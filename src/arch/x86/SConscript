@@ -69,6 +69,7 @@ if env['TARGET_ISA'] == 'x86':
     Source('stacktrace.cc')
     Source('system.cc')
     Source('tlb.cc')
+    Source('tlbl2.cc')
     Source('types.cc')
     Source('utility.cc')
     Source('vtophys.cc')
@@ -78,6 +79,7 @@ if env['TARGET_ISA'] == 'x86':
     SimObject('X86NativeTrace.py')
     SimObject('X86System.py')
     SimObject('X86TLB.py')
+    #SimObject('X86TLBL2.py')
 
     DebugFlag('Faults', "Trace all faults/exceptions/traps")
     DebugFlag('LocalApic', "Local APIC debugging")

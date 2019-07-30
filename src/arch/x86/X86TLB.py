@@ -57,3 +57,20 @@ class X86TLB(BaseTLB):
     size = Param.Unsigned(64, "TLB size")
     walker = Param.X86PagetableWalker(\
             X86PagetableWalker(), "page table walker")
+
+class X86TLBL2(BaseTLB):
+    type = 'X86TLBL2'
+    cxx_class = 'X86ISA::TLBL2'
+    cxx_header = 'arch/x86/tlbl2.hh'
+
+    size = Param.Unsigned(64, "Dummy size")
+    size_l1_4k = Param.Unsigned(64, "L1 4KB TLB size")
+    size_l1_2m = Param.Unsigned(32, "L1 2MB TLB size")
+    size_l2 = Param.Unsigned(1536, "L2 TLB size")
+
+    assoc_l1_4k = Param.Unsigned(4, "L1 4KB TLB associativity")
+    assoc_l1_2m = Param.Unsigned(4, "L1 2MB TLB associativity")
+    assoc_l2 = Param.Unsigned(12, "L2 TLB associativity")
+
+    walker = Param.X86PagetableWalker(\
+            X86PagetableWalker(), "page table walker")

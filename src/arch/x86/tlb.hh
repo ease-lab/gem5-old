@@ -48,6 +48,7 @@
 #include "base/trie.hh"
 #include "mem/request.hh"
 #include "params/X86TLB.hh"
+#include "params/X86TLBL2.hh"
 
 class ThreadContext;
 
@@ -68,12 +69,13 @@ namespace X86ISA
 
         typedef X86TLBParams Params;
         TLB(const Params *p);
+        TLB(const X86TLBL2Params *p);
 
         void takeOverFrom(BaseTLB *otlb) override {}
 
-        TlbEntry *lookup(Addr va, bool update_lru = true);
+        virtual TlbEntry *lookup(Addr va, bool update_lru = true);
 
-        void setConfigAddress(uint32_t addr);
+        virtual void setConfigAddress(uint32_t addr);
 
       protected:
 
@@ -84,13 +86,14 @@ namespace X86ISA
       public:
         Walker *getWalker();
 
-        void flushAll() override;
+        virtual void flushAll() override;
 
-        void flushNonGlobal();
+        virtual void flushNonGlobal();
 
-        void demapPage(Addr va, uint64_t asn) override;
+        virtual void demapPage(Addr va, uint64_t asn) override;
 
       protected:
+        //L1 TLB
         uint32_t size;
 
         std::vector<TlbEntry> tlb;
@@ -106,25 +109,25 @@ namespace X86ISA
         Stats::Scalar rdMisses;
         Stats::Scalar wrMisses;
 
-        Fault translateInt(const RequestPtr &req, ThreadContext *tc);
+        virtual Fault translateInt(const RequestPtr &req, ThreadContext *tc);
 
-        Fault translate(const RequestPtr &req, ThreadContext *tc,
+        virtual Fault translate(const RequestPtr &req, ThreadContext *tc,
                 Translation *translation, Mode mode,
                 bool &delayedResponse, bool timing);
 
       public:
 
-        void evictLRU();
+        virtual void evictLRU();
 
-        uint64_t
+        virtual uint64_t
         nextSeq()
         {
             return ++lruSeq;
         }
 
-        Fault translateAtomic(
+        virtual Fault translateAtomic(
             const RequestPtr &req, ThreadContext *tc, Mode mode) override;
-        void translateTiming(
+        virtual void translateTiming(
             const RequestPtr &req, ThreadContext *tc,
             Translation *translation, Mode mode) override;
 
@@ -141,19 +144,19 @@ namespace X86ISA
          * @param mode Request type (read/write/execute).
          * @return A fault on failure, NoFault otherwise.
          */
-        Fault finalizePhysical(const RequestPtr &req, ThreadContext *tc,
-                               Mode mode) const override;
+        virtual Fault finalizePhysical(const RequestPtr &req,
+            ThreadContext *tc, Mode mode) const override;
 
-        TlbEntry *insert(Addr vpn, const TlbEntry &entry);
+        virtual TlbEntry *insert(Addr vpn, const TlbEntry &entry);
 
         /*
          * Function to register Stats
          */
-        void regStats() override;
+        virtual void regStats() override;
 
         // Checkpointing
-        void serialize(CheckpointOut &cp) const override;
-        void unserialize(CheckpointIn &cp) override;
+        virtual void serialize(CheckpointOut &cp) const override;
+        virtual void unserialize(CheckpointIn &cp) override;
 
         /**
          * Get the table walker port. This is used for
@@ -165,7 +168,7 @@ namespace X86ISA
          *
          * @return A pointer to the walker port
          */
-        Port *getTableWalkerPort() override;
+        virtual Port *getTableWalkerPort() override;
     };
 }
 

@@ -44,6 +44,7 @@
 
 #include "arch/x86/pagetable.hh"
 #include "arch/x86/tlb.hh"
+#include "arch/x86/tlbl2.hh"
 #include "base/types.hh"
 #include "mem/packet.hh"
 #include "params/X86PagetableWalker.hh"

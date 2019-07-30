@@ -63,6 +63,25 @@ TLB::TLB(const Params *p)
     : BaseTLB(p), configAddress(0), size(p->size),
       tlb(size), lruSeq(0)
 {
+    printf("%s:size: %d\n", __func__, size);
+    if (!size)
+        fatal("TLBs must have a non-zero size.\n");
+
+    for (int x = 0; x < size; x++) {
+        tlb[x].trieHandle = NULL;
+        freeList.push_back(&tlb[x]);
+    }
+
+    walker = p->walker;
+    walker->setTLB(this);
+}
+
+
+TLB::TLB(const X86TLBL2Params *p)
+    : BaseTLB(p), configAddress(0), size(p->size),
+      tlb(size), lruSeq(0)
+{
+    printf("%s:size: %d\n", __func__, size);
     if (!size)
         fatal("TLBs must have a non-zero size.\n");
 

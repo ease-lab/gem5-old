@@ -73,7 +73,8 @@ elif buildEnv['TARGET_ISA'] == 'sparc':
     from m5.objects.SparcISA import SparcISA
     default_isa_class = SparcISA
 elif buildEnv['TARGET_ISA'] == 'x86':
-    from m5.objects.X86TLB import X86TLB as ArchDTB, X86TLB as ArchITB
+    from m5.objects.X86TLB import X86TLB as ArchITB
+    from m5.objects.X86TLB import X86TLBL2 as ArchDTB
     from m5.objects.X86LocalApic import X86LocalApic
     from m5.objects.X86ISA import X86ISA
     default_isa_class = X86ISA
