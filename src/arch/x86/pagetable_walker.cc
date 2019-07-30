@@ -145,6 +145,7 @@ Walker::finishedFixedLatWalk()
                                    currState->mode);
     tlb->inc_walk_cycles(walk_lat);
     tlb->inc_walks();
+    DPRINTF(PageTableWalker, "Walk latency incremented by %d\n", walk_lat);
     //handle this state!
     delete currState;
 

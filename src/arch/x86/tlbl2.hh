@@ -154,7 +154,7 @@ namespace X86ISA
 
         void inc_squashed_walks(unsigned num_squashed)
         {
-            walks+=num_squashed;
+            squashedWalks+=num_squashed;
         }
 
         void completeTranslation();
