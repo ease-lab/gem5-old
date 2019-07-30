@@ -495,42 +495,42 @@ TLB::regStats()
 
 }
 
-void
-TLB::serialize(CheckpointOut &cp) const
-{
-    // Only store the entries in use.
-    uint32_t _size = size - freeList.size();
-    SERIALIZE_SCALAR(_size);
-    SERIALIZE_SCALAR(lruSeq);
-
-    uint32_t _count = 0;
-    for (uint32_t x = 0; x < size; x++) {
-        if (tlb[x].trieHandle != NULL)
-            tlb[x].serializeSection(cp, csprintf("Entry%d", _count++));
-    }
-}
-
-void
-TLB::unserialize(CheckpointIn &cp)
-{
-    // Do not allow to restore with a smaller tlb.
-    uint32_t _size;
-    UNSERIALIZE_SCALAR(_size);
-    if (_size > size) {
-        fatal("TLB size less than the one in checkpoint!");
-    }
-
-    UNSERIALIZE_SCALAR(lruSeq);
-
-    for (uint32_t x = 0; x < _size; x++) {
-        TlbEntry *newEntry = freeList.front();
-        freeList.pop_front();
-
-        newEntry->unserializeSection(cp, csprintf("Entry%d", x));
-        newEntry->trieHandle = trie.insert(newEntry->vaddr,
-            TlbEntryTrie::MaxBits - newEntry->logBytes, newEntry);
-    }
-}
+//void
+//TLB::serialize(CheckpointOut &cp) const
+//{
+//    // Only store the entries in use.
+//    uint32_t _size = size - freeList.size();
+//    SERIALIZE_SCALAR(_size);
+//    SERIALIZE_SCALAR(lruSeq);
+//
+//    uint32_t _count = 0;
+//    for (uint32_t x = 0; x < size; x++) {
+//        if (tlb[x].trieHandle != NULL)
+//            tlb[x].serializeSection(cp, csprintf("Entry%d", _count++));
+//    }
+//}
+//
+//void
+//TLB::unserialize(CheckpointIn &cp)
+//{
+//    // Do not allow to restore with a smaller tlb.
+//    uint32_t _size;
+//    UNSERIALIZE_SCALAR(_size);
+//    if (_size > size) {
+//        fatal("TLB size less than the one in checkpoint!");
+//    }
+//
+//    UNSERIALIZE_SCALAR(lruSeq);
+//
+//    for (uint32_t x = 0; x < _size; x++) {
+//        TlbEntry *newEntry = freeList.front();
+//        freeList.pop_front();
+//
+//        newEntry->unserializeSection(cp, csprintf("Entry%d", x));
+//        newEntry->trieHandle = trie.insert(newEntry->vaddr,
+//            TlbEntryTrie::MaxBits - newEntry->logBytes, newEntry);
+//    }
+//}
 
 Port *
 TLB::getTableWalkerPort()

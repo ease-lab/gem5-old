@@ -158,8 +158,8 @@ namespace X86ISA
         virtual void regStats() override;
 
         // Checkpointing
-        virtual void serialize(CheckpointOut &cp) const override;
-        virtual void unserialize(CheckpointIn &cp) override;
+//        virtual void serialize(CheckpointOut &cp) const override;
+//        virtual void unserialize(CheckpointIn &cp) override;
 
         /**
          * Get the table walker port. This is used for

@@ -197,8 +197,8 @@ namespace X86ISA
         void regStats();
 
         // Checkpointing
-        void serialize(CheckpointOut &cp) const;
-        void unserialize(CheckpointIn &cp);
+//        void serialize(CheckpointOut &cp) const;
+//        void unserialize(CheckpointIn &cp);
 
         /**
          * Get the table walker port. This is used for

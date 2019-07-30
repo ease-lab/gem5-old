@@ -527,42 +527,42 @@ TLBL2::regStats()
         .desc("Total number of squashed walks from tlbl2 misses");
 }
 
-void
-TLBL2::serialize(CheckpointOut &cp) const
-{
-    // Only store the entries in use.
-    uint32_t _size = size_l1_4k - freeList.size();
-    SERIALIZE_SCALAR(_size);
-    SERIALIZE_SCALAR(lruSeq);
-
-    uint32_t _count = 0;
-    for (uint32_t x = 0; x < size_l1_4k; x++) {
-        if (tlb_l1_4k[x].trieHandle != NULL)
-            tlb_l1_4k[x].serializeSection(cp, csprintf("Entry%d", _count++));
-    }
-}
-
-void
-TLBL2::unserialize(CheckpointIn &cp)
-{
-    // Do not allow to restore with a smaller tlb.
-    uint32_t _size;
-    UNSERIALIZE_SCALAR(_size);
-    if (_size > size_l1_4k) {
-        fatal("TLBL2 size less than the one in checkpoint!");
-    }
-
-    UNSERIALIZE_SCALAR(lruSeq);
-
-    for (uint32_t x = 0; x < _size; x++) {
-        TlbEntry *newEntry = freeList.front();
-        freeList.pop_front();
-
-        newEntry->unserializeSection(cp, csprintf("Entry%d", x));
-        newEntry->trieHandle = trie.insert(newEntry->vaddr,
-            TlbEntryTrie::MaxBits - newEntry->logBytes, newEntry);
-    }
-}
+//void
+//TLBL2::serialize(CheckpointOut &cp) const
+//{
+//    // Only store the entries in use.
+//    uint32_t _size = size_l1_4k - freeList.size();
+//    SERIALIZE_SCALAR(_size);
+//    SERIALIZE_SCALAR(lruSeq);
+//
+//    uint32_t _count = 0;
+//    for (uint32_t x = 0; x < size_l1_4k; x++) {
+//        if (tlb_l1_4k[x].trieHandle != NULL)
+//            tlb_l1_4k[x].serializeSection(cp, csprintf("Entry%d", _count++));
+//    }
+//}
+//
+//void
+//TLBL2::unserialize(CheckpointIn &cp)
+//{
+//    // Do not allow to restore with a smaller tlb.
+//    uint32_t _size;
+//    UNSERIALIZE_SCALAR(_size);
+//    if (_size > size_l1_4k) {
+//        fatal("TLBL2 size less than the one in checkpoint!");
+//    }
+//
+//    UNSERIALIZE_SCALAR(lruSeq);
+//
+//    for (uint32_t x = 0; x < _size; x++) {
+//        TlbEntry *newEntry = freeList.front();
+//        freeList.pop_front();
+//
+//        newEntry->unserializeSection(cp, csprintf("Entry%d", x));
+//        newEntry->trieHandle = trie.insert(newEntry->vaddr,
+//            TlbEntryTrie::MaxBits - newEntry->logBytes, newEntry);
+//    }
+//}
 
 Port *
 TLBL2::getTableWalkerPort()
