@@ -37,17 +37,17 @@
  * Authors: Gabe Black
  */
 
-#ifndef __ARCH_X86_TLB_HH__
-#define __ARCH_X86_TLB_HH__
+#ifndef __ARCH_X86_TLBL2_HH__
+#define __ARCH_X86_TLBL2_HH__
 
 #include <list>
 #include <vector>
 
 #include "arch/generic/tlb.hh"
 #include "arch/x86/pagetable.hh"
+#include "arch/x86/tlb.hh"
 #include "base/trie.hh"
 #include "mem/request.hh"
-#include "params/X86TLB.hh"
 #include "params/X86TLBL2.hh"
 
 class ThreadContext;
@@ -56,7 +56,7 @@ namespace X86ISA
 {
     class Walker;
 
-    class TLB : public BaseTLB
+    class TLBL2 : public TLB
     {
       protected:
         friend class Walker;
@@ -67,36 +67,49 @@ namespace X86ISA
 
       public:
 
-        typedef X86TLBParams Params;
-        TLB(const Params *p);
-        TLB(const X86TLBL2Params *p);
+        typedef X86TLBL2Params Params;
+        TLBL2(const Params *p);
 
-        void takeOverFrom(BaseTLB *otlb) override {}
+        TlbEntry *lookup(Addr va, bool update_lru = true);
 
-        virtual TlbEntry *lookup(Addr va, bool update_lru = true);
-
-        virtual void setConfigAddress(uint32_t addr);
+        void setConfigAddress(uint32_t addr);
 
       protected:
-
-        EntryList::iterator lookupIt(Addr va, bool update_lru = true);
 
         Walker * walker;
 
       public:
         Walker *getWalker();
 
-        virtual void flushAll() override;
+        void flushAll();
 
-        virtual void flushNonGlobal();
+        void flushNonGlobal();
 
-        virtual void demapPage(Addr va, uint64_t asn) override;
+        void demapPage(Addr va, uint64_t asn);
 
       protected:
-        //L1 TLB
-        uint32_t size;
+        //L1 TLBL2
+        uint32_t size_l1_4k;
+        uint32_t size_l1_2m;
+        uint32_t size_l2;
 
-        std::vector<TlbEntry> tlb;
+        uint32_t assoc_l1_4k;
+        uint32_t assoc_l1_2m;
+        uint32_t assoc_l2;
+
+        uint32_t set_l1_4k;
+        uint32_t set_l1_2m;
+        uint32_t set_l2;
+
+        uint32_t set_bits_l1_4k;
+        uint32_t set_bits_l1_2m;
+        uint32_t set_bits_l2;
+
+        Tick walk_lat;
+
+        std::vector<TlbEntry> tlb_l1_4k;
+        std::vector<TlbEntry> tlb_l1_2m;
+        std::vector<TlbEntry> tlb_l2;
 
         EntryList freeList;
 
@@ -109,30 +122,56 @@ namespace X86ISA
         Stats::Scalar rdMisses;
         Stats::Scalar wrMisses;
 
-        virtual Fault translateInt(const RequestPtr &req, ThreadContext *tc);
+        Stats::Scalar walkCycles;
+        Stats::Scalar walks;
+        Stats::Scalar squashedWalks;
 
-        virtual Fault translate(const RequestPtr &req, ThreadContext *tc,
-                Translation *translation, Mode mode,
+        Fault translateInt(const RequestPtr &req, ThreadContext *tc);
+
+        Fault translate(const RequestPtr &req, ThreadContext *tc,
+                BaseTLB::Translation *translation, BaseTLB::Mode mode,
                 bool &delayedResponse, bool timing);
 
+        // Inflight translation context
+        bool transInflight;
+        ThreadContext *inflight_tc;
+        RequestPtr inflight_req;
+        Mode inflight_mode;
+        Translation *inflight_trans;
+        EventFunctionWrapper walkCompleteEvent;
+
+
       public:
-        virtual void inc_walk_cycles(Tick cycles) { };
-        virtual void inc_walks() {};
-        virtual void inc_squashed_walks(unsigned num) {};
+        void inc_walk_cycles(Tick cycles)
+        {
+            walkCycles += cycles;
+        }
 
-        virtual void evictLRU();
+        void inc_walks()
+        {
+            walks++;
+        }
 
-        virtual uint64_t
+        void inc_squashed_walks(unsigned num_squashed)
+        {
+            walks+=num_squashed;
+        }
+
+        void completeTranslation();
+
+        void evictLRU();
+
+        uint64_t
         nextSeq()
         {
             return ++lruSeq;
         }
 
-        virtual Fault translateAtomic(
-            const RequestPtr &req, ThreadContext *tc, Mode mode) override;
-        virtual void translateTiming(
+        Fault translateAtomic(
+            const RequestPtr &req, ThreadContext *tc, BaseTLB::Mode mode);
+        void translateTiming(
             const RequestPtr &req, ThreadContext *tc,
-            Translation *translation, Mode mode) override;
+            BaseTLB::Translation *translation, BaseTLB::Mode mode);
 
         /**
          * Do post-translation physical address finalization.
@@ -147,19 +186,19 @@ namespace X86ISA
          * @param mode Request type (read/write/execute).
          * @return A fault on failure, NoFault otherwise.
          */
-        virtual Fault finalizePhysical(const RequestPtr &req,
-            ThreadContext *tc, Mode mode) const override;
+        Fault finalizePhysical(const RequestPtr &req, ThreadContext *tc,
+                               BaseTLB::Mode mode) const;
 
-        virtual TlbEntry *insert(Addr vpn, const TlbEntry &entry);
+        TlbEntry *insert(Addr vpn, const TlbEntry &entry);
 
         /*
          * Function to register Stats
          */
-        virtual void regStats() override;
+        void regStats();
 
         // Checkpointing
-        virtual void serialize(CheckpointOut &cp) const override;
-        virtual void unserialize(CheckpointIn &cp) override;
+        void serialize(CheckpointOut &cp) const;
+        void unserialize(CheckpointIn &cp);
 
         /**
          * Get the table walker port. This is used for
@@ -171,8 +210,8 @@ namespace X86ISA
          *
          * @return A pointer to the walker port
          */
-        virtual Port *getTableWalkerPort() override;
+        Port *getTableWalkerPort();
     };
 }
 
-#endif // __ARCH_X86_TLB_HH__
+#endif // __ARCH_X86_TLBL2_HH__

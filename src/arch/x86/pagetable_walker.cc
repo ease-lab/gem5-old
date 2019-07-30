@@ -62,7 +62,9 @@
 #include "cpu/thread_context.hh"
 #include "debug/PageTableWalker.hh"
 #include "mem/packet_access.hh"
+#include "mem/page_table.hh"
 #include "mem/request.hh"
+#include "sim/process.hh"
 
 namespace X86ISA {
 
@@ -99,10 +101,57 @@ Walker::startFunctional(ThreadContext * _tc, Addr &addr, unsigned &logBytes,
     return funcState.startFunctional(addr, logBytes);
 }
 
+void
+Walker::setFixedLatency(Tick lat)
+{
+    fixed_lat = true;
+    walk_lat = lat;
+    DPRINTF(PageTableWalker, "Turning on Fixed latency to %lu ticks\n", lat);
+}
+
 bool
 Walker::WalkerPort::recvTimingResp(PacketPtr pkt)
 {
     return walker->recvTimingResp(pkt);
+}
+
+void
+Walker::finishedFixedLatWalk()
+{
+    WalkerState *currState = currStates.front();
+    currStates.pop_front();
+
+    Process *p = currState->tc->getProcessPtr();
+    VAddr vaddr = currState->entry.vaddr;
+    Addr alignedVaddr = p->pTable->pageAlign(vaddr);
+    const EmulationPageTable::Entry *pte = p->pTable->lookup(vaddr);
+
+    DPRINTF(PageTableWalker, "Mapping %#x to %#x\n", alignedVaddr,
+                    pte->paddr);
+
+    TlbEntry *tlbentry = NULL;
+    tlbentry = tlb->insert(alignedVaddr, TlbEntry(
+                            p->pTable->pid(), alignedVaddr, pte->paddr,
+                            pte->flags & EmulationPageTable::Uncacheable,
+                            pte->flags & EmulationPageTable::ReadOnly));
+    Addr paddr = tlbentry->paddr | (vaddr & mask(tlbentry->logBytes));
+    DPRINTF(PageTableWalker, "Translated %#x -> %#x.\n", vaddr, paddr);
+    currState->req->setPaddr(paddr);
+    if (tlbentry->uncacheable)
+        currState->req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
+
+    DPRINTF(PageTableWalker, "Finishing translation\n");
+    currState->translation->finish(NoFault, currState->req, currState->tc,
+                                   currState->mode);
+    tlb->inc_walk_cycles(walk_lat);
+    tlb->inc_walks();
+    //handle this state!
+    delete currState;
+
+    if (currStates.size() && !startWalkWrapperEvent.scheduled())
+            // delay sending any new requests until we are finished
+            // with the responses
+            schedule(startWalkWrapperEvent, clockEdge());
 }
 
 bool
@@ -222,6 +271,7 @@ Walker::startWalkWrapper()
     }
     if (currState && !currState->wasStarted())
         currState->startWalk();
+    tlb->inc_squashed_walks(num_squashed);
 }
 
 Fault
@@ -549,6 +599,11 @@ Walker::WalkerState::endWalk()
 void
 Walker::WalkerState::setupWalk(Addr vaddr)
 {
+    if (fixed_lat) {
+        nextState = Ready;
+        entry.vaddr = vaddr;
+        return;
+    }
     VAddr addr = vaddr;
     CR3 cr3 = tc->readMiscRegNoEffect(MISCREG_CR3);
     // Check if we're in long mode or not
@@ -662,6 +717,13 @@ Walker::WalkerState::sendPackets()
     //If we're already waiting for the port to become available, just return.
     if (retrying)
         return;
+
+    if (fixed_lat) {
+        assert(!walker->fixedLatEvent.scheduled());
+        walker->schedule(walker->fixedLatEvent,
+                         curTick() + walk_lat * walker->clockPeriod());
+        return;
+    }
 
     //Reads always have priority
     if (read) {

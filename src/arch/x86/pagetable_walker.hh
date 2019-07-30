@@ -113,6 +113,8 @@ namespace X86ISA
             bool retrying;
             bool started;
             bool squashed;
+            bool fixed_lat;
+            Tick walk_lat;
           public:
             WalkerState(Walker * _walker, BaseTLB::Translation *_translation,
                         const RequestPtr &_req, bool _isFunctional = false) :
@@ -120,7 +122,8 @@ namespace X86ISA
                 nextState(Ready), inflight(0),
                 translation(_translation),
                 functional(_isFunctional), timing(false),
-                retrying(false), started(false), squashed(false)
+                retrying(false), started(false), squashed(false),
+                fixed_lat(_walker->fixed_lat), walk_lat(_walker->walk_lat)
             {
             }
             void initState(ThreadContext * _tc, BaseTLB::Mode _mode,
@@ -173,16 +176,22 @@ namespace X86ISA
         System * sys;
         MasterID masterId;
 
+        // Variables to ddo fixed/latency emulated table walks
+        bool fixed_lat;
+        Tick walk_lat;
+
         // The number of outstanding walks that can be squashed per cycle.
         unsigned numSquashable;
 
         // Wrapper for checking for squashes before starting a translation.
         void startWalkWrapper();
+        void finishedFixedLatWalk();
 
         /**
          * Event used to call startWalkWrapper.
          **/
         EventFunctionWrapper startWalkWrapperEvent;
+        EventFunctionWrapper fixedLatEvent;
 
         // Functions for dealing with packets.
         bool recvTimingResp(PacketPtr pkt);
@@ -196,6 +205,8 @@ namespace X86ISA
             tlb = _tlb;
         }
 
+        void setFixedLatency(Tick lat);
+
         typedef X86PagetableWalkerParams Params;
 
         const Params *
@@ -208,8 +219,10 @@ namespace X86ISA
             ClockedObject(params), port(name() + ".port", this),
             funcState(this, NULL, NULL, true), tlb(NULL), sys(params->system),
             masterId(sys->getMasterId(this)),
+            fixed_lat(false), walk_lat(0UL),
             numSquashable(params->num_squash_per_cycle),
-            startWalkWrapperEvent([this]{ startWalkWrapper(); }, name())
+            startWalkWrapperEvent([this]{ startWalkWrapper(); }, name()),
+            fixedLatEvent([this]{ finishedFixedLatWalk(); }, name())
         {
         }
     };
