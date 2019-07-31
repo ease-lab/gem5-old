@@ -102,10 +102,11 @@ Walker::startFunctional(ThreadContext * _tc, Addr &addr, unsigned &logBytes,
 }
 
 void
-Walker::setFixedLatency(Tick lat)
+Walker::setFixedLatency(Tick lat, bool _skip_insert)
 {
     fixed_lat = true;
     walk_lat = lat;
+    skip_insert = _skip_insert;
     DPRINTF(PageTableWalker, "Turning on Fixed latency to %lu ticks\n", lat);
 }
 
@@ -129,23 +130,34 @@ Walker::finishedFixedLatWalk()
     DPRINTF(PageTableWalker, "Mapping %#x to %#x\n", alignedVaddr,
                     pte->paddr);
 
-    TlbEntry *tlbentry = NULL;
-    tlbentry = tlb->insert(alignedVaddr, TlbEntry(
-                            p->pTable->pid(), alignedVaddr, pte->paddr,
-                            pte->flags & EmulationPageTable::Uncacheable,
-                            pte->flags & EmulationPageTable::ReadOnly));
-    Addr paddr = tlbentry->paddr | (vaddr & mask(tlbentry->logBytes));
+    if (!skip_insert) {
+        tlb->insert(alignedVaddr, TlbEntry(
+                    p->pTable->pid(), alignedVaddr, pte->paddr,
+                    pte->flags & EmulationPageTable::Uncacheable,
+                    pte->flags & EmulationPageTable::ReadOnly));
+    }
+    int logbytes = 12;
+
+    Addr paddr = pte->paddr | (vaddr & mask(logbytes));
     DPRINTF(PageTableWalker, "Translated %#x -> %#x.\n", vaddr, paddr);
     currState->req->setPaddr(paddr);
-    if (tlbentry->uncacheable)
+    if (pte->flags & EmulationPageTable::Uncacheable)
         currState->req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
+
+    tlb->finalizePhysical(currState->req, currState->tc, currState->mode);
 
     DPRINTF(PageTableWalker, "Finishing translation\n");
     currState->translation->finish(NoFault, currState->req, currState->tc,
                                    currState->mode);
-    tlb->inc_walk_cycles(walk_lat);
-    tlb->inc_walks();
-    DPRINTF(PageTableWalker, "Walk latency incremented by %d\n", walk_lat);
+    if (!skip_insert) {
+        tlb->inc_walk_cycles(walk_lat);
+        tlb->inc_walks();
+        DPRINTF(PageTableWalker, "Walk latency incremented by %d\n", walk_lat);
+    } else {
+        tlb->inc_l2_access_cycles(walk_lat);
+        DPRINTF(PageTableWalker, "L2 TLB access latency added by %d cycles\n",
+                walk_lat);
+    }
     //handle this state!
     delete currState;
 

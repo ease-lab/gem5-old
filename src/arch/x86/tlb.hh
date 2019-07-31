@@ -117,6 +117,7 @@ namespace X86ISA
 
       public:
         virtual void inc_walk_cycles(Tick cycles) { };
+        virtual void inc_l2_access_cycles(Tick cycles) { };
         virtual void inc_walks() {};
         virtual void inc_squashed_walks(unsigned num) {};
 

@@ -73,6 +73,7 @@ class X86TLBL2(BaseTLB):
     assoc_l2 = Param.Unsigned(12, "L2 TLB associativity")
 
     fixed_l2_miss_latency = Param.Cycles(60, "TLB miss handling latency")
+    l2_hit_latency = Param.Cycles(9, "TLB L1 miss, L2 hit latency")
 
     walker = Param.X86PagetableWalker(\
             X86PagetableWalker(), "page table walker")

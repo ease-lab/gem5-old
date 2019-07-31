@@ -70,7 +70,7 @@ namespace X86ISA
         typedef X86TLBL2Params Params;
         TLBL2(const Params *p);
 
-        TlbEntry *lookup(Addr va, bool update_lru = true);
+        TlbEntry *lookup(Addr va, int &delay_cycles, bool update_lru = true);
 
         void setConfigAddress(uint32_t addr);
 
@@ -108,6 +108,7 @@ namespace X86ISA
         uint32_t set_bits_l2;
 
         Tick walk_lat;
+        Tick l2_access_lat;
 
         std::vector<std::vector<TlbEntry*> > tlb_l1_4k;
         std::vector<std::vector<TlbEntry*> > tlb_l1_2m;
@@ -127,6 +128,7 @@ namespace X86ISA
         Stats::Scalar l2_2m_hits;
         Stats::Scalar l2_misses;
 
+        Stats::Scalar l2_access_cycles;
         Stats::Scalar walkCycles;
         Stats::Scalar walks;
         Stats::Scalar squashedWalks;
@@ -152,6 +154,11 @@ namespace X86ISA
         void inc_walk_cycles(Tick cycles)
         {
             walkCycles += cycles;
+        }
+
+        void inc_l2_access_cycles(Tick cycles)
+        {
+            l2_access_cycles += cycles;
         }
 
         void inc_walks()

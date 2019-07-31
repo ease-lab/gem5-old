@@ -80,6 +80,7 @@ TLBL2::TLBL2(const Params *p)
       set_l2(size_l2 / assoc_l2),
 
       walk_lat(p->fixed_l2_miss_latency),
+      l2_access_lat(p->l2_hit_latency),
 
       tlb_l1_4k(set_l1_4k),
       tlb_l1_2m(set_l1_2m),
@@ -115,7 +116,7 @@ TLBL2::TLBL2(const Params *p)
 
     walker = p->walker;
     walker->setTLB(this);
-    walker->setFixedLatency(walk_lat);
+    walker->setFixedLatency(walk_lat, false);
 
     transInflight = false;
     inflight_tc = NULL;
@@ -242,11 +243,12 @@ int TLBL2::getIndex(Addr va, TLBType type)
 }
 
 TlbEntry *
-TLBL2::lookup(Addr va, bool update_lru)
+TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
 {
     TlbEntry *entry = NULL;
     Addr vpn_4k = va & ~((1UL << 12)-1);
     TLBType hitLevel = Miss;
+    int delays = 0;
 
     // Lookup L1_4k
     int idx = getIndex(vpn_4k, L1_4K);
@@ -287,6 +289,7 @@ TLBL2::lookup(Addr va, bool update_lru)
             if (ent->vaddr == vpn_4k) {
                 entry = ent;
                 hitLevel = L2_4K;
+                delays += l2_access_lat;
                 break;
             }
         }
@@ -307,10 +310,12 @@ TLBL2::lookup(Addr va, bool update_lru)
                 case L2_4K:
                     l1_misses++;
                     l2_4k_hits++;
+                    l2_access_cycles += delays;
                     break;
                 case L2_2M:
                     l1_misses++;
                     l2_2m_hits++;
+                    l2_access_cycles += delays;
                     break;
                 default:
                     break;
@@ -322,7 +327,7 @@ TLBL2::lookup(Addr va, bool update_lru)
             l2_misses++;
         }
     }
-
+    delay_cycles = delays;
     return entry;
 }
 
@@ -582,10 +587,11 @@ TLBL2::translate(const RequestPtr &req,
                 (flags & (AddrSizeFlagBit << FlagShift)))
             vaddr &= mask(32);
         // If paging is enabled, do the translation.
+        int delays = 0;
         if (m5Reg.paging) {
             DPRINTF(TLB, "Paging enabled.\n");
             // The vaddr already has the segment base applied.
-            TlbEntry *entry = lookup(vaddr);
+            TlbEntry *entry = lookup(vaddr, delays);
 
             if (!entry) {
                 DPRINTF(TLB, "Handling a TLBL2 miss for "
@@ -599,7 +605,7 @@ TLBL2::translate(const RequestPtr &req,
                         delayedResponse = true;
                         return fault;
                     }
-                    entry = lookup(vaddr);
+                    entry = lookup(vaddr, delays);
                     assert(entry);
                 } else {
                     Process *p = tc->getProcessPtr();
@@ -617,6 +623,7 @@ TLBL2::translate(const RequestPtr &req,
                                                            true, false);
                     } else {
                         if (timing) {
+                            walker->setFixedLatency(walk_lat, false);
                             Fault fault = walker->start(tc, translation, req,
                                                         mode);
                             if (timing || fault != NoFault) {
@@ -635,6 +642,11 @@ TLBL2::translate(const RequestPtr &req,
                         }
                     }
                 }
+            } else if (delays && timing) {
+                walker->setFixedLatency(delays, true);
+                Fault fault = walker->start(tc, translation, req, mode);
+                delayedResponse = true;
+                return fault;
             }
 
             DPRINTF(TLB, "Entry found with paddr %#x, "
