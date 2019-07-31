@@ -100,7 +100,8 @@ def get_processes(options):
             perlbench.executable =  binary_dir+'400.perlbench/perlbench'
             data=binary_dir+'400.perlbench/checkspam.pl'
             include= '-I'+binary_dir+'400.perlbench/lib'
-            perlbench.cmd = [perlbench.executable] + [include, data, '2500', '5', '25', '11', '150', '1', '1', '1', '1']
+            perlbench.cmd = [perlbench.executable] + [include, data,
+                    '2500', '5', '25', '11', '150', '1', '1', '1', '1']
             process = perlbench
         elif wrkld == 'bzip2':
             #401.bzip2
@@ -171,7 +172,8 @@ def get_processes(options):
             namd = Process(pid = 100 + idx)
             namd.executable =  binary_dir+'444.namd/namd'
             input=binary_dir+'444.namd/namd.input'
-            namd.cmd = [namd.executable] + ['--input',input,'--iterations','38']
+            namd.cmd = [namd.executable] + \
+                    ['--input',input,'--iterations','38']
             #namd.output='namd.stdout'
             process = namd
         elif wrkld == 'soplex':
@@ -235,19 +237,16 @@ def get_processes(options):
             lbm=Process(pid = 100 + idx)
             lbm.executable =  binary_dir+'470.lbm/lbm'
             data=binary_dir+'470.lbm/100_100_130_ldc.of'
-            lbm.cmd = [lbm.executable]+['3000', 'reference.dat', '0', '0' ,data]
+            lbm.cmd = [lbm.executable]+ \
+                    ['3000', 'reference.dat', '0', '0' ,data]
             #lbm.output = 'lbm.out'
             process = lbm
         elif wrkld == 'omnetpp':
             #471.omnetpp
             omnetpp=Process(pid = 100 + idx)
             omnetpp.executable =  binary_dir+'471.omnetpp/omnetpp'
-            data=binary_dir+'471.omnetpp/omnetpp.ini'
-            #stdin=binary_dir+'471.omnetpp/omnetpp.ini'
-            omnetpp.cmd = [omnetpp.executable]+[data]
-            #omnetpp.cmd = [omnetpp.executable]
-            #omnetpp.input = stdin
-            #omnetpp.output = 'omnetpp.log'
+            omnetpp.cwd = binary_dir + '471.omnetpp'
+            omnetpp.cmd = [omnetpp.executable]
             process = omnetpp
         else:
             process = Process(pid = 100 + idx)
@@ -292,6 +291,16 @@ if '--ruby' in sys.argv:
 if args:
     print("Error: script doesn't take any positional arguments")
     sys.exit(1)
+
+#Nofrag options
+options.cpu_type='DerivO3CPU'
+options.mem_type='DDR4_2400_8x8'
+options.mem_channels=4
+options.mem_size='4GB'
+options.caches=True
+options.l2cache=True
+#options.cmd='tests/test-progs/hello/bin/x86/linux/hello'
+print(options)
 
 multiprocesses = []
 numThreads = 1
