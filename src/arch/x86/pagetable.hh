@@ -91,11 +91,13 @@ namespace X86ISA
         bool noExec;
         // A sequence number to keep track of LRU.
         uint64_t lruSeq;
+        // Marks a large page
+        bool largepage;
 
         TlbEntryTrie::Handle trieHandle;
 
         TlbEntry(Addr asn, Addr _vaddr, Addr _paddr,
-                 bool uncacheable, bool read_only);
+                 bool uncacheable, bool read_only, bool largepage = false);
         TlbEntry();
 
         void

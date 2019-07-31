@@ -59,6 +59,12 @@
 
 namespace X86ISA {
 
+bool isPow2(uint32_t val)
+{
+    //https://stackoverflow.com/a/108360/754562
+    return val && !(val & (val-1));
+}
+
 TLBL2::TLBL2(const Params *p)
     : TLB(p), configAddress(0),
       size_l1_4k(p->size_l1_4k),
@@ -75,19 +81,36 @@ TLBL2::TLBL2(const Params *p)
 
       walk_lat(p->fixed_l2_miss_latency),
 
-      tlb_l1_4k(size),
+      tlb_l1_4k(set_l1_4k),
+      tlb_l1_2m(set_l1_2m),
+      tlb_l2(set_l2),
       walkCompleteEvent([this]{completeTranslation();}, name())
 
       //lruSeq(0)
 {
-    printf("%s:size: %d\n", __func__, size);
-    if (!size_l1_4k)
+    if (!size_l1_4k || !size_l1_2m || !size_l2)
         fatal("TLBL2s must have a non-zero size.\n");
 
+    //Checks!
+    if (!isPow2(set_l1_4k)) {
+        fatal("TLBL2 L1 4K TLB set size is not pow2\n");
+    }
+    if (!isPow2(set_l1_2m)) {
+        fatal("TLBL2 L1 2M TLB set size is not pow2\n");
+    }
+    if (!isPow2(set_l2)) {
+        fatal("TLBL2 L2 TLB set size is not pow2\n");
+    }
 
-    for (int x = 0; x < size_l1_4k; x++) {
-        tlb_l1_4k[x].trieHandle = NULL;
-        freeList.push_back(&tlb_l1_4k[x]);
+    // Build TLB tables
+    for (int x = 0; x < set_l1_4k; x++) {
+        tlb_l1_4k.at(x) = std::vector<TlbEntry*>(assoc_l1_4k, NULL);
+    }
+    for (int x = 0; x < set_l1_2m; x++) {
+        tlb_l1_2m.at(x) = std::vector<TlbEntry*>(assoc_l1_2m, NULL);
+    }
+    for (int x = 0; x < set_l2; x++) {
+        tlb_l2.at(x) = std::vector<TlbEntry*>(assoc_l2, NULL);
     }
 
     walker = p->walker;
@@ -99,54 +122,207 @@ TLBL2::TLBL2(const Params *p)
     inflight_trans = NULL;
 }
 
-void
-TLBL2::evictLRU()
+//Inserts into specific TLB
+TlbEntry *
+TLBL2::insertInto(Addr vpn, const TlbEntry &entry, TLBType dest)
 {
-    // Find the entry with the lowest (and hence least recently updated)
-    // sequence number.
+    std::vector<TlbEntry *> *tlb_way = NULL;
+    int idx = getIndex(vpn, dest);
 
-    unsigned lru = 0;
-    for (unsigned i = 1; i < size_l1_4k; i++) {
-        if (tlb_l1_4k[i].lruSeq < tlb_l1_4k[lru].lruSeq)
-            lru = i;
+    switch (dest) {
+        case L1_4K:
+            tlb_way = &tlb_l1_4k.at(idx);
+            break;
+
+        case L1_2M:
+            tlb_way = &tlb_l1_2m.at(idx);
+            break;
+
+        case L2_4K:
+        case L2_2M:
+            tlb_way = &tlb_l2.at(idx);
+            break;
+        default:
+            break;
     }
 
-    assert(tlb_l1_4k[lru].trieHandle);
-    trie.remove(tlb_l1_4k[lru].trieHandle);
-    tlb_l1_4k[lru].trieHandle = NULL;
-    freeList.push_back(&tlb_l1_4k[lru]);
+    // Check if there is emtpy entry, else get the oldest
+    uint64_t oldest_seq = lruSeq;
+    std::vector<TlbEntry *>::iterator oldest_it;
+    for (auto it = tlb_way->begin(); it != tlb_way->end(); it++) {
+        if (!*it) {
+            oldest_it = it;
+            break;
+        }
+        if (oldest_seq >= (*it)->lruSeq) {
+            oldest_it = it;
+            oldest_seq = (*it)->lruSeq;
+        }
+    }
+
+    TlbEntry *ent;
+    if (freeList.empty()) {
+        ent = new TlbEntry();
+    } else {
+        ent = freeList.front();
+        freeList.pop_front();
+    }
+
+    ent->paddr = entry.paddr;
+    ent->vaddr = entry.vaddr;
+    ent->logBytes = entry.logBytes;
+    ent->writable = entry.writable;
+    ent->user = entry.user;
+    ent->uncacheable = entry.uncacheable;
+    ent->global = entry.global;
+    ent->patBit = entry.patBit;
+    ent->noExec = entry.noExec;
+    ent->largepage = entry.largepage;
+    ent->lruSeq = nextSeq();
+
+    *oldest_it = ent;
+
+
+    return ent;
 }
 
+//Inserts into all applicable levels
 TlbEntry *
 TLBL2::insert(Addr vpn, const TlbEntry &entry)
 {
-    // If somebody beat us to it, just use that existing entry.
-    TlbEntry *newEntry = trie.lookup(vpn);
-    if (newEntry) {
-        assert(newEntry->vaddr == vpn);
-        return newEntry;
+    if (entry.largepage) {
+        insertInto(vpn, entry, L1_2M);
+        return insertInto(vpn, entry, L2_2M);
+    } else {
+        insertInto(vpn, entry, L1_4K);
+        return insertInto(vpn, entry, L2_4K);
     }
+//
+//    // If somebody beat us to it, just use that existing entry.
+//    TlbEntry *newEntry = trie.lookup(vpn);
+//    if (newEntry) {
+//        assert(newEntry->vaddr == vpn);
+//        return newEntry;
+//    }
+//
+//    if (freeList.empty())
+//        evictLRU();
+//
+//    newEntry = freeList.front();
+//    freeList.pop_front();
+//
+//    *newEntry = entry;
+//    newEntry->lruSeq = nextSeq();
+//    newEntry->vaddr = vpn;
+//    newEntry->trieHandle =
+//    trie.insert(vpn, TlbEntryTrie::MaxBits - entry.logBytes, newEntry);
+//    return newEntry;
+}
 
-    if (freeList.empty())
-        evictLRU();
+int TLBL2::getIndex(Addr va, TLBType type)
+{
+    int idx = 0;
+    switch(type){
+        case L1_4K:
+            idx = va >> 12;
+            idx &= set_l1_4k-1;
+            assert(idx >= 0 && idx < set_l1_4k);
+            break;
 
-    newEntry = freeList.front();
-    freeList.pop_front();
-
-    *newEntry = entry;
-    newEntry->lruSeq = nextSeq();
-    newEntry->vaddr = vpn;
-    newEntry->trieHandle =
-    trie.insert(vpn, TlbEntryTrie::MaxBits - entry.logBytes, newEntry);
-    return newEntry;
+        case L2_4K:
+            va >>= 12;
+            va &= set_l2-1;
+            assert(idx >= 0 && idx < set_l2);
+            break;
+        default:
+            //TODO 2M
+            fatal("Not implemented");
+    }
+    return idx;
 }
 
 TlbEntry *
 TLBL2::lookup(Addr va, bool update_lru)
 {
-    TlbEntry *entry = trie.lookup(va);
-    if (entry && update_lru)
-        entry->lruSeq = nextSeq();
+    TlbEntry *entry = NULL;
+    Addr vpn_4k = va & ~((1UL << 12)-1);
+    TLBType hitLevel = Miss;
+
+    // Lookup L1_4k
+    int idx = getIndex(vpn_4k, L1_4K);
+    for (TlbEntry *ent: tlb_l1_4k.at(idx)) {
+       if (!ent) //empty
+           continue;
+       if (ent->vaddr == vpn_4k) {
+           entry = ent;
+           hitLevel = L1_4K;
+           break;
+       }
+    }
+
+#if 0
+    Addr vpn_2m = p->pTable->pageAlign(vaddr); //TODO
+    //TODO Support large pages!!
+    if (!entry) {
+        // Lookup L1_2m
+        int idx = getIndex(vpn_2m, L1_2M);
+        for (TlbEntry *ent: tlb_l1_2m.at(idx)) {
+            if (!ent) //empty
+                continue;
+            if (ent->vaddr == vpn_2m) {
+                entry = ent;
+                hitLevel = L1_2M;
+                break;
+            }
+        }
+    }
+#endif
+
+    if (!entry) {
+        // Lookup L2
+        int idx = getIndex(vpn_4k, L2_4K);
+        for (TlbEntry *ent: tlb_l2.at(idx)) {
+            if (!ent) //empty
+                continue;
+            if (ent->vaddr == vpn_4k) {
+                entry = ent;
+                hitLevel = L2_4K;
+                break;
+            }
+        }
+    }
+
+    if (update_lru) { // Also update counters
+        if (entry) {
+            //Update LRU
+            entry->lruSeq = nextSeq();
+
+            switch(hitLevel) {
+                case L1_4K:
+                    l1_4k_hits++;
+                    break;
+                case L1_2M:
+                    l1_2m_hits++;
+                    break;
+                case L2_4K:
+                    l1_misses++;
+                    l2_4k_hits++;
+                    break;
+                case L2_2M:
+                    l1_misses++;
+                    l2_2m_hits++;
+                    break;
+                default:
+                    break;
+            }
+            assert(hitLevel != Miss);
+        } else {
+            assert(hitLevel == Miss);
+            l1_misses++;
+            l2_misses++;
+        }
+    }
+
     return entry;
 }
 
@@ -154,11 +330,36 @@ void
 TLBL2::flushAll()
 {
     DPRINTF(TLB, "Invalidating all entries.\n");
-    for (unsigned i = 0; i < size_l1_4k; i++) {
-        if (tlb_l1_4k[i].trieHandle) {
-            trie.remove(tlb_l1_4k[i].trieHandle);
-            tlb_l1_4k[i].trieHandle = NULL;
-            freeList.push_back(&tlb_l1_4k[i]);
+    for (int i = 0; i < set_l1_4k; i++) {
+        for (auto it = tlb_l1_4k.at(i).begin();
+                it != tlb_l1_4k.at(i).end();
+                it++) {
+            if (*it) { // Not NULL)
+                freeList.push_back(*it);
+                *it = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; i < set_l1_2m; i++) {
+        for (auto it = tlb_l1_2m.at(i).begin();
+                it != tlb_l1_2m.at(i).end();
+                it++) {
+            if (*it) { // Not NULL)
+                freeList.push_back(*it);
+                *it = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; i < set_l2; i++) {
+        for (auto it = tlb_l2.at(i).begin();
+                it != tlb_l2.at(i).end();
+                it++) {
+            if (*it) { // Not NULL)
+                freeList.push_back(*it);
+                *it = NULL;
+            }
         }
     }
 }
@@ -173,18 +374,45 @@ void
 TLBL2::flushNonGlobal()
 {
     DPRINTF(TLB, "Invalidating all non global entries.\n");
-    for (unsigned i = 0; i < size_l1_4k; i++) {
-        if (tlb_l1_4k[i].trieHandle && !tlb_l1_4k[i].global) {
-            trie.remove(tlb_l1_4k[i].trieHandle);
-            tlb_l1_4k[i].trieHandle = NULL;
-            freeList.push_back(&tlb_l1_4k[i]);
+    for (int i = 0; i < set_l1_4k; i++) {
+        for (auto it = tlb_l1_4k.at(i).begin();
+                it != tlb_l1_4k.at(i).end();
+                it++) {
+            if (*it && !(*it)->global) {
+                freeList.push_back(*it);
+                *it = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; i < set_l1_2m; i++) {
+        for (auto it = tlb_l1_2m.at(i).begin();
+                it != tlb_l1_2m.at(i).end();
+                it++) {
+            if (*it && !(*it)->global) {
+                freeList.push_back(*it);
+                *it = NULL;
+            }
+        }
+    }
+
+    for (int i = 0; i < set_l2; i++) {
+        for (auto it = tlb_l2.at(i).begin();
+                it != tlb_l2.at(i).end();
+                it++) {
+            if (*it && !(*it)->global) {
+                freeList.push_back(*it);
+                *it = NULL;
+            }
         }
     }
 }
 
+//Invalidate TLB entry
 void
 TLBL2::demapPage(Addr va, uint64_t asn)
 {
+    //TODO
     TlbEntry *entry = trie.lookup(va);
     if (entry) {
         trie.remove(entry->trieHandle);
@@ -358,20 +586,12 @@ TLBL2::translate(const RequestPtr &req,
             DPRINTF(TLB, "Paging enabled.\n");
             // The vaddr already has the segment base applied.
             TlbEntry *entry = lookup(vaddr);
-            if (mode == Read) {
-                rdAccesses++;
-            } else {
-                wrAccesses++;
-            }
+
             if (!entry) {
                 DPRINTF(TLB, "Handling a TLBL2 miss for "
                         "address %#x at pc %#x.\n",
                         vaddr, tc->instAddr());
-                if (mode == Read) {
-                    rdMisses++;
-                } else {
-                    wrMisses++;
-                }
+
                 if (FullSystem) {
                     Fault fault = walker->start(tc, translation, req, mode);
                     if (timing || fault != NoFault) {
@@ -498,21 +718,32 @@ TLBL2::regStats()
 {
     using namespace Stats;
     BaseTLB::regStats();
-    rdAccesses
-        .name(name() + ".rdAccesses")
-        .desc("TLBL2 accesses on read requests");
 
-    wrAccesses
-        .name(name() + ".wrAccesses")
-        .desc("TLBL2 accesses on write requests");
+    l1_4k_hits
+        .name(name() + ".l1_4k_hits")
+        .desc("TLBL2 L1 TLB 4KB hits");
 
-    rdMisses
-        .name(name() + ".rdMisses")
-        .desc("TLBL2 misses on read requests");
+    l1_2m_hits
+        .name(name() + ".l1_2m_hits")
+        .desc("TLBL2 L1 TLB 2MB hits");
 
-    wrMisses
-        .name(name() + ".wrMisses")
-        .desc("TLBL2 misses on write requests");
+    l1_misses
+        .name(name() + ".l1_misses")
+        .desc("TLBL2 L1 TLB misses");
+
+
+    l2_4k_hits
+        .name(name() + ".l2_4k_hits")
+        .desc("TLBL2 L2 TLB 4KB hits");
+
+    l2_2m_hits
+        .name(name() + ".l2_2m_hits")
+        .desc("TLBL2 L2 TLB 2MB hits");
+
+    l2_misses
+        .name(name() + ".l2_misses")
+        .desc("TLBL2 L2 TLB misses");
+
 
     walkCycles
         .name(name() + ".walkCycles")

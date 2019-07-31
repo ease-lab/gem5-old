@@ -87,6 +87,8 @@ namespace X86ISA
 
         void demapPage(Addr va, uint64_t asn);
 
+        enum TLBType {L1_4K, L1_2M, L2_4K, L2_2M, Miss};
+
       protected:
         //L1 TLBL2
         uint32_t size_l1_4k;
@@ -107,9 +109,9 @@ namespace X86ISA
 
         Tick walk_lat;
 
-        std::vector<TlbEntry> tlb_l1_4k;
-        std::vector<TlbEntry> tlb_l1_2m;
-        std::vector<TlbEntry> tlb_l2;
+        std::vector<std::vector<TlbEntry*> > tlb_l1_4k;
+        std::vector<std::vector<TlbEntry*> > tlb_l1_2m;
+        std::vector<std::vector<TlbEntry*> > tlb_l2;
 
         EntryList freeList;
 
@@ -117,10 +119,13 @@ namespace X86ISA
         uint64_t lruSeq;
 
         // Statistics
-        Stats::Scalar rdAccesses;
-        Stats::Scalar wrAccesses;
-        Stats::Scalar rdMisses;
-        Stats::Scalar wrMisses;
+        Stats::Scalar l1_4k_hits;
+        Stats::Scalar l1_2m_hits;
+        Stats::Scalar l1_misses;
+
+        Stats::Scalar l2_4k_hits;
+        Stats::Scalar l2_2m_hits;
+        Stats::Scalar l2_misses;
 
         Stats::Scalar walkCycles;
         Stats::Scalar walks;
@@ -140,8 +145,10 @@ namespace X86ISA
         Translation *inflight_trans;
         EventFunctionWrapper walkCompleteEvent;
 
+        int getIndex(Addr va, TLBType type);
 
       public:
+
         void inc_walk_cycles(Tick cycles)
         {
             walkCycles += cycles;
@@ -158,8 +165,6 @@ namespace X86ISA
         }
 
         void completeTranslation();
-
-        void evictLRU();
 
         uint64_t
         nextSeq()
@@ -190,6 +195,7 @@ namespace X86ISA
                                BaseTLB::Mode mode) const;
 
         TlbEntry *insert(Addr vpn, const TlbEntry &entry);
+        TlbEntry *insertInto(Addr vpn, const TlbEntry &entry, TLBType dest);
 
         /*
          * Function to register Stats
