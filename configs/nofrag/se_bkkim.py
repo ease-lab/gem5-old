@@ -218,6 +218,7 @@ def get_processes(options):
             GemsFDTD=Process(pid = 100 + idx)
             GemsFDTD.executable =  spec_binary_dir+'459.GemsFDTD/GemsFDTD'
             GemsFDTD.cmd = [GemsFDTD.executable]
+            GemsFDTD.cwd = binary_dir + '459.GemsFDTD'
             #GemsFDTD.output = 'test.log'
             process = GemsFDTD
         elif wrkld == 'libquantum':
