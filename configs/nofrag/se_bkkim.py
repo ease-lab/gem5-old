@@ -256,7 +256,7 @@ def get_processes(options):
             astar=Process(pid = 100 + idx)
             astar.executable = spec_binary_dir+'473.astar/astar'
             data=spec_binary_dir+'473.astar/BigLakes2048.cfg'
-            astar.cmd = [astar.executable]
+            astar.cmd = [astar.executable]+[data]
             process = astar
         elif wrkld == 'sphinx':
             #482.sphinx
