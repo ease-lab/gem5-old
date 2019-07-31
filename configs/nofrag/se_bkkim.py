@@ -71,6 +71,9 @@ from common.cpu2000 import *
 
 #TODO you should modify the path of binaries
 binary_dir = '/home/bkkim/benchmarks/SPECCPU2006/'
+bio_binary_dir = '/home/bkkim/benchmarks/Biobench/'
+graph500_binary_dir = '/home/bkkim/benchmarks/graph500-2.1.4/'
+liblinear_binary_dir = '/home/bkkim/benchmarks/liblinear-2.30/'
 
 def get_processes(options):
     """Interprets provided options and returns a list of processes"""
@@ -248,6 +251,59 @@ def get_processes(options):
             omnetpp.cwd = binary_dir + '471.omnetpp'
             omnetpp.cmd = [omnetpp.executable]
             process = omnetpp
+        elif wrkld == 'astar':
+            #473.astar
+            astar=Process(pid = 100 + idx)
+            astar.executable = spec_binary_dir+'473.astar/astar'
+            data=spec_binary_dir+'473.astar/BigLakes2048.cfg'
+            astar.cmd = [astar.executable]
+            process = astar
+        elif wrkld == 'sphinx':
+            #482.sphinx
+            sphinx=Process(pid = 100 + idx)
+            sphinx.executable = spec_binary_dir+\
+                '482.sphinx3/sphinx_livepretend'
+            sphinx.cmd = [sphinx.executable]+['ctlfile','.','args.an4']
+            process = sphinx
+        elif wrkld == 'xalanc':
+            #483.xalanc
+            xalanc=Process(pid = 100 + idx)
+            xalanc.executable = spec_binary_dir+'483.xalancbmk/Xalan'
+            xalanc.cmd = [xalanc.executable]+['-v','t5.xml','xalanc.xsl']
+            process = xalanc
+        elif wrkld == 'mummer':
+            #bio.mummer
+            mummer=Process(pid = 100 + idx)
+            mummer.executable = bio_binary_dir+'001.mummer/mummer'
+            data=bio_binary_dir+'001.mummer/hs_chrY.fa'
+            data2=bio_binary_dir+'001.mummer/hs_chr17.fa'
+            mummer.cmd = [mummer.executable]+['-b','-c',data,data2]
+            process = mummer
+        elif wrkld == 'tiger':
+            #bio.tiger
+            tiger=Process(pid = 100 + idx)
+            tiger.executable = bio_binary_dir+'002.tiger/TIGR_Assembler'
+            tiger.input = bio_binary_dir+'002.tiger/sitchensis.fa'
+            data = bio_binary_dir+'002.tiger/sitchensis.fasta'
+            output = bio_binary_dir+'002.tiger/sitchensis.scratch'
+            tiger.cmd = [tiger.executable]+\
+                ['-n',tiger.input,'-g','8','-l','40','-e','15',\
+                '-p','97.5','-a','output/sitchensis.align/',\
+                '-f',data,'-s',output]
+            process = tiger
+        elif wrkld == 'graph500':
+            #graph500
+            graph500=Process(pid = 100 + idx)
+            graph500.executable = graph500_binary_dir+'seq-csr'
+            graph500.cmd = [graph500.executable]+['-s','26','-e','16']
+            process = graph500
+        elif wrkld == 'liblinear':
+            #liblinear
+            liblinear=Process(pid = 100 + idx)
+            liblinear.executable = liblinear_binary_dir+'train'
+            data=liblinear_binary_dir+'data/url_combined'
+            liblinear.cmd = [liblinear.executable]+[data]
+            process = liblinear
         else:
             process = Process(pid = 100 + idx)
             process.executable = wrkld
