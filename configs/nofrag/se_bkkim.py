@@ -70,7 +70,7 @@ from common.cpu2000 import *
 
 
 #TODO you should modify the path of binaries
-binary_dir = '/home/bkkim/benchmarks/SPECCPU2006/'
+spec_binary_dir = '/home/bkkim/benchmarks/SPECCPU2006/'
 bio_binary_dir = '/home/bkkim/benchmarks/Biobench/'
 graph500_binary_dir = '/home/bkkim/benchmarks/graph500-2.1.4/'
 liblinear_binary_dir = '/home/bkkim/benchmarks/liblinear-2.30/'
@@ -100,48 +100,48 @@ def get_processes(options):
         if wrkld == 'perlbench':
             #400.perlbench
             perlbench = Process(pid = 100 + idx)
-            perlbench.executable =  binary_dir+'400.perlbench/perlbench'
-            data=binary_dir+'400.perlbench/checkspam.pl'
-            include= '-I'+binary_dir+'400.perlbench/lib'
+            perlbench.executable =  spec_binary_dir+'400.perlbench/perlbench'
+            data=spec_binary_dir+'400.perlbench/checkspam.pl'
+            include= '-I'+spec_binary_dir+'400.perlbench/lib'
             perlbench.cmd = [perlbench.executable] + [include, data,
                     '2500', '5', '25', '11', '150', '1', '1', '1', '1']
             process = perlbench
         elif wrkld == 'bzip2':
             #401.bzip2
             bzip2 = Process(pid = 100 + idx)
-            bzip2.executable =  binary_dir+'401.bzip2/bzip2'
-            data=binary_dir+'401.bzip2/input.source'
+            bzip2.executable =  spec_binary_dir+'401.bzip2/bzip2'
+            data=spec_binary_dir+'401.bzip2/input.source'
             bzip2.cmd = [bzip2.executable] + [data, '280']
             #bzip2.output = 'input.program.out'
             process = bzip2
         elif wrkld == 'gcc':
             #403.gcc
             gcc = Process(pid = 100 + idx)
-            gcc.executable =  binary_dir+'403.gcc/gcc'
-            data=binary_dir+'403.gcc/166.i'
-            output=binary_dir+'403.gcc/166.s'
+            gcc.executable =  spec_binary_dir+'403.gcc/gcc'
+            data=spec_binary_dir+'403.gcc/166.i'
+            output=spec_binary_dir+'403.gcc/166.s'
             gcc.cmd = [gcc.executable] + [data]+['-o',output]
             #gcc.output = 'ccc.out'
             process = gcc
         elif wrkld == 'bwaves':
             #410.bwaves
             bwaves = Process(pid = 100 + idx)
-            bwaves.executable =  binary_dir+'410.bwaves/bwaves'
+            bwaves.executable =  spec_binary_dir+'410.bwaves/bwaves'
             bwaves.cmd = [bwaves.executable]
             process = bwaves
         elif wrkld == 'mcf':
             #429.mcf
             mcf = Process(pid = 100 + idx)
-            mcf.executable =  binary_dir+'429.mcf/mcf'
-            data=binary_dir+'429.mcf/inp.in'
+            mcf.executable =  spec_binary_dir+'429.mcf/mcf'
+            data=spec_binary_dir+'429.mcf/inp.in'
             mcf.cmd = [mcf.executable] + [data]
             #mcf.output = 'inp.out'
             process = mcf
         elif wrkld == 'milc':
             #433.milc
             milc=Process(pid = 100 + idx)
-            milc.executable = binary_dir+'433.milc/milc'
-            stdin=binary_dir+'433.milc/su3imp.in'
+            milc.executable = spec_binary_dir+'433.milc/milc'
+            stdin=spec_binary_dir+'433.milc/su3imp.in'
             milc.cmd = [milc.executable]
             milc.input=stdin
             #milc.output='su3imp.out'
@@ -149,23 +149,23 @@ def get_processes(options):
         elif wrkld == 'zeusmp':
             #434.zeusmp
             zeusmp=Process(pid = 100 + idx)
-            zeusmp.executable =  binary_dir+'434.zeusmp/zeusmp'
+            zeusmp.executable =  spec_binary_dir+'434.zeusmp/zeusmp'
             zeusmp.cmd = [zeusmp.executable]
             #zeusmp.output = 'zeusmp.stdout'
             process = zeusmp
         elif wrkld == 'cactusADM':
             #436.cactusADM
             cactusADM = Process(pid = 100 + idx)
-            cactusADM.executable =  binary_dir+'436.cactusADM/cactusADM'
-            data=binary_dir+'436.cactusADM/benchADM.par'
+            cactusADM.executable =  spec_binary_dir+'436.cactusADM/cactusADM'
+            data=spec_binary_dir+'436.cactusADM/benchADM.par'
             cactusADM.cmd = [cactusADM.executable] + [data]
             #cactusADM.output = 'benchADM.out'
             process = cactusADM
         elif wrkld == 'leslie3d':
             #437.leslie3d
             leslie3d=Process(pid = 100 + idx)
-            leslie3d.executable =  binary_dir+'437.leslie3d/leslie3d'
-            stdin=binary_dir+'437.leslie3d/leslie3d.in'
+            leslie3d.executable =  spec_binary_dir+'437.leslie3d/leslie3d'
+            stdin=spec_binary_dir+'437.leslie3d/leslie3d.in'
             leslie3d.cmd = [leslie3d.executable]
             leslie3d.input=stdin
             #leslie3d.output='leslie3d.stdout'
@@ -173,8 +173,8 @@ def get_processes(options):
         elif wrkld == 'namd':
             #444.namd
             namd = Process(pid = 100 + idx)
-            namd.executable =  binary_dir+'444.namd/namd'
-            input=binary_dir+'444.namd/namd.input'
+            namd.executable =  spec_binary_dir+'444.namd/namd'
+            input=spec_binary_dir+'444.namd/namd.input'
             namd.cmd = [namd.executable] + \
                     ['--input',input,'--iterations','38']
             #namd.output='namd.stdout'
@@ -182,16 +182,16 @@ def get_processes(options):
         elif wrkld == 'soplex':
             #450.soplex
             soplex=Process(pid = 100 + idx)
-            soplex.executable =  binary_dir+'450.soplex/soplex'
-            data=binary_dir+'450.soplex/pds-50.mps'
+            soplex.executable =  spec_binary_dir+'450.soplex/soplex'
+            data=spec_binary_dir+'450.soplex/pds-50.mps'
             soplex.cmd = [soplex.executable]+['-s1','-e','-m45000',data]
             #soplex.output = 'test.out'
             process = soplex
         elif wrkld == 'povray':
             #453.povray
             povray=Process(pid = 100 + idx)
-            povray.executable =  binary_dir+'453.povray/povray'
-            data=binary_dir+'453.povray/SPEC-benchmark-ref.ini'
+            povray.executable =  spec_binary_dir+'453.povray/povray'
+            data=spec_binary_dir+'453.povray/SPEC-benchmark-ref.ini'
             #povray.cmd = [povray.executable]+['SPEC-benchmark-test.ini']
             povray.cmd = [povray.executable]+[data]
             #povray.output = 'SPEC-benchmark-test.stdout'
@@ -199,47 +199,47 @@ def get_processes(options):
         elif wrkld == 'hmmer':
             #456.hmmer
             hmmer=Process(pid = 100 + idx)
-            hmmer.executable =  binary_dir+'456.hmmer/hmmer'
-            data=binary_dir+'456.hmmer/nph3.hmm'
-            data2=binary_dir+'456.hmmer/swiss41'
+            hmmer.executable =  spec_binary_dir+'456.hmmer/hmmer'
+            data=spec_binary_dir+'456.hmmer/nph3.hmm'
+            data2=spec_binary_dir+'456.hmmer/swiss41'
             hmmer.cmd = [hmmer.executable]+[data]+[data2]
             #hmmer.output = 'bombesin.out'
             process = hmmer
         elif wrkld == 'sjeng':
             #458.sjeng
             sjeng=Process(pid = 100 + idx)
-            sjeng.executable =  binary_dir+'458.sjeng/sjeng'
-            data=binary_dir+'458.sjeng/ref.txt'
+            sjeng.executable =  spec_binary_dir+'458.sjeng/sjeng'
+            data=spec_binary_dir+'458.sjeng/ref.txt'
             sjeng.cmd = [sjeng.executable]+[data]
             #sjeng.output = 'test.out'
             process = sjeng
         elif wrkld == 'GemsFDTD':
             #459.GemsFDTD
             GemsFDTD=Process(pid = 100 + idx)
-            GemsFDTD.executable =  binary_dir+'459.GemsFDTD/GemsFDTD'
+            GemsFDTD.executable =  spec_binary_dir+'459.GemsFDTD/GemsFDTD'
             GemsFDTD.cmd = [GemsFDTD.executable]
             #GemsFDTD.output = 'test.log'
             process = GemsFDTD
         elif wrkld == 'libquantum':
             #462.libquantum
             libquantum=Process(pid = 100 + idx)
-            libquantum.executable =  binary_dir+'462.libquantum/libquantum'
+            libquantum.executable = spec_binary_dir+'462.libquantum/libquantum'
             libquantum.cmd = [libquantum.executable]+['1397','8']
             #libquantum.output = 'test.out'
             process = libquantum
         elif wrkld == 'h264ref':
             #464.h264ref
             h264ref=Process(pid = 100 + idx)
-            h264ref.executable =  binary_dir+'464.h264ref/h264ref'
-            data=binary_dir+'464.h264ref/foreman_ref_encoder_baseline.cfg'
+            h264ref.executable =  spec_binary_dir+'464.h264ref/h264ref'
+            data=spec_binary_dir+'464.h264ref/foreman_ref_encoder_baseline.cfg'
             h264ref.cmd = [h264ref.executable]+['-d',data]
             #h264ref.output = 'foreman_test_encoder_baseline.out'
             process = h264ref
         elif wrkld == 'lbm':
             #470.lbm
             lbm=Process(pid = 100 + idx)
-            lbm.executable =  binary_dir+'470.lbm/lbm'
-            data=binary_dir+'470.lbm/100_100_130_ldc.of'
+            lbm.executable =  spec_binary_dir+'470.lbm/lbm'
+            data=spec_binary_dir+'470.lbm/100_100_130_ldc.of'
             lbm.cmd = [lbm.executable]+ \
                     ['3000', 'reference.dat', '0', '0' ,data]
             #lbm.output = 'lbm.out'
@@ -247,8 +247,8 @@ def get_processes(options):
         elif wrkld == 'omnetpp':
             #471.omnetpp
             omnetpp=Process(pid = 100 + idx)
-            omnetpp.executable =  binary_dir+'471.omnetpp/omnetpp'
-            omnetpp.cwd = binary_dir + '471.omnetpp'
+            omnetpp.executable =  spec_binary_dir+'471.omnetpp/omnetpp'
+            omnetpp.cwd = spec_binary_dir + '471.omnetpp'
             omnetpp.cmd = [omnetpp.executable]
             process = omnetpp
         elif wrkld == 'astar':
