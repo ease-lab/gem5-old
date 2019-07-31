@@ -293,6 +293,11 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
                 break;
             }
         }
+
+        if (entry) { // L2 hit
+            //Fill L1!
+            insertInto(vpn_4k, *entry, L1_4K);
+        }
     }
 
     if (update_lru) { // Also update counters
@@ -759,6 +764,9 @@ TLBL2::regStats()
         .name(name() + ".l2_misses")
         .desc("TLBL2 L2 TLB misses");
 
+    l2_access_cycles
+        .name(name() + ".l2_access_cycles")
+        .desc("L2 TLB access latency");
 
     walkCycles
         .name(name() + ".walkCycles")
