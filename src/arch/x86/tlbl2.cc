@@ -616,6 +616,7 @@ TLBL2::translate(const RequestPtr &req,
                         return std::make_shared<PageFault>(vaddr, true, mode,
                                                            true, false);
                     } else {
+                        if (timing) {
                             Fault fault = walker->start(tc, translation, req,
                                                         mode);
                             if (timing || fault != NoFault) {
@@ -623,13 +624,15 @@ TLBL2::translate(const RequestPtr &req,
                                     delayedResponse = true;
                                     return fault;
                             }
-//                        Addr alignedVaddr = p->pTable->pageAlign(vaddr);
-//                        DPRINTF(TLB, "Mapping %#x to %#x\n", alignedVaddr,
-//                                pte->paddr);
-//                        entry = insert(alignedVaddr, TlbEntry(
-//                                p->pTable->pid(), alignedVaddr, pte->paddr,
-//                                pte->flags & EmulationPageTable::Uncacheable,
-//                                pte->flags & EmulationPageTable::ReadOnly));
+                        } else {
+                            Addr alignedVaddr = p->pTable->pageAlign(vaddr);
+                            DPRINTF(TLB, "Mapping %#x to %#x\n", alignedVaddr,
+                                    pte->paddr);
+                            entry = insert(alignedVaddr, TlbEntry(
+                                p->pTable->pid(), alignedVaddr, pte->paddr,
+                                pte->flags & EmulationPageTable::Uncacheable,
+                                pte->flags & EmulationPageTable::ReadOnly));
+                        }
                     }
                 }
             }
