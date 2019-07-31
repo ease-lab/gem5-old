@@ -231,8 +231,20 @@ int TLBL2::getIndex(Addr va, TLBType type)
             break;
 
         case L2_4K:
-            va >>= 12;
-            va &= set_l2-1;
+            idx = va >> 12;
+            idx &= set_l2-1;
+            assert(idx >= 0 && idx < set_l2);
+            break;
+
+        case L1_2M:
+            idx = va >> 21;
+            idx &= set_l1_2m-1;
+            assert(idx >= 0 && idx < set_l1_2m);
+            break;
+
+        case L2_2M:
+            idx = va >> 21;
+            idx &= set_l2-1;
             assert(idx >= 0 && idx < set_l2);
             break;
         default:
