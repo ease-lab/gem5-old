@@ -82,6 +82,8 @@ TLBL2::TLBL2(const Params *p)
       walk_lat(p->fixed_l2_miss_latency),
       l2_access_lat(p->l2_hit_latency),
 
+      enableLargePage(p->enable_2m),
+
       tlb_l1_4k(set_l1_4k),
       tlb_l1_2m(set_l1_2m),
       tlb_l2(set_l2),

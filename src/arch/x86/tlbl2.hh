@@ -110,6 +110,8 @@ namespace X86ISA
         Tick walk_lat;
         Tick l2_access_lat;
 
+        bool enableLargePage;
+
         std::vector<std::vector<TlbEntry*> > tlb_l1_4k;
         std::vector<std::vector<TlbEntry*> > tlb_l1_2m;
         std::vector<std::vector<TlbEntry*> > tlb_l2;
