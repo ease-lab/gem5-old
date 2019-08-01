@@ -198,26 +198,6 @@ TLBL2::insert(Addr vpn, const TlbEntry &entry)
         insertInto(vpn, entry, L1_4K);
         return insertInto(vpn, entry, L2_4K);
     }
-//
-//    // If somebody beat us to it, just use that existing entry.
-//    TlbEntry *newEntry = trie.lookup(vpn);
-//    if (newEntry) {
-//        assert(newEntry->vaddr == vpn);
-//        return newEntry;
-//    }
-//
-//    if (freeList.empty())
-//        evictLRU();
-//
-//    newEntry = freeList.front();
-//    freeList.pop_front();
-//
-//    *newEntry = entry;
-//    newEntry->lruSeq = nextSeq();
-//    newEntry->vaddr = vpn;
-//    newEntry->trieHandle =
-//    trie.insert(vpn, TlbEntryTrie::MaxBits - entry.logBytes, newEntry);
-//    return newEntry;
 }
 
 int TLBL2::getIndex(Addr va, TLBType type)

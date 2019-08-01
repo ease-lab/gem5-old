@@ -41,6 +41,7 @@
 
 #include "base/compiler.hh"
 #include "base/trace.hh"
+#include "debug/CHP.hh"
 #include "debug/MMU.hh"
 #include "sim/faults.hh"
 #include "sim/serialize.hh"
