@@ -308,7 +308,7 @@ Process::allocateMem(Addr vaddr, int64_t size, bool clobber, bool largepage)
 
     pTable->map(vaddr, paddr, size,
                 clobber ? EmulationPageTable::Clobber :
-                          EmulationPageTable::MappingFlags(0));
+                          EmulationPageTable::MappingFlags(0), largepage);
 }
 
 void

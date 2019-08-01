@@ -232,7 +232,6 @@ int TLBL2::getIndex(Addr va, TLBType type)
             assert(idx >= 0 && idx < set_l2);
             break;
         default:
-            //TODO 2M
             fatal("Not implemented");
     }
     return idx;
@@ -303,6 +302,11 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
                     break;
                 }
             }
+            if (entry) { //L2 2M hit
+                //Fill L1!
+                insertInto(vpn_2m, *entry, L1_2M);
+                //TODO we may need to move this into the page walker...
+            }
         }
     }
 
@@ -321,12 +325,10 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
                 case L2_4K:
                     l1_misses++;
                     l2_4k_hits++;
-                    l2_access_cycles += delays;
                     break;
                 case L2_2M:
                     l1_misses++;
                     l2_2m_hits++;
-                    l2_access_cycles += delays;
                     break;
                 default:
                     break;
@@ -636,6 +638,8 @@ TLBL2::translate(const RequestPtr &req,
                         if (timing) {
                             TLBWalkerAction action = PageWalk_4K;
 
+                            if (pte->isLargePageEntry())
+                                action = PageWalk_2M;
 
                             walker->setLatAndAction(walk_lat, action);
                             Fault fault = walker->start(tc, translation, req,
@@ -646,13 +650,22 @@ TLBL2::translate(const RequestPtr &req,
                                     return fault;
                             }
                         } else {
-                            Addr alignedVaddr = p->pTable->pageAlign(vaddr);
-                            DPRINTF(TLB, "Mapping %#x to %#x\n", alignedVaddr,
+                            Addr alignedVaddr;
+                            if (pte->isLargePageEntry()) {
+                                alignedVaddr = p->pTable->
+                                    largePageAlign(vaddr);
+                            } else {
+                                alignedVaddr = p->pTable->pageAlign(vaddr);
+                            }
+                            DPRINTF(TLB, "Mapping %s %#x to %#x\n",
+                                    alignedVaddr, pte->isLargePageEntry() ?
+                                    "largepage" : "",
                                     pte->paddr);
                             entry = insert(alignedVaddr, TlbEntry(
                                 p->pTable->pid(), alignedVaddr, pte->paddr,
                                 pte->flags & EmulationPageTable::Uncacheable,
-                                pte->flags & EmulationPageTable::ReadOnly));
+                                pte->flags & EmulationPageTable::ReadOnly,
+                                pte->isLargePageEntry()));
                         }
                     }
                 }

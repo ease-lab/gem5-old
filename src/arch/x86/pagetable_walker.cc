@@ -132,6 +132,10 @@ Walker::finishedFixedLatWalk()
                     pte->paddr);
 
     int logbytes = 12;
+    if (action == TLB::PageWalk_2M || action == TLB::L1_2M_Hit ||
+            (action == TLB::Access_L2 && pte->isLargePageEntry())) {
+        logbytes = 21;
+    }
 
     if (action == TLB::PageWalk_4K) {
         tlb->insert(alignedVaddr, TlbEntry(
@@ -141,7 +145,7 @@ Walker::finishedFixedLatWalk()
     } else if (action == TLB::PageWalk_2M) {
         alignedVaddr = p->pTable->largePageAlign(vaddr);
         tlb->insert(alignedVaddr, TlbEntry(
-                    p->pTable->pid(), alignedVaddr, 0,
+                    p->pTable->pid(), alignedVaddr, pte->paddr,
                     pte->flags & EmulationPageTable::Uncacheable,
                     pte->flags & EmulationPageTable::ReadOnly, true));
         DPRINTF(PageTableWalker, "Inserting 2M page into TLB 0x%lx\n",
