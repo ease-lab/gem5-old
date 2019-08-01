@@ -98,6 +98,7 @@
 #include "config/the_isa.hh"
 #include "cpu/base.hh"
 #include "cpu/thread_context.hh"
+#include "debug/MMU.hh"
 #include "mem/page_table.hh"
 #include "params/Process.hh"
 #include "sim/emul_driver.hh"
@@ -1839,6 +1840,7 @@ mmapImpl(SyscallDesc *desc, int num, ThreadContext *tc, bool is_mmap2)
     // mapped and clobber is not set, the simulator will issue throw a
     // fatal and bail out of the simulation.
 
+    DPRINTF(MMU, "mmap: start:%#x, length:%#x\n", start, length);
     Addr alloc_point = start;
     Addr end = alloc_point + length;
     while (alloc_point < end) {

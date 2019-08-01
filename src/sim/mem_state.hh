@@ -52,7 +52,9 @@ class MemState : public Serializable
   public:
     MemState(Addr brk_point, Addr stack_base, Addr max_stack_size,
              Addr next_thread_stack_base, Addr mmap_end)
-        : _brkPoint(brk_point), _stackBase(stack_base), _stackSize(0),
+        : _brkPoint(brk_point), _brkAllocatePoint(brk_point),
+        _brkAllocateLargePage(false),
+        _stackBase(stack_base), _stackSize(0),
           _maxStackSize(max_stack_size), _stackMin(0),
           _nextThreadStackBase(next_thread_stack_base), _mmapEnd(mmap_end)
     { }
@@ -74,6 +76,8 @@ class MemState : public Serializable
     }
 
     Addr getBrkPoint() const { return _brkPoint; }
+    Addr getBrkAlllocatePoint() const {return _brkAllocatePoint;}
+    bool getBrkAllocateLargePage() const {return _brkAllocateLargePage;}
     Addr getStackBase() const { return _stackBase; }
     Addr getStackSize() const { return _stackSize; }
     Addr getMaxStackSize() const { return _maxStackSize; }
@@ -82,6 +86,8 @@ class MemState : public Serializable
     Addr getMmapEnd() const { return _mmapEnd; }
 
     void setBrkPoint(Addr brk_point) { _brkPoint = brk_point; }
+    void setBrkAllocatePoint(Addr brk_point) { _brkAllocatePoint = brk_point; }
+    void setBrkAllocateLargePage() { _brkAllocateLargePage = true; }
     void setStackBase(Addr stack_base) { _stackBase = stack_base; }
     void setStackSize(Addr stack_size) { _stackSize = stack_size; }
     void setMaxStackSize(Addr max_stack) { _maxStackSize = max_stack; }
@@ -93,6 +99,8 @@ class MemState : public Serializable
     serialize(CheckpointOut &cp) const override
     {
         paramOut(cp, "brkPoint", _brkPoint);
+        paramOut(cp, "brkAllocatePoint", _brkAllocatePoint);
+        paramOut(cp, "brkAllocateLargePage", _brkAllocateLargePage);
         paramOut(cp, "stackBase", _stackBase);
         paramOut(cp, "stackSize", _stackSize);
         paramOut(cp, "maxStackSize", _maxStackSize);
@@ -104,6 +112,8 @@ class MemState : public Serializable
     unserialize(CheckpointIn &cp) override
     {
         paramIn(cp, "brkPoint", _brkPoint);
+        paramIn(cp, "brkAllocatePoint", _brkAllocatePoint);
+        paramIn(cp, "brkAllocateLargePage", _brkAllocateLargePage);
         paramIn(cp, "stackBase", _stackBase);
         paramIn(cp, "stackSize", _stackSize);
         paramIn(cp, "maxStackSize", _maxStackSize);
@@ -114,6 +124,9 @@ class MemState : public Serializable
 
   private:
     Addr _brkPoint;
+    Addr _brkAllocatePoint; //Allocate may go beyond brk point due to large
+                            //page allocations
+    bool _brkAllocateLargePage;
     Addr _stackBase;
     Addr _stackSize;
     Addr _maxStackSize;

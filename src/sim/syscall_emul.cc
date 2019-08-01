@@ -248,19 +248,40 @@ brkFunc(SyscallDesc *desc, int num, ThreadContext *tc)
 
     std::shared_ptr<MemState> mem_state = p->memState;
     Addr brk_point = mem_state->getBrkPoint();
+//    Addr brk_alloced_point = mem_state->getBrkAlllocatePoint();
+    bool startLP = mem_state->getBrkAllocateLargePage();
+
 
     // in Linux at least, brk(0) returns the current break value
     // (note that the syscall and the glibc function have different behavior)
     if (new_brk == 0)
         return brk_point;
 
-    if (new_brk > brk_point) {
+    Addr target_brk_point;
+    DPRINTF(MMU, "brk: %#x, new_brk: %#x, startLP:%d\n", brk_point, new_brk,
+            startLP);
+    while (new_brk > brk_point) {
         // might need to allocate some new pages
+        int size;
+        if (startLP) { //Large page allocations
+            size = LargePageBytes;
+           // size = PageBytes;
+            target_brk_point = roundUp(new_brk, LargePageBytes);
+        } else {
+            //If we are not yet starting large page allocations,
+            //then first off reach the first largepage boundary
+            size = PageBytes;
+            target_brk_point = std::min(roundUp(brk_point, LargePageBytes),
+                                        new_brk);
+        }
         for (ChunkGenerator gen(brk_point,
-                                new_brk - brk_point,
-                                PageBytes); !gen.done(); gen.next()) {
+                                target_brk_point - brk_point,
+                                size); !gen.done(); gen.next()) {
+            DPRINTF(MMU, "ChunkGen: addr: %#x\n", gen.addr());
+
             if (!p->pTable->translate(gen.addr()))
-                p->allocateMem(roundDown(gen.addr(), PageBytes), PageBytes);
+                p->allocateMem(roundDown(gen.addr(), size), size, false,
+                        startLP);
 
             // if the address is already there, zero it out
             else {
@@ -270,18 +291,31 @@ brkFunc(SyscallDesc *desc, int num, ThreadContext *tc)
                 // split non-page aligned accesses
                 Addr next_page = roundUp(gen.addr(), PageBytes);
                 uint32_t size_needed = next_page - gen.addr();
+                DPRINTF(MMU, "memsetBlob: addr: %#x, size: %u\n", gen.addr(),
+                        size_needed);
                 tp.memsetBlob(gen.addr(), zero, size_needed);
                 if (gen.addr() + PageBytes > next_page &&
                     next_page < new_brk &&
                     p->pTable->translate(next_page)) {
                     size_needed = PageBytes - size_needed;
+                    DPRINTF(MMU, "memsetBlob: addr: %#x, size: %u\n",
+                            next_page, size_needed);
                     tp.memsetBlob(next_page, zero, size_needed);
                 }
             }
         }
+        if (!startLP &&
+                roundUp(brk_point, LargePageBytes) == target_brk_point) {
+            startLP = true;
+            mem_state->setBrkAllocateLargePage();
+        }
+        brk_point = target_brk_point;
+       // mem_state->setBrkAllocatePoint(target_brk_point);
     }
 
     mem_state->setBrkPoint(new_brk);
+    DPRINTF(MMU, "brk: break point changed to: %#X\n",
+                    mem_state->getBrkPoint());
     DPRINTF_SYSCALL(Verbose, "brk: break point changed to: %#X\n",
                     mem_state->getBrkPoint());
     return mem_state->getBrkPoint();
