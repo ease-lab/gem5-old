@@ -57,6 +57,10 @@ class EmulationPageTable : public Serializable
 
         Entry(Addr paddr, uint64_t flags) : paddr(paddr), flags(flags) {}
         Entry() {}
+
+        bool isLargePageEntry() {
+            return flags & LargePage_flag;
+        }
     };
 
   protected:
@@ -93,11 +97,13 @@ class EmulationPageTable : public Serializable
      * bit 0 - no-clobber | clobber
      * bit 2 - cacheable  | uncacheable
      * bit 3 - read-write | read-only
+     * bit 4 - regular pg | largepage
      */
     enum MappingFlags : uint32_t {
         Clobber     = 1,
         Uncacheable = 4,
         ReadOnly    = 8,
+        LargePage_flag   =16,
     };
 
     // flag which marks the page table as shared among software threads
@@ -122,7 +128,8 @@ class EmulationPageTable : public Serializable
      * @param flags Generic mapping flags that can be set by or-ing values
      *              from MappingFlags enum.
      */
-    virtual void map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags = 0);
+    virtual void map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags = 0,
+            bool largepage = false);
     virtual void remap(Addr vaddr, int64_t size, Addr new_vaddr);
     virtual void unmap(Addr vaddr, int64_t size);
 

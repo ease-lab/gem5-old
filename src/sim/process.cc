@@ -293,10 +293,19 @@ Process::drain()
 }
 
 void
-Process::allocateMem(Addr vaddr, int64_t size, bool clobber)
+Process::allocateMem(Addr vaddr, int64_t size, bool clobber, bool largepage)
 {
-    int npages = divCeil(size, (int64_t)PageBytes);
-    Addr paddr = system->allocPhysPages(npages);
+    int npages;
+    Addr paddr;
+
+    if (largepage) {
+        npages = divCeil(size, (int64_t)LargePageBytes) * 512;
+    } else {
+        npages = divCeil(size, (int64_t)PageBytes);
+    }
+
+    paddr = system->allocPhysPages(npages, largepage);
+
     pTable->map(vaddr, paddr, size,
                 clobber ? EmulationPageTable::Clobber :
                           EmulationPageTable::MappingFlags(0));

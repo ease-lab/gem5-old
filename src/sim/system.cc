@@ -373,8 +373,14 @@ System::validKvmEnvironment() const
 }
 
 Addr
-System::allocPhysPages(int npages)
+System::allocPhysPages(int npages, bool largepage)
 {
+    if (largepage) {
+        ///Round up PagePtr to nearest 512 (Largepage boundary)
+        pagePtr = roundUp(pagePtr, 512);
+        assert(npages % 512 == 0); //npages needs to be rounded up by caller
+    }
+
     Addr return_addr = pagePtr << PageShift;
     pagePtr += npages;
 

@@ -213,9 +213,10 @@ public:
     Addr basePtr() { return _basePtr; }
 
     void
-    map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags = 0) override
+    map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags = 0, bool
+            largepage = false) override
     {
-        EmulationPageTable::map(vaddr, paddr, size, flags);
+        EmulationPageTable::map(vaddr, paddr, size, flags, largepage);
 
         Final entry;
 

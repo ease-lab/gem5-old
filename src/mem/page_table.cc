@@ -47,13 +47,24 @@
 #include "sim/serialize.hh"
 
 void
-EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags)
+EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags,
+        bool largepage)
 {
     bool clobber = flags & Clobber;
-    // starting address must be page aligned
-    assert(pageOffset(vaddr) == 0);
+    int p_size;
+    if (largepage) {
+        p_size = largePageSize;
+        // starting address must be page aligned
+        assert(largePageOffset(vaddr) == 0);
+        flags |= LargePage_flag;
+    } else {
+        p_size = pageSize;
+        // starting address must be page aligned
+        assert(pageOffset(vaddr) == 0);
+    }
 
-    DPRINTF(MMU, "Allocating Page: %#x-%#x\n", vaddr, vaddr + size);
+    DPRINTF(MMU, "Mapping Allocated Page: %#x-%#x isLarge: %c\n", vaddr,
+            vaddr + size, largepage ? 'y' : 'n');
 
     while (size > 0) {
         auto it = pTable.find(vaddr);
@@ -67,9 +78,9 @@ EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags)
             pTable.emplace(vaddr, Entry(paddr, flags));
         }
 
-        size -= pageSize;
-        vaddr += pageSize;
-        paddr += pageSize;
+        size -= p_size;
+        vaddr += p_size;
+        paddr += p_size;
     }
 }
 

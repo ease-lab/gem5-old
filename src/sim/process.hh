@@ -111,7 +111,8 @@ class Process : public SimObject
     // override of virtual SimObject method: register statistics
     void regStats() override;
 
-    void allocateMem(Addr vaddr, int64_t size, bool clobber = false);
+    void allocateMem(Addr vaddr, int64_t size, bool clobber = false,
+            bool largepage = false);
 
     /// Attempt to fix up a fault at vaddr by allocating a page on the stack.
     /// @return Whether the fault has been fixed.

@@ -590,7 +590,7 @@ class System : public SimObject
 
     /// Allocate npages contiguous unused physical pages
     /// @return Starting address of first page
-    Addr allocPhysPages(int npages);
+    Addr allocPhysPages(int npages, bool largepage = false);
 
     ContextID registerThreadContext(ThreadContext *tc,
                                     ContextID assigned = InvalidContextID);
