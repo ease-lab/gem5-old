@@ -1838,7 +1838,39 @@ mmapImpl(SyscallDesc *desc, int num, ThreadContext *tc, bool is_mmap2)
     // Allocate physical memory and map it in. If the page table is already
     // mapped and clobber is not set, the simulator will issue throw a
     // fatal and bail out of the simulation.
-    p->allocateMem(start, length, clobber);
+
+    Addr alloc_point = start;
+    Addr end = alloc_point + length;
+    while (alloc_point < end) {
+        // Is the alloc_point large page aligned?
+        int lp_offset = p->pTable->largePageOffset(alloc_point);
+        if (lp_offset) { //not aligned
+            Addr this_end = std::min(end, roundUp(alloc_point,
+                        TheISA::LargePageBytes));
+            unsigned long len = this_end - alloc_point;
+
+            p->allocateMem(alloc_point, len, clobber);
+            alloc_point += len;
+        } else { //LP aligned
+            // Can we allocate large pages?
+            if (end-alloc_point >= TheISA::LargePageBytes) {
+                //allocate until final largepage boundary
+                Addr this_end = p->pTable->largePageAlign(end);
+                unsigned long len = this_end - alloc_point;
+
+                p->allocateMem(alloc_point, len, clobber, true);
+                alloc_point += len;
+            } else {
+                //Finally, finish it off
+                unsigned long len = end - alloc_point;
+
+                p->allocateMem(alloc_point, len, clobber);
+                alloc_point += len; // Should  now be equal to end
+                assert(alloc_point == end);
+            }
+        }
+    }
+
 
     // Transfer content into target address space.
     PortProxy &tp = tc->getVirtProxy();
