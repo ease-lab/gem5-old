@@ -135,10 +135,12 @@ TLBL2::insertInto(Addr vpn, const TlbEntry &entry, TLBType dest)
     switch (dest) {
         case L1_4K:
             tlb_way = &tlb_l1_4k.at(idx);
+            assert(!entry.largepage);
             break;
 
         case L1_2M:
             tlb_way = &tlb_l1_2m.at(idx);
+            assert(entry.largepage);
             break;
 
         case L2_4K:
@@ -256,9 +258,7 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
        }
     }
 
-#if 0
-    Addr vpn_2m = p->pTable->pageAlign(vaddr); //TODO
-    //TODO Support large pages!!
+    Addr vpn_2m = va & ~((1UL << 21)-1);
     if (!entry) {
         // Lookup L1_2m
         int idx = getIndex(vpn_2m, L1_2M);
@@ -272,15 +272,14 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
             }
         }
     }
-#endif
 
     if (!entry) {
-        // Lookup L2
+        // Lookup L2 4K
         int idx = getIndex(vpn_4k, L2_4K);
         for (TlbEntry *ent: tlb_l2.at(idx)) {
             if (!ent) //empty
                 continue;
-            if (ent->vaddr == vpn_4k) {
+            if (ent->vaddr == vpn_4k && !ent->largepage) {
                 entry = ent;
                 hitLevel = L2_4K;
                 delays += l2_access_lat;
@@ -288,9 +287,22 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
             }
         }
 
-        if (entry) { // L2 hit
+        if (entry) { // L2 4K hit
             //Fill L1!
             insertInto(vpn_4k, *entry, L1_4K);
+        } else {
+            // Lookup L2 2M
+            idx = getIndex(vpn_2m, L2_2M);
+            for (TlbEntry *ent: tlb_l2.at(idx)) {
+                if (!ent) //empty
+                    continue;
+                if (ent->vaddr == vpn_2m && ent->largepage) {
+                    entry = ent;
+                    hitLevel = L2_2M;
+                    delays += l2_access_lat;
+                    break;
+                }
+            }
         }
     }
 

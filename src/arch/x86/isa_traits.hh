@@ -56,6 +56,9 @@ namespace X86ISA
     const Addr PageShift = 12;
     const Addr PageBytes = ULL(1) << PageShift;
 
+    const Addr LargePageShift = 12+9;
+    const Addr LargePageBytes = ULL(1) << LargePageShift;
+
     // Memory accesses can be unaligned
     const bool HasUnalignedMemAcc = true;
 
