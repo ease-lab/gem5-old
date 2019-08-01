@@ -147,9 +147,17 @@ EmulationPageTable::lookup(Addr vaddr)
 {
     Addr page_addr = pageAlign(vaddr);
     PTableItr iter = pTable.find(page_addr);
-    if (iter == pTable.end())
-        return nullptr;
-    return &(iter->second);
+    if (iter != pTable.end())
+        return &(iter->second); // 4KB translated
+
+    // Check 2MB translation!
+    page_addr = largePageAlign(vaddr);
+    iter = pTable.find(page_addr);
+    if (iter != pTable.end() && iter->second.isLargePageEntry()) {
+        return &(iter->second); // 2MB translated
+    }
+
+    return nullptr;
 }
 
 bool
@@ -160,7 +168,11 @@ EmulationPageTable::translate(Addr vaddr, Addr &paddr)
         DPRINTF(MMU, "Couldn't Translate: %#x\n", vaddr);
         return false;
     }
-    paddr = pageOffset(vaddr) + entry->paddr;
+    if (entry->isLargePageEntry()) {
+        paddr = largePageOffset(vaddr) + entry->paddr;
+    } else {
+        paddr = pageOffset(vaddr) + entry->paddr;
+    }
     DPRINTF(MMU, "Translating: %#x->%#x\n", vaddr, paddr);
     return true;
 }

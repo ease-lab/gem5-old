@@ -58,7 +58,8 @@ class EmulationPageTable : public Serializable
         Entry(Addr paddr, uint64_t flags) : paddr(paddr), flags(flags) {}
         Entry() {}
 
-        bool isLargePageEntry() {
+        bool isLargePageEntry () const
+        {
             return flags & LargePage_flag;
         }
     };
