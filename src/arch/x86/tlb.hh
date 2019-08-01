@@ -77,6 +77,8 @@ namespace X86ISA
 
         virtual void setConfigAddress(uint32_t addr);
 
+        enum TLBWalkerAction {PageWalk_4K, PageWalk_2M, Access_L2, L1_2M_Hit};
+
       protected:
 
         EntryList::iterator lookupIt(Addr va, bool update_lru = true);

@@ -103,11 +103,11 @@ Walker::startFunctional(ThreadContext * _tc, Addr &addr, unsigned &logBytes,
 }
 
 void
-Walker::setFixedLatency(Tick lat, bool _skip_insert)
+Walker::setLatAndAction(Tick lat, TLB::TLBWalkerAction _action)
 {
     fixed_lat = true;
     walk_lat = lat;
-    skip_insert = _skip_insert;
+    action = _action;
     DPRINTF(PageTableWalker, "Turning on Fixed latency to %lu ticks\n", lat);
 }
 
@@ -131,13 +131,22 @@ Walker::finishedFixedLatWalk()
     DPRINTF(PageTableWalker, "Mapping %#x to %#x\n", alignedVaddr,
                     pte->paddr);
 
-    if (!skip_insert) {
+    int logbytes = 12;
+
+    if (action == TLB::PageWalk_4K) {
         tlb->insert(alignedVaddr, TlbEntry(
                     p->pTable->pid(), alignedVaddr, pte->paddr,
                     pte->flags & EmulationPageTable::Uncacheable,
                     pte->flags & EmulationPageTable::ReadOnly));
+    } else if (action == TLB::PageWalk_2M) {
+        alignedVaddr = p->pTable->largePageAlign(vaddr);
+        tlb->insert(alignedVaddr, TlbEntry(
+                    p->pTable->pid(), alignedVaddr, 0,
+                    pte->flags & EmulationPageTable::Uncacheable,
+                    pte->flags & EmulationPageTable::ReadOnly, true));
+        DPRINTF(PageTableWalker, "Inserting 2M page into TLB 0x%lx\n",
+                alignedVaddr);
     }
-    int logbytes = 12;
 
     Addr paddr = pte->paddr | (vaddr & mask(logbytes));
     DPRINTF(PageTableWalker, "Translated %#x -> %#x.\n", vaddr, paddr);
@@ -150,11 +159,11 @@ Walker::finishedFixedLatWalk()
     DPRINTF(PageTableWalker, "Finishing translation\n");
     currState->translation->finish(NoFault, currState->req, currState->tc,
                                    currState->mode);
-    if (!skip_insert) {
+    if (action == TLB::PageWalk_4K || action == TLB::PageWalk_2M) {
         tlb->inc_walk_cycles(walk_lat);
         tlb->inc_walks();
         DPRINTF(PageTableWalker, "Walk latency incremented by %d\n", walk_lat);
-    } else {
+    } else if (action == TLB::Access_L2) {
         tlb->inc_l2_access_cycles(walk_lat);
         DPRINTF(PageTableWalker, "L2 TLB access latency added by %d cycles\n",
                 walk_lat);

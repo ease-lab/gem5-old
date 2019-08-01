@@ -118,7 +118,7 @@ TLBL2::TLBL2(const Params *p)
 
     walker = p->walker;
     walker->setTLB(this);
-    walker->setFixedLatency(walk_lat, false);
+    walker->setLatAndAction(walk_lat, PageWalk_4K);
 
     transInflight = false;
     inflight_tc = NULL;
@@ -634,7 +634,10 @@ TLBL2::translate(const RequestPtr &req,
                                                            true, false);
                     } else {
                         if (timing) {
-                            walker->setFixedLatency(walk_lat, false);
+                            TLBWalkerAction action = PageWalk_4K;
+
+
+                            walker->setLatAndAction(walk_lat, action);
                             Fault fault = walker->start(tc, translation, req,
                                                         mode);
                             if (timing || fault != NoFault) {
@@ -653,8 +656,11 @@ TLBL2::translate(const RequestPtr &req,
                         }
                     }
                 }
-            } else if (delays && timing) {
-                walker->setFixedLatency(delays, true);
+            } else if (timing && (delays || entry->largepage)) {
+                TLBWalkerAction action = Access_L2;
+                if (delays == 0)
+                    action = L1_2M_Hit;
+                walker->setLatAndAction(delays, action);
                 Fault fault = walker->start(tc, translation, req, mode);
                 delayedResponse = true;
                 return fault;

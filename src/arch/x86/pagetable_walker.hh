@@ -115,7 +115,7 @@ namespace X86ISA
             bool squashed;
             bool fixed_lat;
             Tick walk_lat;
-            bool skip_insert;
+            TLB::TLBWalkerAction action;
           public:
             WalkerState(Walker * _walker, BaseTLB::Translation *_translation,
                         const RequestPtr &_req, bool _isFunctional = false) :
@@ -125,7 +125,7 @@ namespace X86ISA
                 functional(_isFunctional), timing(false),
                 retrying(false), started(false), squashed(false),
                 fixed_lat(_walker->fixed_lat), walk_lat(_walker->walk_lat),
-                skip_insert(_walker->skip_insert)
+                action(_walker->action)
             {
             }
             void initState(ThreadContext * _tc, BaseTLB::Mode _mode,
@@ -181,7 +181,7 @@ namespace X86ISA
         // Variables to ddo fixed/latency emulated table walks
         bool fixed_lat;
         Tick walk_lat;
-        bool skip_insert;
+        TLB::TLBWalkerAction action;
 
         // The number of outstanding walks that can be squashed per cycle.
         unsigned numSquashable;
@@ -208,7 +208,7 @@ namespace X86ISA
             tlb = _tlb;
         }
 
-        void setFixedLatency(Tick lat, bool skip_insert);
+        void setLatAndAction(Tick lat, TLB::TLBWalkerAction action);
 
         typedef X86PagetableWalkerParams Params;
 
@@ -222,7 +222,7 @@ namespace X86ISA
             ClockedObject(params), port(name() + ".port", this),
             funcState(this, NULL, NULL, true), tlb(NULL), sys(params->system),
             masterId(sys->getMasterId(this)),
-            fixed_lat(false), walk_lat(0UL), skip_insert(false),
+            fixed_lat(false), walk_lat(0UL),
             numSquashable(params->num_squash_per_cycle),
             startWalkWrapperEvent([this]{ startWalkWrapper(); }, name()),
             fixedLatEvent([this]{ finishedFixedLatWalk(); }, name())
