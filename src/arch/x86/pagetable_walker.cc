@@ -159,9 +159,7 @@ Walker::finishedFixedLatWalk()
     } else if (action == TLB::PageWalk_2M_force_4K) {
         int regPageOffset = p->pTable->largePageOffset(vaddr);
         regPageOffset = p->pTable->pageAlign(regPageOffset);
-        alignedVaddr += regPageOffset;
 
-        alignedVaddr = p->pTable->largePageAlign(vaddr);
         tlb->insert(alignedVaddr, TlbEntry(
                     p->pTable->pid(), alignedVaddr,
                     pte->paddr + regPageOffset,
