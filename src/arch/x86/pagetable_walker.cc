@@ -156,15 +156,16 @@ Walker::finishedFixedLatWalk()
     } else if (action == TLB::PageWalk_2M_force_4K) {
         int regPageOffset = p->pTable->largePageOffset(vaddr);
         regPageOffset = p->pTable->pageAlign(regPageOffset);
+        alignedVaddr += regPageOffset;
 
         alignedVaddr = p->pTable->largePageAlign(vaddr);
         tlb->insert(alignedVaddr, TlbEntry(
-                    p->pTable->pid(), alignedVaddr + regPageOffset,
+                    p->pTable->pid(), alignedVaddr,
                     pte->paddr + regPageOffset,
                     pte->flags & EmulationPageTable::Uncacheable,
                     pte->flags & EmulationPageTable::ReadOnly));
         DPRINTF(PageTableWalker, "Inserting 2M forced 4KB page into TLB"
-                " %#x:%#x\n", alignedVaddr + regPageOffset,
+                " %#x:%#x\n", alignedVaddr,
                 pte->paddr + regPageOffset);
     }
 
