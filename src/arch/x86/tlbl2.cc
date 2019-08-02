@@ -669,10 +669,8 @@ TLBL2::translate(const RequestPtr &req,
                         }
                     }
                 }
-            } else if (timing && (delays || entry->largepage)) {
+            } else if (timing && delays) {
                 TLBWalkerAction action = Access_L2;
-                if (delays == 0)
-                    action = L1_2M_Hit;
                 walker->setLatAndAction(delays, action);
                 Fault fault = walker->start(tc, translation, req, mode);
                 delayedResponse = true;
