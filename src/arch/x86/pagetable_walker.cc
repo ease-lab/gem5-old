@@ -132,7 +132,8 @@ Walker::finishedFixedLatWalk()
                     pte->paddr);
 
     int logbytes = 12;
-    if (action == TLB::PageWalk_2M || action == TLB::L1_2M_Hit ||
+    if (action == TLB::PageWalk_2M || action == TLB::PageWalk_2M_force_4K ||
+            action == TLB::L1_2M_Hit ||
             (action == TLB::Access_L2 && pte->isLargePageEntry())) {
         logbytes = 21;
     }
@@ -142,6 +143,8 @@ Walker::finishedFixedLatWalk()
                     p->pTable->pid(), alignedVaddr, pte->paddr,
                     pte->flags & EmulationPageTable::Uncacheable,
                     pte->flags & EmulationPageTable::ReadOnly));
+        DPRINTF(PageTableWalker, "Inserting 4K page into TLB 0x%lx\n",
+                alignedVaddr);
     } else if (action == TLB::PageWalk_2M) {
         alignedVaddr = p->pTable->largePageAlign(vaddr);
         tlb->insert(alignedVaddr, TlbEntry(
@@ -150,6 +153,19 @@ Walker::finishedFixedLatWalk()
                     pte->flags & EmulationPageTable::ReadOnly, true));
         DPRINTF(PageTableWalker, "Inserting 2M page into TLB 0x%lx\n",
                 alignedVaddr);
+    } else if (action == TLB::PageWalk_2M_force_4K) {
+        int regPageOffset = p->pTable->largePageOffset(vaddr);
+        regPageOffset = p->pTable->pageAlign(regPageOffset);
+
+        alignedVaddr = p->pTable->largePageAlign(vaddr);
+        tlb->insert(alignedVaddr, TlbEntry(
+                    p->pTable->pid(), alignedVaddr + regPageOffset,
+                    pte->paddr + regPageOffset,
+                    pte->flags & EmulationPageTable::Uncacheable,
+                    pte->flags & EmulationPageTable::ReadOnly));
+        DPRINTF(PageTableWalker, "Inserting 2M forced 4KB page into TLB"
+                " %#x:%#x\n", alignedVaddr + regPageOffset,
+                pte->paddr + regPageOffset);
     }
 
     Addr paddr = pte->paddr | (vaddr & mask(logbytes));
@@ -163,7 +179,8 @@ Walker::finishedFixedLatWalk()
     DPRINTF(PageTableWalker, "Finishing translation\n");
     currState->translation->finish(NoFault, currState->req, currState->tc,
                                    currState->mode);
-    if (action == TLB::PageWalk_4K || action == TLB::PageWalk_2M) {
+    if (action == TLB::PageWalk_4K || action == TLB::PageWalk_2M ||
+            action == TLB::PageWalk_2M_force_4K) {
         tlb->inc_walk_cycles(walk_lat);
         tlb->inc_walks();
         DPRINTF(PageTableWalker, "Walk latency incremented by %d\n", walk_lat);

@@ -82,7 +82,7 @@ TLBL2::TLBL2(const Params *p)
       walk_lat(p->fixed_l2_miss_latency),
       l2_access_lat(p->l2_hit_latency),
 
-      enableLargePage(p->enable_2m),
+      force_4KB_page(p->force_4k),
 
       tlb_l1_4k(set_l1_4k),
       tlb_l1_2m(set_l1_2m),
@@ -258,7 +258,7 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
     }
 
     Addr vpn_2m = va & ~((1UL << 21)-1);
-    if (!entry) {
+    if (!entry && !force_4KB_page) {
         // Lookup L1_2m
         int idx = getIndex(vpn_2m, L1_2M);
         for (TlbEntry *ent: tlb_l1_2m.at(idx)) {
@@ -289,7 +289,7 @@ TLBL2::lookup(Addr va, int &delay_cycles, bool update_lru)
         if (entry) { // L2 4K hit
             //Fill L1!
             insertInto(vpn_4k, *entry, L1_4K);
-        } else {
+        } else if (!force_4KB_page) {
             // Lookup L2 2M
             idx = getIndex(vpn_2m, L2_2M);
             for (TlbEntry *ent: tlb_l2.at(idx)) {
@@ -638,8 +638,12 @@ TLBL2::translate(const RequestPtr &req,
                         if (timing) {
                             TLBWalkerAction action = PageWalk_4K;
 
-                            if (pte->isLargePageEntry())
-                                action = PageWalk_2M;
+                            if (pte->isLargePageEntry()) {
+                                if (force_4KB_page)
+                                    action = PageWalk_2M_force_4K;
+                                else
+                                    action = PageWalk_2M;
+                            }
 
                             walker->setLatAndAction(walk_lat, action);
                             Fault fault = walker->start(tc, translation, req,
@@ -650,6 +654,7 @@ TLBL2::translate(const RequestPtr &req,
                                     return fault;
                             }
                         } else {
+                            //TODO CHP will this work?
                             Addr alignedVaddr;
                             if (pte->isLargePageEntry()) {
                                 alignedVaddr = p->pTable->
