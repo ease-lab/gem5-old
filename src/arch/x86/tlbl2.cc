@@ -807,6 +807,10 @@ TLBL2::regStats()
     squashedWalks
         .name(name() + ".squashedWalks")
         .desc("Total number of squashed walks from tlbl2 misses");
+
+    coalescedWalks
+        .name(name() + ".coalescedWalks")
+        .desc("Total number of coalesced walks from tlbl2 walk handling");
 }
 
 //void

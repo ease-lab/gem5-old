@@ -133,6 +133,7 @@ namespace X86ISA
         Stats::Scalar l2_access_cycles;
         Stats::Scalar walkCycles;
         Stats::Scalar walks;
+        Stats::Scalar coalescedWalks;
         Stats::Scalar squashedWalks;
 
         Fault translateInt(const RequestPtr &req, ThreadContext *tc);
@@ -171,6 +172,11 @@ namespace X86ISA
         void inc_squashed_walks(unsigned num_squashed)
         {
             squashedWalks+=num_squashed;
+        }
+
+        void inc_coalesced_walks(unsigned num)
+        {
+            coalescedWalks+=num;
         }
 
         void completeTranslation();

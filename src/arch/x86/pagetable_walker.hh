@@ -47,6 +47,7 @@
 #include "arch/x86/tlbl2.hh"
 #include "base/types.hh"
 #include "mem/packet.hh"
+#include "mem/page_table.hh"
 #include "params/X86PagetableWalker.hh"
 #include "sim/clocked_object.hh"
 #include "sim/faults.hh"
@@ -141,6 +142,9 @@ namespace X86ISA
             void squash();
             std::string name() const {return walker->name();}
 
+            TLB::TLBWalkerAction getAction() { return action; }
+            Tick getLatency() { return walk_lat; }
+
           private:
             void setupWalk(Addr vaddr);
             Fault stepWalk(PacketPtr &write);
@@ -189,6 +193,8 @@ namespace X86ISA
         // Wrapper for checking for squashes before starting a translation.
         void startWalkWrapper();
         void finishedFixedLatWalk();
+        int coalesceWalkRequests(Addr vpn, bool isLarge,
+                const EmulationPageTable::Entry *pte);
 
         /**
          * Event used to call startWalkWrapper.
