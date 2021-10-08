@@ -94,11 +94,6 @@ class BPredUnit : public SimObject
      */
     BPredUnit(const Params &p);
 
-    void regProbePoints() override;
-
-    /** Perform sanity checks after a drain. */
-    void drainSanityCheck() const;
-
     /**
      * Invalidates the branch predictor state.
      */
@@ -112,11 +107,8 @@ class BPredUnit : public SimObject
      * @param tid The thread id.
      * @return Returns if the branch is taken or not.
      */
-    bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
+    virtual bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                  PCStateBase &pc, ThreadID tid);
-
-    // @todo: Rename this function.
-    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
     /**
      * Tells the branch predictor to commit any updates until the given
@@ -124,7 +116,7 @@ class BPredUnit : public SimObject
      * @param done_sn The sequence number to commit any older updates up until.
      * @param tid The thread id.
      */
-    void update(const InstSeqNum &done_sn, ThreadID tid);
+    virtual void update(const InstSeqNum &done_sn, ThreadID tid);
 
     /**
      * Squashes all outstanding updates until a given sequence number.
@@ -132,7 +124,10 @@ class BPredUnit : public SimObject
      * until.
      * @param tid The thread id.
      */
-    void squash(const InstSeqNum &squashed_sn, ThreadID tid);
+    virtual void squash(const InstSeqNum &squashed_sn, ThreadID tid);
+
+    /** Perform sanity checks after a drain. */
+    virtual void drainSanityCheck() const;
 
     /**
      * Squashes all outstanding updates until a given sequence number, and
@@ -143,9 +138,15 @@ class BPredUnit : public SimObject
      * @param actually_taken The correct branch direction.
      * @param tid The thread id.
      */
-    void squash(const InstSeqNum &squashed_sn,
+    virtual void squash(const InstSeqNum &squashed_sn,
                 const PCStateBase &corr_target,
                 bool actually_taken, ThreadID tid);
+
+  protected:
+    void regProbePoints() override;
+
+    // @todo: Rename this function.
+    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
     /**
      * @param bp_history Pointer to the history object.  The predictor
@@ -465,7 +466,6 @@ class BPredUnit : public SimObject
 
     /** Miss-predicted branches */
     probing::PMUUPtr ppMisses;
-
     /** @} */
 };
 

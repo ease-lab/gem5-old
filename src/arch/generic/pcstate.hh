@@ -46,6 +46,7 @@
 #include <type_traits>
 
 #include "base/compiler.hh"
+#include "base/output.hh"
 #include "base/trace.hh"
 #include "base/types.hh"
 #include "sim/serialize.hh"
@@ -142,6 +143,10 @@ class PCStateBase : public Serializable
         UNSERIALIZE_SCALAR(_pc);
         UNSERIALIZE_SCALAR(_upc);
     }
+
+    virtual void writeToFile(OutputStream *trace_file_BP) const = 0;
+    virtual void resetBranchingPCFromArgs(Addr pc, Addr npc, MicroPC upc,
+            MicroPC nupc) = 0;
 };
 
 static inline std::ostream &
@@ -358,7 +363,7 @@ class SimplePCState : public PCStateWithNext
      *
      * @param val The value to set the PC to.
      */
-    void
+    virtual void
     set(Addr val)
     {
         this->pc(val);
@@ -377,6 +382,38 @@ class SimplePCState : public PCStateWithNext
     {
         this->_pc = this->_npc;
         this->_npc += InstWidth;
+    }
+
+    void
+    writeToFile(OutputStream *trace_file_BP) const override
+    {
+        std::ostream *const s = trace_file_BP->stream();
+
+        s->write((char*)&_pc, 8);
+        s->write((char*)&_upc, 2);
+        s->write((char*)&_npc, 8);
+        s->write((char*)&_nupc, 2);
+        s->flush();
+    }
+
+
+    void
+    resetBranchingPCFromArgs(Addr pc, Addr npc, MicroPC upc,
+            MicroPC nupc) override
+    {
+        // Assumption is that the current pc is branching
+        assert(pc == _pc);
+        if (nupc != upc + 1)
+        {
+            // Branch in the ucode
+            assert(_npc == npc);
+            _upc = nupc;
+            _nupc = nupc + 1;
+        } else {
+            // Branch to a new inst, we need to call the specialized version
+            // of set() to reset properly the state.
+            this->set(npc);
+        }
     }
 };
 
@@ -402,7 +439,7 @@ class UPCState : public SimplePCState<InstWidth>
     }
 
     void
-    set(Addr val)
+    set(Addr val) override
     {
         Base::set(val);
         this->upc(0);

@@ -140,6 +140,18 @@ class BranchPredictor(SimObject):
     resetStart = Param.Int(0,"When reset start resetting at this table")
     resetEnd = Param.Int(100,"When reset end resetting at this table")
 
+class PerfectBP(BranchPredictor):
+    type = 'PerfectBP'
+    cxx_class = 'gem5::branch_prediction::PerfectBP'
+    cxx_header = 'cpu/pred/perfect.hh'
+
+    traceFile = Param.String("",
+            "Path to the trace BP file. It can also be a gzip compressed file")
+    numberEntriesToFetch = Param.Unsigned(1000,
+        "Number of entries to fetch from the trace file. This fetch is done " \
+        "each time the PerfectBP has consumed all previously fetched entries.")
+
+
 class LocalBP(BranchPredictor):
     type = 'LocalBP'
     cxx_class = 'gem5::branch_prediction::LocalBP'

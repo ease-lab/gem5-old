@@ -462,6 +462,12 @@ BaseSimpleCPU::advancePC(const Fault &fault)
 
     const bool branching = thread->pcState().branching();
 
+    if (traceFileBP && curStaticInst && branching) {
+        assert(curStaticInst->isControl());
+        generateBranchTrace(thread->pcState());
+    }
+
+
     //Since we're moving to a new pc, zero out the offset
     t_info.fetchOffset = 0;
     if (fault != NoFault) {

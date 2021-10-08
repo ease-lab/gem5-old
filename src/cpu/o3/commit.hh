@@ -477,10 +477,14 @@ class Commit
          * to a non-speculative instruction reaching the head of the ROB.
          */
         statistics::Scalar commitNonSpecStalls;
-        /** Stat for the total number of branch mispredicts that caused a
-         * squash.
-         */
+        /** Stat for the total number of committed branch mispredicted. */
         statistics::Scalar branchMispredicts;
+        /** Stat for the total number of time the commit stage has squashed
+          * because of a mispredicted branch.
+          * Note that the squash can be initiated by a mispredicted branch that
+          * will later be squashed by another, older mispeculation.
+          */
+        statistics::Scalar squashDueToBranch;
         /** Distribution of the number of committed instructions each cycle. */
         statistics::Distribution numCommittedDist;
 

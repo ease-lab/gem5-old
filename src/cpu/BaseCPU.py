@@ -140,6 +140,13 @@ class BaseCPU(ClockedObject):
 
     tracer = Param.InstTracer(default_tracer, "Instruction tracer")
 
+    trace_BP = Param.Bool(False,
+        "Generate a file with the Branch Predictor trace")
+    trace_file_BP = Param.String("", "Name of the BP trace file to create. "\
+                "Add the suffix '.gz' to automatically create compressed "\
+                "traces")
+
+
     icache_port = RequestPort("Instruction Port")
     dcache_port = RequestPort("Data Port")
     _cached_ports = ['icache_port', 'dcache_port']

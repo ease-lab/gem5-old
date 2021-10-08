@@ -58,6 +58,7 @@
 #include "cpu/o3/thread_state.hh"
 #include "cpu/timebuf.hh"
 #include "debug/Activity.hh"
+#include "debug/Branch.hh"
 #include "debug/Commit.hh"
 #include "debug/CommitRate.hh"
 #include "debug/Drain.hh"
@@ -158,7 +159,9 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
                "The number of times commit has been forced to stall to "
                "communicate backwards"),
       ADD_STAT(branchMispredicts, statistics::units::Count::get(),
-               "The number of times a branch was mispredicted"),
+               "Number of committed branch mispredictions"),
+      ADD_STAT(squashDueToBranch, statistics::units::Count::get(),
+              "Number of squashes due to branch misprediction"),
       ADD_STAT(numCommittedDist, statistics::units::Count::get(),
                "Number of insts commited each cycle"),
       ADD_STAT(instsCommitted, statistics::units::Count::get(),
@@ -886,7 +889,7 @@ Commit::commit()
                 if (toIEW->commitInfo[tid].mispredictInst->isUncondCtrl()) {
                      toIEW->commitInfo[tid].branchTaken = true;
                 }
-                ++stats.branchMispredicts;
+                ++stats.squashDueToBranch;
             }
 
             set(toIEW->commitInfo[tid].pc, fromIEW->pc[tid]);
@@ -1296,6 +1299,11 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
 
     updateComInstStats(head_inst);
 
+    if (cpu->traceFileBP && head_inst->pcState().branching()) {
+        assert(head_inst->staticInst->isControl());
+        cpu->generateBranchTrace(head_inst->pcState());
+    }
+
     DPRINTF(Commit,
             "[tid:%i] [sn:%llu] Committing instruction with PC %s\n",
             tid, head_inst->seqNum, head_inst->pcState());
@@ -1447,6 +1455,13 @@ Commit::updateComInstStats(const DynInstPtr &inst)
     // Function Calls
     if (inst->isCall())
         stats.functionCalls[tid]++;
+
+
+    if (inst->mispredicted()) {
+        stats.branchMispredicts++;
+        DPRINTF(Branch, "Committing mispredicted branch [sn:%lu] %lx\n",
+                inst->seqNum, inst->pcState().instAddr());
+    }
 
 }
 

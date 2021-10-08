@@ -146,6 +146,13 @@ BaseCPU::BaseCPU(const Params &p, bool is_checker)
         _cpuId = cpuList.size();
     }
 
+    // Generate a file with the trace of the branch predictor
+    if (p.trace_BP) {
+        // Open file in binary mode with possible gz compression
+        traceFileBP = simout.create(p.trace_file_BP, true, false);
+    }
+
+
     // add self to global list of CPUs
     cpuList.push_back(this);
 
@@ -727,6 +734,12 @@ BaseCPU::traceFunctionsInternal(Addr pc)
     }
 }
 
+void
+BaseCPU::generateBranchTrace(const PCStateBase &pcstate)
+{
+    assert(traceFileBP);
+    pcstate.writeToFile(traceFileBP);
+}
 
 BaseCPU::GlobalStats::GlobalStats(statistics::Group *parent)
     : statistics::Group(parent),

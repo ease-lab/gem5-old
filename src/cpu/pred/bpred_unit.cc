@@ -394,7 +394,7 @@ void
 BPredUnit::update(const InstSeqNum &done_sn, ThreadID tid)
 {
     DPRINTF(Branch, "[tid:%i] Committing branches until "
-            "sn:%llu]\n", tid, done_sn);
+            "[sn:%llu]\n", tid, done_sn);
 
     while (!predHist[tid].empty() &&
            predHist[tid].back().seqNum <= done_sn) {

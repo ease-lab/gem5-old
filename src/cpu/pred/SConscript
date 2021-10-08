@@ -46,8 +46,7 @@ SimObject('BranchPredictor.py',
     'MultiperspectivePerceptronTAGE', 'MPP_StatisticalCorrector_64KB',
     'MultiperspectivePerceptronTAGE64KB', 'MPP_TAGE_8KB',
     'MPP_LoopPredictor_8KB', 'MPP_StatisticalCorrector_8KB',
-    'MultiperspectivePerceptronTAGE8KB'],
-    enums=['BranchClass'])
+    'MultiperspectivePerceptronTAGE8KB', 'PerfectBP'])
 
 Source('bpred_unit.cc')
 Source('2bit_local.cc')
@@ -76,6 +75,7 @@ Source('associative_btb.cc')
 DebugFlag('Indirect')
 DebugFlag('BTB')
 DebugFlag('RAS')
+Source('perfect.cc')
 DebugFlag('FreeList')
 DebugFlag('Branch')
 DebugFlag('Tage')

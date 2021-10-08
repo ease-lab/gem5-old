@@ -444,6 +444,17 @@ def run(options, root, testsys, cpu_class):
     if options.repeat_switch and options.take_checkpoints:
         fatal("Can't specify both --repeat-switch and --take-checkpoints")
 
+    if options.trace_BP:
+        if (len(testsys.cpu) != 1 or options.smt):
+            fatal("Can't use --trace-BP with more than 1 cpu or smt")
+        testsys.cpu[0].trace_BP = True
+        testsys.cpu[0].trace_file_BP = options.trace_BP
+    if options.perfect_BP:
+        if (len(testsys.cpu) != 1 or options.smt):
+            fatal("Can't use --perfect-BP with more than 1 cpu or smt")
+        testsys.cpu[0].branchPred = PerfectBP()
+        testsys.cpu[0].branchPred.traceFile = options.perfect_BP
+
     # Setup global stat filtering.
     stat_root_simobjs = []
     for stat_root_str in options.stats_root:

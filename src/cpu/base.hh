@@ -42,6 +42,7 @@
 #ifndef __CPU_BASE_HH__
 #define __CPU_BASE_HH__
 
+#include <fstream>
 #include <vector>
 
 // Before we do anything else, check if this build is the NULL ISA,
@@ -52,6 +53,7 @@
 #error Including BaseCPU in a system without CPU support
 #else
 #include "arch/generic/interrupts.hh"
+#include "base/output.hh"
 #include "base/statistics.hh"
 #include "debug/Mwait.hh"
 #include "mem/htm.hh"
@@ -573,6 +575,12 @@ class BaseCPU : public ClockedObject
             traceFunctionsInternal(pc);
     }
 
+    /**
+     * Write the pc, upc and target of pcState. This function is used to
+     * generate a trace file for the perfect Branch Predictor.
+     */
+    void generateBranchTrace(const PCStateBase &pcstate);
+
     static int numSimulatedCPUs() { return cpuList.size(); }
     static Counter
     numSimulatedInsts()
@@ -646,6 +654,11 @@ class BaseCPU : public ClockedObject
     const Cycles pwrGatingLatency;
     const bool powerGatingOnIdle;
     EventFunctionWrapper enterPwrGatingEvent;
+
+public:
+    // Trace file used to write the BP trace
+    OutputStream *traceFileBP = nullptr;
+
 };
 
 } // namespace gem5
