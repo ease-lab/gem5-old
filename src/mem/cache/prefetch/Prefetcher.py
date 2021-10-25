@@ -53,6 +53,7 @@ class HWPProbeEvent(object):
     def register(self):
         if self.obj:
             for name in self.names:
+                print("Register HWP probe ", name)
                 self.prefetcher.getCCObject().addEventProbe(
                     self.obj.getCCObject(), name)
 
@@ -88,6 +89,7 @@ class BasePrefetcher(ClockedObject):
         self._tlbs = []
 
     def addEvent(self, newObject):
+        print("Add event: ", )
         self._events.append(newObject)
 
     # Override the normal SimObject::regProbeListeners method and
@@ -184,6 +186,8 @@ class TaggedPrefetcher(QueuedPrefetcher):
     cxx_header = "mem/cache/prefetch/tagged.hh"
 
     degree = Param.Int(2, "Number of prefetches to generate")
+
+
 
 class IndirectMemoryPrefetcher(QueuedPrefetcher):
     type = 'IndirectMemoryPrefetcher'
@@ -493,6 +497,7 @@ class HWPProbeEventRetiredInsts(HWPProbeEvent):
     def register(self):
         if self.obj:
             for name in self.names:
+                print("Register HWP Ret inst", name)
                 self.prefetcher.getCCObject().addEventProbeRetiredInsts(
                     self.obj.getCCObject(), name)
 
@@ -527,3 +532,37 @@ class PIFPrefetcher(QueuedPrefetcher):
         if not isinstance(simObj, SimObject):
             raise TypeError("argument must be of SimObject type")
         self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))
+
+
+
+class IStreamPrefetcher(QueuedPrefetcher):
+    type = 'IStreamPrefetcher'
+    cxx_class = 'gem5::prefetch::IStream'
+    cxx_header = "mem/cache/prefetch/istream.hh"
+    cxx_exports = [
+        # PyBindMethod("addEventProbeRetiredInsts"),
+        PyBindMethod("startReplay"),
+        PyBindMethod("startRecord"),
+    ]
+    use_virtual_addresses = True
+
+    degree = Param.Int(2, "Number of prefetches to generate")
+
+    region_size = Param.MemorySize("4kB","size of the region that is covered "
+        "within one buffer entry. Usually one page.")
+    buffer_entries = Param.Unsigned("4",
+        "Number of entries in the FIFO buffer")
+
+    usefullness_threshold = Param.Percent(50,
+        "Threashold to decide wheather a buffer entry will be written to the "
+        "file or discarded.")
+
+    # packet trace output file, disabled by default
+    trace_file = Param.String("itrace.out", "Address trace output file")
+
+
+
+# def listenFromProbeRetiredInstructions(self, simObj):
+#     if not isinstance(simObj, SimObject):
+#         raise TypeError("argument must be of SimObject type")
+#     self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))
