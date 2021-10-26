@@ -34,6 +34,7 @@
 #ifndef __MEM_CACHE_PREFETCH_ISTREAM_HH__
 #define __MEM_CACHE_PREFETCH_ISTREAM_HH__
 
+#include <iostream>
 #include <vector>
 
 #include "debug/HWPrefetch.hh"
@@ -51,19 +52,24 @@ namespace gem5
 
     class IStream : public Queued
     {
+      class Buffer;
 
       struct BufferEntry
       {
+        private:
+        // The parent buffer this entry belongs to.
+        Buffer& parent;
+        public:
         Addr _pageAddr;
         unsigned long _clMask;
         // TODO: This with parameter
         const unsigned MASK_SIZE = 64;
         const unsigned blkSize = 64;
-        const unsigned regionSize = 4;
+        // const unsigned regionSize;
 
-        BufferEntry() {};
-        BufferEntry(Addr a, int mask = 0)
-          : _pageAddr(a), _clMask(mask)
+        BufferEntry(Buffer& _parent) : parent(_parent) {};
+        BufferEntry(Buffer& _parent, Addr a, int mask = 0)
+          : parent(_parent),_pageAddr(a), _clMask(mask)
         {
         }
         // BufferEntry& operator=(const BufferEntry& other) { return *this; }
@@ -79,6 +85,8 @@ namespace gem5
         {
           return (_clMask & (1 << idx)) != 0;
         }
+
+        bool empty() { return _clMask == 0; }
         // bool check(Addr addr)
         // {
         //   return addr;
@@ -94,14 +102,14 @@ namespace gem5
             }
             n = n >> 1; //right shift 1 bit
           }
-          return (float)count / (float)MASK_SIZE;
+          return (float)count / (float)parent.regionSize;
         }
 
         /** Calculate the address for a given index */
         Addr calcAddr(uint idx)
         {
-          assert(idx < MASK_SIZE);
-          return _pageAddr + idx * blkSize;
+          assert(idx < parent.regionSize);
+          return _pageAddr + idx * parent.blkSize;
         }
         /**
          * This function will generate all block addresses that where recorded
@@ -117,6 +125,28 @@ namespace gem5
             n = n >> 1; //right shift 1 bit
           }
           return addresses.size();
+        }
+
+        /**
+         * This function will generate up to n new address from this entry.
+         * For each generated address it will clear the bit in the mask
+         *
+         * @param n The number of addresses to be generated.
+         * @param addresses The address list where the new entry
+         * should be append.
+          * @return The number of addresses that where actually generated.
+          */
+        int genNAddr(int n, std::vector<Addr>& addresses)
+        {
+          int i = 0, _n = 0;
+          for (; _clMask != 0 && _n < n; i++) {
+            if (_clMask & (1<<i)) {
+              addresses.push_back(calcAddr(i));
+              _n++;
+              _clMask &= ~(1<<i);
+            }
+          }
+          return _n;
         }
 
         // /**
@@ -135,19 +165,36 @@ namespace gem5
         //   return addresses.size();
         // }
 
-        void print()
-        {
-          std::cout << "PA: " << _pageAddr << " ," << _clMask << std::endl;
+        std::string print() {
+          char buf[100];
+          std::sprintf(buf, "RA: %#lx Mask: %lx", _pageAddr, _clMask);
+          return std::string(buf);
         }
       };
 
+      class Buffer
+      {
+        public:
+        IStream& parent;
+        const unsigned bufferEntries;
+        const unsigned regionSize;
+        const unsigned blkSize;
 
-      class RecordBuffer
+
+        // public:
+          Buffer(IStream& _parent, unsigned size,
+            unsigned _regionSize = 64, unsigned _blkSize = 64)
+          :  parent(_parent),
+            bufferEntries(size),
+            regionSize(_regionSize),
+            blkSize(_blkSize) {}
+      };
+
+
+      class RecordBuffer : public Buffer
       {
         std::deque<BufferEntry*> _buffer;
         /** Number of entries in the FIFO buffer */
-        const unsigned bufferEntries;
-        IStream& parent;
 
         std::string name()
         {
@@ -155,37 +202,69 @@ namespace gem5
         }
 
       public:
-        RecordBuffer(IStream& _parent, unsigned size)
-          : bufferEntries(size),
-          parent(_parent)
+        RecordBuffer(IStream& _parent, unsigned size,
+          unsigned _regionSize = 64, unsigned _blkSize = 64)
+          : Buffer(_parent, size, _regionSize, _blkSize)
         {
         }
 
         void access(Addr addr);
+        /**
+         * Add a new entry to the front of the record buffer.
+         */
+        void add(Addr a) {
+          _buffer.push_front(new BufferEntry(*this,a));
+        }
+        // TODO: Implement
+        void flush();
+        void flushAll();
       };
 
-      class ReplayBuffer
+      class ReplayBuffer : public Buffer
       {
       private:
-        std::deque<BufferEntry*> _buffer;
+        std::list<BufferEntry*> _buffer;
         /** Number of entries in the FIFO buffer */
-        const unsigned bufferEntries;
-        IStream& parent;
 
-        std::string name()
-        {
-          return parent.name() + ".recBuffer";
+        /** Flag in case the end of the trace file was reached. */
+        bool eof;
+
+        std::string name() {
+          return parent.name() + ".replBuffer";
         }
 
       public:
-        ReplayBuffer(IStream& _parent, unsigned size)
-          : bufferEntries(size),
-          parent(_parent)
+        ReplayBuffer(IStream& _parent, unsigned size,
+          unsigned _regionSize = 64, unsigned _blkSize = 64)
+          : Buffer(_parent, size, _regionSize, _blkSize),
+            eof(false)
         {
         }
 
-        void access(gem5::Addr addr, std::vector<Addr>& addresses);
-        void generateAddresses(BufferEntry* entry);
+        void probe(gem5::Addr addr);
+        /**
+         * Generate n new addresses that can be filled into the prefetch
+         * queue.
+         *
+         * @param n Number of addresses to be generated.
+         */
+    std::vector<Addr> generateNAddresses(int n);
+        /**
+         * Fills the replay buffer by reading the instruction trace.
+         * Returns the number of entires read from the file.
+         */
+        int fill();
+
+        bool empty() { return _buffer.empty(); }
+        bool traceEnd() { return eof; }
+
+        std::string print() {
+          std::string s = "[";
+          for (auto it : _buffer) {
+            s.append(it->print() + " | ");
+          }
+          return s + "]";
+        }
       };
 
       class TraceStream
@@ -196,7 +275,7 @@ namespace gem5
          * Create an output stream for a given file name.
          * @param filename Path to the file to create or truncate
          */
-        TraceStream(const std::string& filename);
+        TraceStream(const std::string& filename, std::ios_base::openmode mode);
         ~TraceStream();
 
         /**
@@ -206,6 +285,10 @@ namespace gem5
          */
         void write(BufferEntry* entry);
         bool read(BufferEntry* entry);
+
+        std::string name() {
+          return ".tracestream";
+        }
 
         void reset();
 
@@ -230,7 +313,8 @@ namespace gem5
     protected:
       // PARAMETERS
 /** Pointr to the parent components. */
-      TraceStream* traceStream;
+      TraceStream* recordStream;
+      TraceStream* replayStream;
       RecordBuffer* buf;
       ReplayBuffer* replayBuffer;
 
@@ -253,13 +337,24 @@ namespace gem5
       IStream(const IStreamPrefetcherParams& p);
       ~IStream() = default;
 
+      void notify(const PacketPtr &pkt, const PrefetchInfo &pfi) override;
+
       void calculatePrefetch(const PrefetchInfo& pfi,
-        std::vector<AddrPriority>& addresses) override;
+        std::vector<AddrPriority>& addresses);
 
+      /**
+       * Method to insert create a new prefetch request.
+       */
+      void insert(const PacketPtr &pkt,
+        PrefetchInfo &new_pfi, int32_t priority);
 
+      /**
+       * Calculate the traget physical address (PA).
+       */
+      void proceedWithTranslation(const PacketPtr &pkt,
+        PrefetchInfo &new_pfi, int32_t priority);
 
-
-
+      void squashPrefetches(Addr addr, bool is_secure);
 
       void startRecord();
 

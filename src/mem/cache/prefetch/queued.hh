@@ -207,7 +207,7 @@ class Queued : public Base
 
     void printQueue(const std::list<DeferredPacket> &queue) const;
 
-  private:
+  protected:
 
     /**
      * Adds a DeferredPacket to the specified queue

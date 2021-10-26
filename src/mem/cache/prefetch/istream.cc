@@ -34,6 +34,7 @@
 #include "mem/cache/prefetch/istream.hh"
 
 #include "debug/HWPrefetch.hh"
+#include "mem/cache/base.hh"
 #include "params/IStreamPrefetcher.hh"
 
 namespace gem5
@@ -45,15 +46,17 @@ namespace gem5
 
     IStream::IStream(const IStreamPrefetcherParams& p)
       : Queued(p),
-      traceStream(nullptr),
+      recordStream(nullptr),
+      replayStream(nullptr),
       degree(p.degree),
       regionSize(p.region_size),
       recordStats(this, ".recordStats"),
       replayStats(this, ".replayStats")
     {
-      traceStream = new TraceStream(p.trace_file);
-      buf = new RecordBuffer(*this, p.buffer_entries);
-      replayBuffer = new ReplayBuffer(*this, p.buffer_entries);
+      recordStream = new TraceStream(p.trace_record_file, std::ios::out);
+      replayStream = new TraceStream(p.trace_replay_file, std::ios::in);
+      buf = new RecordBuffer(*this, p.buffer_entries, regionSize);
+      replayBuffer = new ReplayBuffer(*this, p.buffer_entries, regionSize);
       lRegionSize = floorLog2(regionSize);
 
       // Register a callback to compensate for the destructor not
@@ -67,8 +70,10 @@ namespace gem5
     void
       IStream::closeStreams()
     {
-      if (traceStream != NULL)
-        delete traceStream;
+      if (recordStream != NULL)
+        delete recordStream;
+      if (replayStream != NULL)
+        delete replayStream;
     }
 
     void
@@ -82,13 +87,160 @@ namespace gem5
       DPRINTF(HWPrefetch, "Access to block %#x, pAddress %#x\n",
         blkAddr, pfi.getPaddr());
 
-      for (int d = 1; d <= degree; d++) {
-        Addr newAddr = blkAddr + d * (blkSize);
-        addresses.push_back(AddrPriority(newAddr, 0));
-      }
+      // for (int d = 1; d <= degree; d++) {
+      //   Addr newAddr = blkAddr + d * (blkSize);
+      //   addresses.push_back(AddrPriority(newAddr, 0));
+      // }
 
       replay(pfi, addresses);
 
+    }
+
+    void IStream::squashPrefetches(Addr addr, bool is_secure)
+    {
+      // Squash queued prefetches if demand miss to same line
+      if (queueSquash) {
+        auto itr = pfq.begin();
+        while (itr != pfq.end()) {
+          if (itr->pfInfo.getAddr() == addr &&
+            itr->pfInfo.isSecure() == is_secure) {
+            DPRINTF(HWPrefetch, "Removing pf candidate addr: %#x "
+              "(cl: %#x), demand request going to the same addr\n",
+              itr->pfInfo.getAddr(),
+              blockAddress(itr->pfInfo.getAddr()));
+            delete itr->pkt;
+            itr = pfq.erase(itr);
+            statsQueued.pfRemovedDemand++;
+          }
+          else {
+            ++itr;
+          }
+        }
+      }
+    }
+
+    void
+      IStream::notify(const PacketPtr& pkt, const PrefetchInfo& pfi)
+    {
+      if (useVirtualAddresses && (tlb == nullptr)) {
+        DPRINTF(HWPrefetch, "Using virtual for Record and replay "
+          " requires to register a TLB.\n");
+        return;
+      }
+
+
+      Addr blk_addr = blockAddress(pfi.getAddr());
+      // Incase we see a request to the same address the prefetch
+      // would be to late.
+      squashPrefetches(blk_addr, pfi.isSecure());
+
+      // Calculate prefetches given this access
+      std::vector<AddrPriority> addresses;
+      calculatePrefetch(pfi, addresses);
+
+      // Get the maximum number of prefetches that we are allowed to generate
+      size_t max_pfs = getMaxPermittedPrefetches(addresses.size());
+
+      // Queue up generated prefetches
+      size_t num_pfs = 0;
+      for (AddrPriority& addr_prio : addresses) {
+
+        // Block align prefetch address
+        addr_prio.first = blockAddress(addr_prio.first);
+
+        if (!samePage(addr_prio.first, pfi.getAddr())) {
+          statsQueued.pfSpanPage += 1;
+        }
+
+        PrefetchInfo new_pfi(pfi, addr_prio.first);
+        statsQueued.pfIdentified++;
+        DPRINTF(HWPrefetch, "Found a pf candidate addr: %#x, "
+          "inserting into prefetch queue.\n", new_pfi.getAddr());
+        // Create and insert the request
+        insert(pkt, new_pfi, addr_prio.second);
+        num_pfs += 1;
+        if (num_pfs == max_pfs) {
+          break;
+        }
+
+      }
+      // Now translation can be started if necessary.
+      processMissingTranslations(queueSize - pfq.size());
+    }
+
+
+    void
+      IStream::proceedWithTranslation(const PacketPtr& pkt,
+        PrefetchInfo& new_pfi, int32_t priority)
+    {
+      /*
+       * Physical address computation
+       * As we record addresses we only need to compute the PA
+       * in case we recorded virtual once.
+       */
+
+       // ContextID is needed for translation
+      if (!pkt->req->hasContextId()) {
+        return;
+      }
+
+      RequestPtr translation_req = createPrefetchRequest(
+        new_pfi.getAddr(), new_pfi, pkt);
+
+      /* Create the packet and find the spot to insert it */
+      DeferredPacket dpp(this, new_pfi, 0, priority);
+
+      // Add the translation request.
+      dpp.setTranslationRequest(translation_req);
+      dpp.tc = cache->system->threads[translation_req->contextId()];
+      DPRINTF(HWPrefetch, "Prefetch queued with no translation. "
+        "addr:%#x priority: %3d\n", new_pfi.getAddr(), priority);
+      addToQueue(pfqMissingTranslation, dpp);
+    }
+
+
+
+    void
+      IStream::insert(const PacketPtr& pkt,
+        PrefetchInfo& new_pfi, int32_t priority)
+    {
+      if (queueFilter) {
+        if (alreadyInQueue(pfq, new_pfi, priority)) {
+          return;
+        }
+        if (alreadyInQueue(pfqMissingTranslation, new_pfi, priority)) {
+          return;
+        }
+      }
+
+      /* In case we work with virtual addresses we need to translate first */
+      if (useVirtualAddresses) {
+        proceedWithTranslation(pkt, new_pfi, priority);
+        return;
+      }
+
+      // Using PA: no translation necessary.
+      Addr target_paddr = new_pfi.getAddr();
+
+      if (cacheSnoop &&
+        (inCache(target_paddr, new_pfi.isSecure()) ||
+          inMissQueue(target_paddr, new_pfi.isSecure()))) {
+        statsQueued.pfInCache++;
+        DPRINTF(HWPrefetch, "Dropping redundant in "
+          "cache/MSHR prefetch addr:%#x\n", target_paddr);
+        return;
+      }
+
+      /* Create the packet and insert it in the prefetch queue */
+      DeferredPacket dpp(this, new_pfi, 0, priority);
+
+      Tick pf_time = curTick() + clockPeriod() * latency;
+      dpp.createPkt(target_paddr, blkSize, requestorId,
+        tagPrefetch, pf_time);
+      DPRINTF(HWPrefetch, "Prefetch queued. "
+        "addr:%#x priority: %3d tick:%lld.\n",
+        new_pfi.getAddr(), priority, pf_time);
+      addToQueue(pfq, dpp);
     }
 
     Addr
@@ -119,6 +271,7 @@ namespace gem5
         blkAddr, region.first, region.second);
 
       buf->access(blkAddr);
+      buf->flush();
 
     }
 
@@ -126,59 +279,81 @@ namespace gem5
       IStream::replay(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses)
     {
+      // TODO: Fill up timely
+      replayBuffer->fill();
+      if (replayBuffer->empty()) {
+        DPRINTF(HWPrefetch, "Reached end of trace file. No more records "
+          "for prefetching \n");
+        return;
+      }
+
       std::vector<Addr> _tmpAddresses;
       Addr blkAddr = blockAddress(pfi.getAddr());
       // In case there is an entry in the reply buffer for this address
         // then we are already to late. We want to fetch the other addresses as
         // soon as possible.
 
-      DPRINTF(HWPrefetch, "pfq size: %u\n", pfq.size());
-      replayBuffer->access(blkAddr, _tmpAddresses);
+      DPRINTF(HWPrefetch, "pfq size: %u, pfqMissingTr size: %u\n", pfq.size(),
+        pfqMissingTranslation.size());
 
 
+      // Test if there is an entry in the replay buffer that meats this
+      // address.
+      replayBuffer->probe(blkAddr);
+      DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
+      // Generate new addresses
+      int max = queueSize - pfq.size() - pfqMissingTranslation.size() - 16;
+      if (max > 0) {
+        auto _addresses = replayBuffer->generateNAddresses(4);
+        // Pass them to the prefetch queue.
+        // TODO: add priority
+        for (auto addr : _addresses) {
+          addresses.push_back(AddrPriority(addr, 0));
+        }
+      }
 
+      DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
     }
 
 
     void
       IStream::startRecord()
     {
-      DPRINTF(HWPrefetch, "Start Recoding instructions\n");
+      // DPRINTF(HWPrefetch, "Start Recoding instructions\n");
 
-      for (auto i : { 0,3,4,5 }) {
-        buffer.push_back(BufferEntry((Addr)i, 0));
-      }
-      for (auto entry : buffer) {
-        traceStream->write(&entry);
-      }
-      // traceStream->write("Hallo");
+      // for (auto i : { 0,3,4,5 }) {
+      //   buffer.push_back(BufferEntry((Addr)i, 0));
+      // }
+      // for (auto entry : buffer) {
+      //   recordStream->write(&entry);
+      // }
+      // // traceStream->write("Hallo");
     }
 
 
     void
       IStream::startReplay()
     {
-      DPRINTF(HWPrefetch, "Start Replay\n");
+      // DPRINTF(HWPrefetch, "Start Replay\n");
 
-      buffer.clear();
-      traceStream->reset();
+      // buffer.clear();
+      // traceStream->reset();
 
-      BufferEntry tmp;
-      while (traceStream->read(&tmp)) {
-        buffer.push_back(tmp);
-        tmp.print();
-      }
-      for (auto e : buffer) {
-        e.print();
-      }
+      // BufferEntry tmp;
+      // while (traceStream->read(&tmp)) {
+      //   buffer.push_back(tmp);
+      //   tmp.print();
+      // }
+      // for (auto e : buffer) {
+      //   e.print();
+      // }
     }
 
 
+    /*****************************************************************
+     * Record Buffer functionality
+     */
 
-
-    /**
-         * Record Buffer
-         */
     void
       IStream::RecordBuffer::access(gem5::Addr addr)
     {
@@ -200,23 +375,28 @@ namespace gem5
       if (hit_idx < _buffer.size()) {
         parent.recordStats.hits++;
         parent.recordStats.bufferHitDistHist.sample(hit_idx);
-        DPRINTF(HWPrefetch, "[%#x] Rec. buffer hit: Region (%#x:%u)\n",
+        DPRINTF(HWPrefetch, "[%#x] hit: Region (%#x:%u)\n",
           addr, _buffer[hit_idx]->_pageAddr, region.second);
       }
       else {
         parent.recordStats.misses++;
-        DPRINTF(HWPrefetch, "[%#x] Rec. buffer miss: Region (%#x:%u)\n",
-          addr, _buffer[hit_idx]->_pageAddr, region.second);
+        DPRINTF(HWPrefetch, "[%#x] miss. "
+          "Add new entry to the record buffer\n", addr);
 
         // Create new entry and push it into the fifo buffer
-        _buffer.push_front(new BufferEntry(region.first));
+        add(region.first);
         hit_idx = 0;
       }
       // Mark the entry block in the region as used
       _buffer[hit_idx]->touch(region.second);
+    }
 
-      // If the buffer is full write the last entry to the file.
-      if (_buffer.size() > bufferEntries) {
+    void
+      IStream::RecordBuffer::flush()
+    {
+      // Resize the buffer by writting the last
+      // entries into the trace file.
+      while (_buffer.size() > bufferEntries) {
         auto wrEntry = _buffer.back();
         auto usage = wrEntry->usage();
         parent.recordStats.cumUsefullness += usage;
@@ -227,7 +407,7 @@ namespace gem5
           parent.recordStats.entryWrites++;
           DPRINTF(HWPrefetch, "Rec. buffer entry %#x:[%x]: write to file."
             " Usage: %.3f\n", wrEntry->_pageAddr, wrEntry->_clMask, usage);
-          parent.traceStream->write(wrEntry);
+          parent.recordStream->write(wrEntry);
         }
         else {
           parent.recordStats.entryDrops++;
@@ -239,7 +419,7 @@ namespace gem5
     }
 
 
-    /**
+    /*****************************************************************
      * Replay Buffer functionality
      */
 
@@ -251,59 +431,94 @@ namespace gem5
       */
 
     void
-      IStream::ReplayBuffer::access(gem5::Addr addr,
-        std::vector<Addr>& addresses)
+      IStream::ReplayBuffer::probe(gem5::Addr addr)
     {
       auto region = parent.regionAddrIdx(addr);
 
       // Check if the replay buffer contains the entry for this region
       int hit_idx = 0;
-      for (; hit_idx < _buffer.size(); hit_idx++) {
-        if (_buffer[hit_idx]->_pageAddr == region.first
-          && _buffer[hit_idx]->check(region.second)) {
+      auto it = _buffer.begin();
+      for (; it != _buffer.end(); it++, hit_idx++) {
+        if ((*it)->_pageAddr == region.first
+          && (*it)->check(region.second)) {
           break;
         }
       }
 
-      if (hit_idx == _buffer.size()) {
-        parent.replayStats.misses++;
-        DPRINTF(HWPrefetch, "[%#x] Repl. buffer miss: Region (%#x:%u)\n",
-          addr, _buffer[hit_idx]->_pageAddr, region.second);
+      if (it == _buffer.end()) {
         return;
       }
 
       parent.replayStats.hits++;
       parent.replayStats.bufferHitDistHist.sample(hit_idx);
-      DPRINTF(HWPrefetch, "[%#x] Repl. buffer hit: Region (%#x:%u)\n",
-        addr, _buffer[hit_idx]->_pageAddr, region.second);
+      DPRINTF(HWPrefetch, "hit: Region (%#x:%u). Move to front.\n",
+        (*it)->_pageAddr, region.second);
 
+      // In the case we found an entry within the replay buffer we are
+      // already to late to for this to be prefetched.
+      // However, then we will try to prefetch the other once as soon as
+      // possible. Therefore, we put this entry to the head of the replay
+      // buffer.
+      _buffer.splice(_buffer.begin(), _buffer, it);
+      // _buffer[hit_idx]->genAllAddr(addresses);
 
-      // Generate all addresses from this entry
-      _buffer[hit_idx]->genAllAddr(addresses);
-
-      // And drop the entry
-      // auto it = ;
-      _buffer.erase(_buffer.begin());
+      // // And drop the entry
+      // _buffer.erase(_buffer.begin() + hit_idx);
     }
 
 
-    void
-      IStream::ReplayBuffer::generateAddresses(BufferEntry* entry)
+    std::vector<Addr>
+      IStream::ReplayBuffer::generateNAddresses(int n)
     {
-      // std::vector<Addr> addresses;
+      std::vector<Addr> addresses;
+      int n_left = n;
 
+      // Starting from the beginning of the list generate
+      // up to n addresses.
+      for (auto it = _buffer.begin(); it != _buffer.end();) {
+        n_left -= (*it)->genNAddr(n_left, addresses);
+        if (n_left == 0) {
+          break;
+        }
+        // If this
+        if ((*it)->empty()) {
+          it++;
+          _buffer.pop_front();
+        }
+      }
+      return addresses;
+    }
+
+    int
+      IStream::ReplayBuffer::fill()
+    {
+      int n = 0;
+      while (_buffer.size() < bufferEntries) {
+
+        auto tmp = new BufferEntry(*this);
+        if (!parent.replayStream->read(tmp)) {
+          DPRINTF(HWPrefetch, "Reached end of file.\n");
+          eof = true;
+          return n;
+        }
+
+        n++;
+        DPRINTF(HWPrefetch, "Fill: %s\n", tmp->print());
+        _buffer.push_back(tmp);
+      }
+      return n;
     }
 
 
 
 
 
-    IStream::TraceStream::TraceStream(const std::string& filename) :
-      fileStream(filename.c_str(),
-        std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc)
+    IStream::TraceStream::TraceStream(const std::string& filename,
+      std::ios_base::openmode mode) :
+      fileStream(filename.c_str(), mode)
     {
       if (!fileStream.good())
-        panic("Could not open %s for writing\n", filename);
+        panic("Could not open %s\n", filename);
     }
 
     IStream::TraceStream::~TraceStream()
@@ -318,14 +533,34 @@ namespace gem5
     void
       IStream::TraceStream::write(BufferEntry* entry)
     {
-      fileStream.write((char*)entry, sizeof(*entry));
+      // DPRINTF(HWPrefetch, "WR: %s\n",entry->print());
+      // std::getline(sstream, record);
+      fileStream << entry->_pageAddr << "," << entry->_clMask << "\n";
+
+
+
+      // fileStream.write((char*)entry, sizeof(*entry));
     }
 
     bool
       IStream::TraceStream::read(BufferEntry* entry)
     {
       if (!fileStream.eof()) {
-        fileStream.read((char*)entry, sizeof(*entry));
+        // fileStream.read((char*)entry, sizeof(*entry));
+
+        std::string record;
+        std::getline(fileStream, record);
+        std::istringstream line(record);
+        if (fileStream.eof()) {
+          return false;
+        }
+
+        std::getline(line, record, ',');
+        entry->_pageAddr = Addr(std::stoull(record));
+        std::getline(line, record, ',');
+        entry->_clMask = std::stoull(record);
+
+        // DPRINTF(HWPrefetch, "RD: %s\n",entry->print());
         return true;
       }
       return false;

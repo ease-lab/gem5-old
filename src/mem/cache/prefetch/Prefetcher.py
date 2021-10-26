@@ -558,8 +558,8 @@ class IStreamPrefetcher(QueuedPrefetcher):
         "file or discarded.")
 
     # packet trace output file, disabled by default
-    trace_file = Param.String("itrace.out", "Address trace output file")
-
+    trace_record_file = Param.String("itrace.out", "Address trace output file")
+    trace_replay_file = Param.String("itrace.in", "Address trace output file")
 
 
 # def listenFromProbeRetiredInstructions(self, simObj):
