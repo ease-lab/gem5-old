@@ -244,6 +244,8 @@ class IGbE : public EtherDevice
          */
         void areaChanged();
 
+        bool instrumentGRPCPacket(networking::TcpPtr tcp);
+
         void writeback(Addr aMask);
         void writeback1();
         EventFunctionWrapper wbDelayEvent;

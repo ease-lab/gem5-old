@@ -49,6 +49,7 @@
 #include "mem/packet.hh"
 #include "mem/packet_access.hh"
 #include "params/IGbE.hh"
+#include "sim/sim_exit.hh"
 #include "sim/stats.hh"
 #include "sim/system.hh"
 
@@ -1142,6 +1143,58 @@ IGbE::DescCache<T>::unserialize(CheckpointIn &cp)
 
 }
 
+template<class T>
+bool
+IGbE::DescCache<T>::instrumentGRPCPacket(TcpPtr tcp) {
+
+    constexpr bool rx = (std::is_same<T, RxDesc>::value) ? true : false;
+    // Check in which system we are:
+    const std::string s(this->name());
+    bool testsys = (s.substr(0,4) == "test") ? true : false;
+    bool drivesys = (s.substr(0,5) == "drive") ? true : false;
+
+
+    // Check if and which type of grpc request.
+    bool grpc_req  = (tcp->dport() > 50000 && tcp->dport() < 50100)
+                            ? true : false;
+    bool grpc_resp = (tcp->sport() > 50000 && tcp->sport() < 50100)
+                            ? true : false;
+
+    // We are only interested in grpc communication
+    if (!(grpc_req || grpc_resp)) {
+        return false;
+    }
+
+    DPRINTF(EthernetDesc,
+        "Process: %s gRPC %s\n",
+            rx ? "rx" : "tx",
+            grpc_req ? "req" : "resp");
+
+    if (pktPtr == nullptr || pktPtr->data == nullptr || pktPtr->length < 10) {
+        return true;
+    }
+
+    auto plen = pktPtr->length;
+    auto pload = pktPtr->data;
+    DPRINTF(EthernetDesc,
+        "Pkt: start: %x, len: %d,  last bytes: %x %x %x %x \n",
+        pload, plen, pload[plen-4],pload[plen-3],pload[plen-2],pload[plen-1]);
+
+    // At the moment we send the packet from the drive system we want th
+    exitSimLoop(csprintf("Exit on gRPC packet "
+                    "< %s %d->%d len: %d [%x %x %x %x] >"
+                    " tick: %ull",
+                        rx ? "rx" : "tx",
+                        tcp->sport(), tcp->dport(),
+                        plen,
+                        pload[plen-4],pload[plen-3],
+                        pload[plen-2],pload[plen-1],
+                        curTick()),
+                0);
+
+    return true;
+}
+
 ///////////////////////////// IGbE::RxDescCache //////////////////////////////
 
 IGbE::RxDescCache::RxDescCache(IGbE *i, const std::string n, int s)
@@ -1283,6 +1336,7 @@ IGbE::RxDescCache::writePacket(EthPacketPtr packet, int pkt_offset)
 
 }
 
+
 void
 IGbE::RxDescCache::pktComplete()
 {
@@ -1349,6 +1403,12 @@ IGbE::RxDescCache::pktComplete()
                 err |= RXDE_TCPE;
                 ext_err |= RXDEE_TCPE;
             }
+            DPRINTF(EthernetDesc,
+                "Proccesing TCP packet: [%d -> %d] \n",
+                    tcp->sport(), tcp->dport());
+
+            // Trick instrumentation function =====================
+            instrumentGRPCPacket(tcp);
         }
 
         UdpPtr udp = ip ? UdpPtr(ip) : UdpPtr(ip6);
@@ -1831,6 +1891,13 @@ IGbE::TxDescCache::pktComplete()
                 tcp->sum(cksum(tcp));
                 igbe->etherDeviceStats.txTcpChecksums++;
                 DPRINTF(EthernetDesc, "Calculated TCP checksum\n");
+
+                DPRINTF(EthernetDesc,
+                "Proccesing TCP packet: [%d -> %d] \n",
+                    tcp->sport(), tcp->dport());
+                // Trick instrumentation function =====================
+                instrumentGRPCPacket(tcp);
+
             } else if (udp) {
                 assert(udp);
                 udp->sum(0);
