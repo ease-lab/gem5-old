@@ -541,8 +541,9 @@ class IStreamPrefetcher(QueuedPrefetcher):
     cxx_header = "mem/cache/prefetch/istream.hh"
     cxx_exports = [
         # PyBindMethod("addEventProbeRetiredInsts"),
-        PyBindMethod("startReplay"),
+        PyBindMethod("initReplay"),
         PyBindMethod("startRecord"),
+        PyBindMethod("dumpRecTrace"),
     ]
     use_virtual_addresses = True
 
@@ -557,9 +558,25 @@ class IStreamPrefetcher(QueuedPrefetcher):
         "Threashold to decide wheather a buffer entry will be written to the "
         "file or discarded.")
 
+
+    port = RequestPort("Interface of the IStream prefetcher to "
+                            "read and write the traces directly to memory")
+
+    record_trace = Param.AddrRange("10kB",
+        "Address where the record trace is placed in memory. "
+        "Because the prefetcher will not override upon reaching the end of "
+        "this address range, the size this address space defines the maximal "
+        "numbers of entries which can be written.")
+    replay_trace = Param.AddrRange("10kB",
+        "Same as 'record_trace' but the replaying functionality.")
+
     # packet trace output file, disabled by default
     trace_record_file = Param.String("itrace.out", "Address trace output file")
     trace_replay_file = Param.String("itrace.in", "Address trace output file")
+
+    def dumpRecordTrace(self, filename):
+        self.getCCObject().dumpRecTrace(filename)
+
 
 
 # def listenFromProbeRetiredInstructions(self, simObj):

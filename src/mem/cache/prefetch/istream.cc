@@ -40,30 +40,66 @@
 namespace gem5
 {
 
-  GEM5_DEPRECATED_NAMESPACE(Prefetcher, prefetch);
-  namespace prefetch
-  {
+GEM5_DEPRECATED_NAMESPACE(Prefetcher, prefetch);
+namespace prefetch
+{
 
-    IStream::IStream(const IStreamPrefetcherParams& p)
-      : Queued(p),
-      recordStream(nullptr),
-      replayStream(nullptr),
-      degree(p.degree),
-      regionSize(p.region_size),
-      recordStats(this, ".recordStats"),
-      replayStats(this, ".replayStats")
-    {
-      recordStream = new TraceStream(p.trace_record_file, std::ios::out);
-      replayStream = new TraceStream(p.trace_replay_file, std::ios::in);
-      buf = new RecordBuffer(*this, p.buffer_entries, regionSize);
-      replayBuffer = new ReplayBuffer(*this, p.buffer_entries, regionSize);
-      lRegionSize = floorLog2(regionSize);
+IStream::IStream(const IStreamPrefetcherParams& p)
+  : Queued(p),
+  port(name() + "-port", *this),
+  reqQueue(*this, port),
+  snoopRespQueue(*this, port),
 
-      // Register a callback to compensate for the destructor not
-      // being called. The callback forces the stream to flush and
-      // closes the output file.
-      registerExitCallback([this]() { closeStreams(); });
-    }
+  recordStream(nullptr),
+  replayStream(nullptr),
+  degree(p.degree),
+  regionSize(p.region_size),
+
+  recordTrace(p.record_trace),
+  replayTrace(p.replay_trace),
+  recordStats(this, ".recordStats"),
+  replayStats(this, ".replayStats")
+{
+  recordStream = new TraceStream(p.trace_record_file);
+  replayStream = new TraceStream(p.trace_replay_file);
+  buf = new RecordBuffer(*this, p.buffer_entries, regionSize);
+  replayBuffer = new ReplayBuffer(*this, p.buffer_entries, regionSize);
+  lRegionSize = floorLog2(regionSize);
+
+  // Register a callback to compensate for the destructor not
+  // being called. The callback forces the stream to flush and
+  // closes the output file.
+  registerExitCallback([this]() { closeStreams(); });
+}
+
+void
+IStream::init()
+{
+    if (!port.isConnected())
+        fatal("IStream prefetcher need to be connected to memory.\n");
+}
+
+
+
+Port &
+IStream::getPort(const std::string &if_name, PortID idx)
+{
+  return port;
+}
+
+bool
+IStream::trySatisfyFunctional(PacketPtr pkt)
+{
+  return port.trySatisfyFunctional(pkt);
+}
+
+IStream::IStreamMemPort::IStreamMemPort(const std::string &_name,
+                                            IStream &_parent)
+  : QueuedRequestPort(_name, &_parent,
+                      _parent.reqQueue, _parent.snoopRespQueue),
+    parent(_parent)
+{
+}
 
 
 
@@ -320,33 +356,88 @@ namespace gem5
       IStream::startRecord()
     {
       // DPRINTF(HWPrefetch, "Start Recoding instructions\n");
+      recordStream->reset();
+      buf->clear();
 
-      // for (auto i : { 0,3,4,5 }) {
-      //   buffer.push_back(BufferEntry((Addr)i, 0));
-      // }
-      // for (auto entry : buffer) {
-      //   recordStream->write(&entry);
-      // }
-      // // traceStream->write("Hallo");
+
+    Addr nextAddr = recordTrace.start();
+    unsigned int blocksize = 8;
+    bool isRead = true;
+    DPRINTF(HWPrefetch, "Send Packet: %c to addr %x, size %d\n",
+            isRead ? 'r' : 'w', nextAddr, blocksize);
+
+    // Add the amount of data manipulated to the total
+    // dataManipulated += blocksize;
+
+    PacketPtr pkt = getPacket(nextAddr, blocksize,
+                              isRead ? MemCmd::ReadReq : MemCmd::WriteReq);
+
+    // increment the address
+    // nextAddr += blocksize;
+    outstandingResp[pkt->req] = curTick();
+    port.schedTimingReq(pkt, curTick());
+
+
+
+
+
     }
 
 
     void
-      IStream::startReplay()
+      IStream::initReplay(std::string filename)
     {
       // DPRINTF(HWPrefetch, "Start Replay\n");
+      std::fstream fileStream(filename.c_str(), std::ios::in);
 
-      // buffer.clear();
-      // traceStream->reset();
+      auto tmp = new BufferEntry(*replayBuffer);
+      int n = 0;
+      while (!fileStream.eof()) {
+        // File was in binary format.
+        // fileStream.read((char*)entry, sizeof(*entry));
 
-      // BufferEntry tmp;
-      // while (traceStream->read(&tmp)) {
-      //   buffer.push_back(tmp);
-      //   tmp.print();
-      // }
-      // for (auto e : buffer) {
-      //   e.print();
-      // }
+        // File was in human readable format.
+        std::string record;
+        std::getline(fileStream, record);
+        std::istringstream line(record);
+        if (fileStream.eof()) {
+          break;
+        }
+        n++;
+        std::getline(line, record, ',');
+        tmp->_pageAddr = Addr(std::stoull(record));
+        std::getline(line, record, ',');
+        tmp->_clMask = std::stoull(record);
+
+        // Read one entry from provided trace. Write it to the Prefetchers
+        // replay stream.
+        replayStream->write(tmp);
+      }
+      // After writting the stream
+      // set the stream pointer to the start again.
+      replayStream->reset();
+      replayBuffer->clear();
+
+      DPRINTF(HWPrefetch, "Wrote %i entries: file -> MEM.\n", n);
+      fileStream.close();
+    }
+
+    void
+      IStream::dumpRecTrace(std::string filename)
+    {
+      std::fstream fileStream(filename.c_str(), std::ios::out);
+      // Make sure the content is fully written to memory.
+      buf->flush(true);
+
+      auto tmp = new BufferEntry(*buf);
+      recordStream->reset();
+      int n = 0;
+      while (recordStream->read(tmp)) {
+        n++;
+        fileStream << tmp->_pageAddr << "," << tmp->_clMask << "\n";
+      }
+      DPRINTF(HWPrefetch, "Wrote %i entries: MEM -> file.\n", n);
+      fileStream.close();
     }
 
 
@@ -392,11 +483,12 @@ namespace gem5
     }
 
     void
-      IStream::RecordBuffer::flush()
+      IStream::RecordBuffer::flush(bool all)
     {
       // Resize the buffer by writting the last
       // entries into the trace file.
-      while (_buffer.size() > bufferEntries) {
+      // Write everything when the all flag is set.
+      while (_buffer.size() > bufferEntries || (_buffer.size() && all)) {
         auto wrEntry = _buffer.back();
         auto usage = wrEntry->usage();
         parent.recordStats.cumUsefullness += usage;
@@ -417,6 +509,7 @@ namespace gem5
         _buffer.pop_back();
       }
     }
+
 
 
     /*****************************************************************
@@ -492,6 +585,11 @@ namespace gem5
     int
       IStream::ReplayBuffer::fill()
     {
+      // In case we are already at the end of the stream we
+      // cannot fill more entries.
+      if (eof) {
+        return 0;
+      }
       int n = 0;
       while (_buffer.size() < bufferEntries) {
 
@@ -513,9 +611,83 @@ namespace gem5
 
 
 
-    IStream::TraceStream::TraceStream(const std::string& filename,
-      std::ios_base::openmode mode) :
-      fileStream(filename.c_str(), mode)
+
+
+
+
+
+
+
+
+
+    /*****************************************************************
+     * Trace Functionality
+     */
+
+PacketPtr
+IStream::getPacket(Addr addr, unsigned size, const MemCmd& cmd,
+                   Request::FlagsType flags)
+{
+    // Create new request
+    RequestPtr req = std::make_shared<Request>(addr, size, flags,
+                                               requestorId);
+    // Dummy PC to have PC-based prefetchers latch on; get entropy into higher
+    // bits
+    req->setPC(((Addr)requestorId) << 2);
+
+    // Embed it in a packet
+    PacketPtr pkt = new Packet(req, cmd);
+
+    uint8_t* pkt_data = new uint8_t[req->getSize()];
+    pkt->dataDynamic(pkt_data);
+
+    if (cmd.isWrite()) {
+        std::fill_n(pkt_data, req->getSize(), (uint8_t)requestorId);
+    }
+
+    return pkt;
+}
+
+
+bool
+IStream::recvTimingResp(PacketPtr pkt)
+{
+    auto iter = outstandingResp.find(pkt->req);
+
+    panic_if(iter == outstandingResp.end(), "%s: "
+            "Received unexpected response [%s reqPtr=%x]\n",
+               pkt->print(), pkt->req);
+
+    assert(iter->second <= curTick());
+
+    if (pkt->isWrite()) {
+        recordStats.totalWrites++;
+        recordStats.bytesWritten += pkt->req->getSize();
+        recordStats.totalWriteLatency += curTick() - iter->second;
+    } else {
+        replayStats.totalReads++;
+        replayStats.bytesRead += pkt->req->getSize();
+        replayStats.totalReadLatency += curTick() - iter->second;
+    }
+
+    outstandingResp.erase(iter);
+    delete pkt;
+
+    // // Sends up the request if we were blocked
+    // if (blockedWaitingResp) {
+    //     blockedWaitingResp = false;
+    //     retryReq();
+    // }
+
+    return true;
+}
+
+
+
+
+
+    IStream::TraceStream::TraceStream(const std::string& filename) :
+      fileStream(filename.c_str(), std::ios::in|std::ios::out|std::ios::trunc)
     {
       if (!fileStream.good())
         panic("Could not open %s\n", filename);
@@ -535,32 +707,30 @@ namespace gem5
     {
       // DPRINTF(HWPrefetch, "WR: %s\n",entry->print());
       // std::getline(sstream, record);
-      fileStream << entry->_pageAddr << "," << entry->_clMask << "\n";
+      // fileStream << entry->_pageAddr << "," << entry->_clMask << "\n";
 
-
-
-      // fileStream.write((char*)entry, sizeof(*entry));
+      fileStream.write((char*)entry, sizeof(*entry));
     }
 
     bool
       IStream::TraceStream::read(BufferEntry* entry)
     {
       if (!fileStream.eof()) {
-        // fileStream.read((char*)entry, sizeof(*entry));
+        fileStream.read((char*)entry, sizeof(*entry));
 
-        std::string record;
-        std::getline(fileStream, record);
-        std::istringstream line(record);
-        if (fileStream.eof()) {
-          return false;
-        }
+        // std::string record;
+        // std::getline(fileStream, record);
+        // std::istringstream line(record);
+        // if (fileStream.eof()) {
+        //   return false;
+        // }
 
-        std::getline(line, record, ',');
-        entry->_pageAddr = Addr(std::stoull(record));
-        std::getline(line, record, ',');
-        entry->_clMask = std::stoull(record);
+        // std::getline(line, record, ',');
+        // entry->_pageAddr = Addr(std::stoull(record));
+        // std::getline(line, record, ',');
+        // entry->_clMask = std::stoull(record);
 
-        // DPRINTF(HWPrefetch, "RD: %s\n",entry->print());
+        DPRINTF(HWPrefetch, "RD: %s\n",entry->print());
         return true;
       }
       return false;
@@ -578,74 +748,109 @@ namespace gem5
 
 
 
-    IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
-      const std::string& name)
-      : statistics::Group(parent, name.c_str()),
-      ADD_STAT(hits, statistics::units::Count::get(),
-        "Number of hits in the record buffer"),
-      ADD_STAT(misses, statistics::units::Count::get(),
-        "Number of misses in the record buffer"),
-      ADD_STAT(bufferHitDistHist, statistics::units::Count::get(),
-        "Record buffer hits distance distribution"),
-      ADD_STAT(entryWrites, statistics::units::Count::get(),
-        "Number of entries written to the record trace"),
-      ADD_STAT(entryDrops, statistics::units::Count::get(),
-        "Number of entires dropped to write to the record trace"),
-      ADD_STAT(cumUsefullness, statistics::units::Count::get(),
-        "Cummulative usefullness of the entries that fall out of the "
-        "fifo buffer"),
-      ADD_STAT(avgUsefullness, statistics::units::Count::get(),
-        "Average usefullness of the entries that fall out of the fifo buffer")
-    {
-      using namespace statistics;
+IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
+  const std::string& name)
+  : statistics::Group(parent, name.c_str()),
+  ADD_STAT(hits, statistics::units::Count::get(),
+    "Number of hits in the record buffer"),
+  ADD_STAT(misses, statistics::units::Count::get(),
+    "Number of misses in the record buffer"),
+  ADD_STAT(bufferHitDistHist, statistics::units::Count::get(),
+    "Record buffer hits distance distribution"),
+  ADD_STAT(entryWrites, statistics::units::Count::get(),
+    "Number of entries written to the record trace"),
+  ADD_STAT(entryDrops, statistics::units::Count::get(),
+    "Number of entires dropped to write to the record trace"),
+  ADD_STAT(cumUsefullness, statistics::units::Count::get(),
+    "Cummulative usefullness of the entries that fall out of the "
+    "fifo buffer"),
+  ADD_STAT(avgUsefullness, statistics::units::Count::get(),
+    "Average usefullness of the entries that fall out of the fifo buffer"),
 
-      const IStreamPrefetcherParams& p =
-        dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
+  ADD_STAT(numPackets, statistics::units::Count::get(),
+            "Number of packets generated"),
+  ADD_STAT(numRetries, statistics::units::Count::get(), "Number of retries"),
+  ADD_STAT(retryTicks, statistics::units::Tick::get(),
+            "Time spent waiting due to back-pressure"),
+  ADD_STAT(bytesWritten, statistics::units::Byte::get(),
+            "Number of bytes written"),
+  ADD_STAT(totalWriteLatency, statistics::units::Tick::get(),
+            "Total latency of write requests"),
+  ADD_STAT(totalWrites, statistics::units::Count::get(),
+            "Total num of writes"),
+  ADD_STAT(avgWriteLatency, statistics::units::Rate<
+                statistics::units::Tick, statistics::units::Count>::get(),
+            "Avg latency of write requests",
+            totalWriteLatency / totalWrites),
+  ADD_STAT(writeBW, statistics::units::Rate<
+                statistics::units::Byte, statistics::units::Second>::get(),
+            "Write bandwidth", bytesWritten / simSeconds)
+{
+  using namespace statistics;
 
-      bufferHitDistHist
-        .init(p.buffer_entries)
-        .flags(pdf);
+  const IStreamPrefetcherParams& p =
+    dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
 
-      avgUsefullness.flags(total);
-      avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
+  bufferHitDistHist
+    .init(p.buffer_entries)
+    .flags(pdf);
 
-    }
+  avgUsefullness.flags(total);
+  avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
 
-    IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
-      const std::string& name)
-      : statistics::Group(parent, name.c_str()),
-      ADD_STAT(hits, statistics::units::Count::get(),
-        "Number of hits in the record buffer"),
-      ADD_STAT(misses, statistics::units::Count::get(),
-        "Number of misses in the record buffer"),
-      // ADD_STAT(avgHitDistance, statistics::units::Count::get(),
-      //   "The hitting entries average distance to the head of "
-            // "the record buffer"),
-      ADD_STAT(bufferHitDistHist, statistics::units::Count::get(),
-        "Record buffer hits distance distribution"),
-      ADD_STAT(entryWrites, statistics::units::Count::get(),
-        "Number of entries written to the record trace"),
-      ADD_STAT(entryDrops, statistics::units::Count::get(),
-        "Number of entires dropped to write to the record trace"),
-      ADD_STAT(cumUsefullness, statistics::units::Count::get(),
-        "Cummulative usefullness of the entries that fall out of the "
-        "fifo buffer"),
-      ADD_STAT(avgUsefullness, statistics::units::Count::get(),
-        "Average usefullness of the entries that fall out of the fifo buffer")
-    {
-      using namespace statistics;
+}
 
-      const IStreamPrefetcherParams& p =
-        dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
+IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
+  const std::string& name)
+  : statistics::Group(parent, name.c_str()),
+  ADD_STAT(hits, statistics::units::Count::get(),
+    "Number of hits in the record buffer"),
+  ADD_STAT(misses, statistics::units::Count::get(),
+    "Number of misses in the record buffer"),
+  // ADD_STAT(avgHitDistance, statistics::units::Count::get(),
+  //   "The hitting entries average distance to the head of "
+        // "the record buffer"),
+  ADD_STAT(bufferHitDistHist, statistics::units::Count::get(),
+    "Record buffer hits distance distribution"),
+  ADD_STAT(entryWrites, statistics::units::Count::get(),
+    "Number of entries written to the record trace"),
+  ADD_STAT(entryDrops, statistics::units::Count::get(),
+    "Number of entires dropped to write to the record trace"),
+  ADD_STAT(cumUsefullness, statistics::units::Count::get(),
+    "Cummulative usefullness of the entries that fall out of the "
+    "fifo buffer"),
+  ADD_STAT(avgUsefullness, statistics::units::Count::get(),
+    "Average usefullness of the entries that fall out of the fifo buffer"),
 
-      bufferHitDistHist
-        .init(p.buffer_entries)
-        .flags(pdf);
+  ADD_STAT(numPackets, statistics::units::Count::get(),
+            "Number of packets generated"),
+  ADD_STAT(numRetries, statistics::units::Count::get(), "Number of retries"),
+  ADD_STAT(retryTicks, statistics::units::Tick::get(),
+            "Time spent waiting due to back-pressure"),
+  ADD_STAT(bytesRead, statistics::units::Byte::get(), "Number of bytes read"),
+  ADD_STAT(totalReadLatency, statistics::units::Tick::get(),
+            "Total latency of read requests"),
+  ADD_STAT(totalReads, statistics::units::Count::get(), "Total num of reads"),
+  ADD_STAT(avgReadLatency, statistics::units::Rate<
+                statistics::units::Tick, statistics::units::Count>::get(),
+            "Avg latency of read requests", totalReadLatency / totalReads),
+  ADD_STAT(readBW, statistics::units::Rate<
+                statistics::units::Byte, statistics::units::Second>::get(),
+            "Read bandwidth", bytesRead / simSeconds)
+{
+  using namespace statistics;
 
-      avgUsefullness.flags(total);
-      avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
+  const IStreamPrefetcherParams& p =
+    dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
 
-    }
+  bufferHitDistHist
+    .init(p.buffer_entries)
+    .flags(pdf);
+
+  avgUsefullness.flags(total);
+  avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
+
+}
 
 
 

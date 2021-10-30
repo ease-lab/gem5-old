@@ -40,6 +40,8 @@
 #include "debug/HWPrefetch.hh"
 #include "mem/cache/prefetch/queued.hh"
 #include "mem/packet.hh"
+#include "mem/qport.hh"
+#include "mem/request.hh"
 
 namespace gem5
 {
@@ -52,6 +54,61 @@ namespace gem5
 
     class IStream : public Queued
     {
+      public:
+        IStream(const IStreamPrefetcherParams& p);
+        ~IStream() = default;
+
+        void init() override;
+
+
+
+      /** * *
+       *  Memory port interface
+       *  The prefetcher uses this interface to read a write the instruction
+       *  traces form memory.
+       */
+      protected:
+        Port &getPort(const std::string &if_name,
+                    PortID idx=InvalidPortID) override;
+
+        /** Request port specialisation for the Stream prefetcher */
+        class IStreamMemPort : public QueuedRequestPort
+        {
+          public:
+
+            IStreamMemPort(const std::string& name, IStream& _parent);
+
+          protected:
+
+            // void recvReqRetry() { trafficGen.recvReqRetry(); }
+
+            bool recvTimingResp(PacketPtr pkt)
+            { return parent.recvTimingResp(pkt); }
+
+            // void recvTimingSnoopReq(PacketPtr pkt) { }
+            // void recvFunctionalSnoop(PacketPtr pkt) { }
+            // Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
+
+          private:
+            IStream& parent;
+        };
+
+        bool trySatisfyFunctional(PacketPtr pkt);
+
+        IStreamMemPort port;
+
+        ReqPacketQueue reqQueue;
+        SnoopRespPacketQueue snoopRespQueue;
+
+
+
+
+      private:
+      /** Buffer to track accesses
+       *
+      */
+
+
       class Buffer;
 
       struct BufferEntry
@@ -215,9 +272,15 @@ namespace gem5
         void add(Addr a) {
           _buffer.push_front(new BufferEntry(*this,a));
         }
-        // TODO: Implement
-        void flush();
-        void flushAll();
+         /**
+         * This function is to write buffer entries to the trace file in
+         * memory until the buffer has again the size it was parameterized.
+         * In order to write everything set the all flag when calling.
+         *
+         * @param all Will write all entries to memory
+         */
+        void flush(bool all = false);
+        void clear() {_buffer.clear();}
       };
 
       class ReplayBuffer : public Buffer
@@ -265,6 +328,7 @@ namespace gem5
           }
           return s + "]";
         }
+        void clear() {_buffer.clear();}
       };
 
       class TraceStream
@@ -275,7 +339,7 @@ namespace gem5
          * Create an output stream for a given file name.
          * @param filename Path to the file to create or truncate
          */
-        TraceStream(const std::string& filename, std::ios_base::openmode mode);
+        TraceStream(const std::string& filename);
         ~TraceStream();
 
         /**
@@ -318,6 +382,13 @@ namespace gem5
       RecordBuffer* buf;
       ReplayBuffer* replayBuffer;
 
+      /**
+       * Switches to enable/disable the two distinct
+       * features of the IStream prefetcher
+       */
+      bool enable_record;
+      bool enable_replay;
+
 
       const int degree;
       /** The size of one spatial region. */
@@ -333,9 +404,37 @@ namespace gem5
        */
       void closeStreams();
 
+    /**
+     * Generate a new request and associated packet
+     *
+     * @param addr Physical address to use
+     * @param size Size of the request
+     * @param cmd Memory command to send
+     * @param flags Optional request flags
+     */
+    PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
+                        Request::FlagsType flags = 0);
+
+      /**
+       * Callback to receive responses for outstanding memory requests.
+       */
+      bool recvTimingResp(PacketPtr pkt);
+
+      /** Reqs waiting for response **/
+      std::unordered_map<RequestPtr,Tick> outstandingResp;
+
+
+      AddrRange recordTrace;
+      AddrRange replayTrace;
+
+
+
+
+
     public:
-      IStream(const IStreamPrefetcherParams& p);
-      ~IStream() = default;
+
+
+
 
       void notify(const PacketPtr &pkt, const PrefetchInfo &pfi) override;
 
@@ -358,7 +457,21 @@ namespace gem5
 
       void startRecord();
 
-      void startReplay();
+      void initReplay(std::string filename);
+
+      void dumpRecTrace(std::string filename);
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -384,9 +497,35 @@ namespace gem5
         /** Number of writes and drops of entires to the record trace */
         statistics::Scalar entryWrites;
         statistics::Scalar entryDrops;
-        // Average usefullness of a entry that falls out of the fifo buffer
+
+        /** Average usefullness of a entry that falls out of the fifo buffer */
         statistics::Scalar cumUsefullness;
         statistics::Formula avgUsefullness;
+
+
+        /** Count the number of generated packets. */
+        statistics::Scalar numPackets;
+
+        /** Count the number of retries. */
+        statistics::Scalar numRetries;
+
+        /** Count the time incurred from back-pressure. */
+        statistics::Scalar retryTicks;
+
+        /** Count the number of bytes written. */
+        statistics::Scalar bytesWritten;
+
+        /** Total num of ticks write reqs took to complete  */
+        statistics::Scalar totalWriteLatency;
+
+        /** Count the number writes. */
+        statistics::Scalar totalWrites;
+
+        /** Avg num of ticks each write reqs took to complete  */
+        statistics::Formula avgWriteLatency;
+
+        /** Write bandwidth in bytes/s  */
+        statistics::Formula writeBW;
 
 
       } recordStats;
@@ -413,6 +552,30 @@ namespace gem5
         statistics::Scalar cumUsefullness;
         statistics::Formula avgUsefullness;
 
+
+        /** Count the number of generated packets. */
+        statistics::Scalar numPackets;
+
+        /** Count the number of retries. */
+        statistics::Scalar numRetries;
+
+        /** Count the time incurred from back-pressure. */
+        statistics::Scalar retryTicks;
+
+        /** Count the number of bytes read. */
+        statistics::Scalar bytesRead;
+
+        /** Total num of ticks read reqs took to complete  */
+        statistics::Scalar totalReadLatency;
+
+        /** Count the number reads. */
+        statistics::Scalar totalReads;
+
+        /** Avg num of ticks each read req took to complete  */
+        statistics::Formula avgReadLatency;
+
+        /** Read bandwidth in bytes/s  */
+        statistics::Formula readBW;
 
       } replayStats;
 
