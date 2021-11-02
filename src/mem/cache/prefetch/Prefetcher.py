@@ -558,17 +558,21 @@ class IStreamPrefetcher(QueuedPrefetcher):
         "Threashold to decide wheather a buffer entry will be written to the "
         "file or discarded.")
 
+    # Maximum number of requests waiting for response. Set to 0 for an
+    # unlimited number of outstanding requests.
+    max_outstanding_reqs = Param.Int(0,
+                            "Maximum number of outstanding requests")
 
     port = RequestPort("Interface of the IStream prefetcher to "
                             "read and write the traces directly to memory")
 
-    record_trace = Param.AddrRange("10kB",
+    record_addr_range = Param.AddrRange("10kB",
         "Address where the record trace is placed in memory. "
         "Because the prefetcher will not override upon reaching the end of "
         "this address range, the size this address space defines the maximal "
         "numbers of entries which can be written.")
-    replay_trace = Param.AddrRange("10kB",
-        "Same as 'record_trace' but the replaying functionality.")
+    replay_addr_range = Param.AddrRange("10kB",
+        "Same as 'record_addr_range' but the replaying functionality.")
 
     # packet trace output file, disabled by default
     trace_record_file = Param.String("itrace.out", "Address trace output file")

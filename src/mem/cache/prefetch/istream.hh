@@ -40,7 +40,7 @@
 #include "debug/HWPrefetch.hh"
 #include "mem/cache/prefetch/queued.hh"
 #include "mem/packet.hh"
-#include "mem/qport.hh"
+#include "mem/port.hh"
 #include "mem/request.hh"
 
 namespace gem5
@@ -60,49 +60,6 @@ namespace gem5
 
         void init() override;
 
-
-
-      /** * *
-       *  Memory port interface
-       *  The prefetcher uses this interface to read a write the instruction
-       *  traces form memory.
-       */
-      protected:
-        Port &getPort(const std::string &if_name,
-                    PortID idx=InvalidPortID) override;
-
-        /** Request port specialisation for the Stream prefetcher */
-        class IStreamMemPort : public QueuedRequestPort
-        {
-          public:
-
-            IStreamMemPort(const std::string& name, IStream& _parent);
-
-          protected:
-
-            // void recvReqRetry() { trafficGen.recvReqRetry(); }
-
-            bool recvTimingResp(PacketPtr pkt)
-            { return parent.recvTimingResp(pkt); }
-
-            // void recvTimingSnoopReq(PacketPtr pkt) { }
-            // void recvFunctionalSnoop(PacketPtr pkt) { }
-            // Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
-
-          private:
-            IStream& parent;
-        };
-
-        bool trySatisfyFunctional(PacketPtr pkt);
-
-        IStreamMemPort port;
-
-        ReqPacketQueue reqQueue;
-        SnoopRespPacketQueue snoopRespQueue;
-
-
-
-
       private:
       /** Buffer to track accesses
        *
@@ -115,18 +72,20 @@ namespace gem5
       {
         private:
         // The parent buffer this entry belongs to.
-        Buffer& parent;
+        // Buffer* parent;
         public:
-        Addr _pageAddr;
-        unsigned long _clMask;
+        Addr _addr;
+        unsigned long _mask;
+
+
         // TODO: This with parameter
         const unsigned MASK_SIZE = 64;
-        const unsigned blkSize = 64;
         // const unsigned regionSize;
 
-        BufferEntry(Buffer& _parent) : parent(_parent) {};
-        BufferEntry(Buffer& _parent, Addr a, int mask = 0)
-          : parent(_parent),_pageAddr(a), _clMask(mask)
+
+        // BufferEntry() : _addr(0), _mask(0){};
+        BufferEntry(Addr a = 0, int mask = 0)
+          : _addr(a), _mask(mask)
         {
         }
         // BufferEntry& operator=(const BufferEntry& other) { return *this; }
@@ -135,76 +94,108 @@ namespace gem5
         void touch(uint idx)
         {
           assert(idx < MASK_SIZE);
-          _clMask |= (1 << idx);
+          _mask |= (1 << idx);
         }
 
         bool check(uint idx)
         {
-          return (_clMask & (1 << idx)) != 0;
+          return (_mask & (1 << idx)) != 0;
         }
 
-        bool empty() { return _clMask == 0; }
+        bool empty() { return _mask == 0; }
         // bool check(Addr addr)
         // {
         //   return addr;
         // }
 
-        float usage()
-        {
-          int count = 0;
-          unsigned long n = _clMask;
-          while (n != 0) {
-            if ((n & 1) == 1) {
-              count++;
-            }
-            n = n >> 1; //right shift 1 bit
-          }
-          return (float)count / (float)parent.regionSize;
-        }
+//         float usefullness()
+//         {
+//           int count = 0;
+//           unsigned long n = _mask;
+//           while (n != 0) {
+//             if ((n & 1) == 1) {
+//               count++;
+//             }
+//             n = n >> 1; //right shift 1 bit
+//           }
+//           return (float)count;
+//           // / (float)parent->regionSize;
+//         }
 
-        /** Calculate the address for a given index */
-        Addr calcAddr(uint idx)
-        {
-          assert(idx < parent.regionSize);
-          return _pageAddr + idx * parent.blkSize;
-        }
-        /**
-         * This function will generate all block addresses that where recorded
-         * to been accessed in this region.
-        */
-        int genAllAddr(std::vector<Addr>& addresses)
-        {
-          unsigned long n = _clMask;
-          for (int i = 0; n != 0; i++) {
-            if ((n & 1) == 1) {
-              addresses.push_back(calcAddr(i));
-            }
-            n = n >> 1; //right shift 1 bit
-          }
-          return addresses.size();
-        }
+//         /** Calculate the address for a given index */
+//         Addr calcAddr(uint idx)
+//         {
+//           // assert(idx < parent->regionSize);
 
-        /**
-         * This function will generate up to n new address from this entry.
-         * For each generated address it will clear the bit in the mask
-         *
-         * @param n The number of addresses to be generated.
-         * @param addresses The address list where the new entry
-         * should be append.
-          * @return The number of addresses that where actually generated.
-          */
-        int genNAddr(int n, std::vector<Addr>& addresses)
-        {
-          int i = 0, _n = 0;
-          for (; _clMask != 0 && _n < n; i++) {
-            if (_clMask & (1<<i)) {
-              addresses.push_back(calcAddr(i));
-              _n++;
-              _clMask &= ~(1<<i);
-            }
-          }
-          return _n;
-        }
+
+
+
+
+// /*
+
+// asdfasdfa
+// sd
+// asd
+// fasdfasdf
+// asd
+// fasdfasd
+// f
+// asd
+// fa
+// dsf
+// ads
+// f
+// adsf
+// a
+// sd
+
+
+
+// */
+
+
+
+
+//           // return _addr + idx * parent->blkSize;
+//           return _addr + idx * 64;
+//         }
+//         /**
+//          * This function will generate all block addresses that where
+//          * recorded to been accessed in this region.
+//         */
+//         int genAllAddr(std::vector<Addr>& addresses)
+//         {
+//           unsigned long n = _mask;
+//           for (int i = 0; n != 0; i++) {
+//             if ((n & 1) == 1) {
+//               addresses.push_back(calcAddr(i));
+//             }
+//             n = n >> 1; //right shift 1 bit
+//           }
+//           return addresses.size();
+//         }
+
+//         /**
+//          * This function will generate up to n new address from this entry.
+//          * For each generated address it will clear the bit in the mask
+//          *
+//          * @param n The number of addresses to be generated.
+//          * @param addresses The address list where the new entry
+//          * should be append.
+//           * @return The number of addresses that where actually generated.
+//           */
+//         int genNAddr(int n, std::vector<Addr>& addresses)
+//         {
+//           int i = 0, _n = 0;
+//           for (; _mask != 0 && _n < n; i++) {
+//             if (_mask & (1<<i)) {
+//               addresses.push_back(calcAddr(i));
+//               _n++;
+//               _mask &= ~(1<<i);
+//             }
+//           }
+//           return _n;
+//         }
 
         // /**
         //  * This function will generate up to n addresses
@@ -212,7 +203,7 @@ namespace gem5
         // */
         // int genNAddr(int n, std::vector<Addr>& addresses)
         // {
-        //   unsigned long n = _clMask;
+        //   unsigned long n = _mask;
         //   for (int i = 0; n != 0; i++) {
         //     if ((n & 1) == 1) {
         //       addresses.push_back(calcAddr(i));
@@ -223,11 +214,72 @@ namespace gem5
         // }
 
         std::string print() {
-          char buf[100];
-          std::sprintf(buf, "RA: %#lx Mask: %lx", _pageAddr, _clMask);
-          return std::string(buf);
+          std::stringstream ss;
+          ss << "A: " << std::hex << _addr;
+          ss << " |M: " << std::hex << _mask;
+          // } else {
+          //   s = "Invalid";
+          // }
+          return ss.str();
         }
+
+        std::string toReadable() {
+          // auto format = "%ull,%ul";
+          // auto size = std::snprintf(nullptr, 0, format, _addr,_mask);
+          // std::string output(size + 1, '\0');
+          // std::sprintf(&output[0], format, _addr,_mask);
+          // std::ostring
+          return std::to_string(_addr) + "," + std::to_string(_mask);
+        }
+        bool parseLine(std::fstream& str) {
+          std::string line;
+          if (!std::getline(str,line)) {
+            return false;
+          }
+          std::stringstream lineStream(line);
+          std::string cell;
+          if (!std::getline(lineStream,cell, ',')) {
+            return false;
+          }
+          _addr = Addr(std::stoull(cell));
+          if (!std::getline(lineStream,cell, ',')) {
+            return false;
+          }
+          _mask = std::stoul(cell);
+          return true;
+        }
+
+        /** Write the data of the entry to the given memory location
+         *
+         * @param loc Location to write the data.
+         * @return the number of bytes written.
+         */
+        int writeTo(uint8_t* loc) {
+          auto size = sizeof(uint64_t);
+          memcpy(loc, (uint8_t*)&_addr , size);
+          memcpy(loc + size, (uint8_t*)&_mask , size);
+          return 2*size;
+        }
+        /** Read the data for this entry from the given memory location
+         *
+         * @param loc Location to read the data from.
+         * @return the number of bytes read.
+         */
+        int readFrom(uint8_t* loc) {
+          auto size = sizeof(uint64_t);
+          memcpy((uint8_t*)&_addr, loc, size);
+          memcpy((uint8_t*)&_mask, loc + size, size);
+          return 2*size;
+        }
+        /** Returns how much space in memory the entry requires. */
+        int size() { return 2*sizeof(uint64_t); }
+
+        // bool getValid() { return _valid; }
+        // void setValid() { _valid = true; }
+
+
       };
+      typedef std::shared_ptr<BufferEntry> BufferEntryPtr;
 
       class Buffer
       {
@@ -245,12 +297,91 @@ namespace gem5
             bufferEntries(size),
             regionSize(_regionSize),
             blkSize(_blkSize) {}
+
+
+        /** Calculate the usefullness of a given entry:
+         * n block touched in a region / total blocks in one region */
+        float usefullness(BufferEntryPtr e)
+        {
+          int count = 0;
+          unsigned long n = e->_mask;
+          while (n != 0) {
+            if ((n & 1) == 1) {
+              count++;
+            }
+            n = n >> 1; //right shift 1 bit
+          }
+          return (float)count / (float)regionSize;
+        }
+
+        /** Calculate the address for the given entry and index
+         *
+         * @param e The entry from which we want to calculate the address.
+         * @param idx The index in the region.
+         */
+        Addr calcAddr(BufferEntryPtr e, uint idx)
+        {
+          assert(idx < regionSize);
+          return e->_addr + idx * blkSize;
+        }
+        /**
+         * This function will generate all block addresses that where recorded
+         * by a given entry to been accessed.
+        */
+        int genAllAddr(BufferEntryPtr e, std::vector<Addr>& addresses)
+        {
+          unsigned long n = e->_mask;
+          for (int i = 0; n != 0; i++) {
+            if ((n & 1) == 1) {
+              addresses.push_back(calcAddr(e,i));
+            }
+            n = n >> 1; //right shift 1 bit
+          }
+          return addresses.size();
+        }
+
+        /**
+         * This function will generate up to n new address from this entry.
+         * For each generated address it will clear the bit in the mask
+         *
+         * @param e The entry from which we want to calculate the addresses.
+         * @param n The number of addresses to be generated.
+         * @param addresses The address list where the new entry
+         * should be append.
+          * @return The number of addresses that where actually generated.
+          */
+        int genNAddr(BufferEntryPtr e, int n, std::vector<Addr>& addresses)
+        {
+          int i = 0, _n = 0;
+          for (; e->_mask != 0 && _n < n; i++) {
+            if (e->_mask & (1<<i)) {
+              addresses.push_back(calcAddr(e,i));
+              _n++;
+              e->_mask &= ~(1<<i);
+            }
+          }
+          return _n;
+        }
+
       };
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
       class RecordBuffer : public Buffer
       {
-        std::deque<BufferEntry*> _buffer;
+        std::deque<BufferEntryPtr> _buffer;
         /** Number of entries in the FIFO buffer */
 
         std::string name()
@@ -270,7 +401,7 @@ namespace gem5
          * Add a new entry to the front of the record buffer.
          */
         void add(Addr a) {
-          _buffer.push_front(new BufferEntry(*this,a));
+          _buffer.push_front(std::make_shared<BufferEntry>(a));
         }
          /**
          * This function is to write buffer entries to the trace file in
@@ -286,11 +417,13 @@ namespace gem5
       class ReplayBuffer : public Buffer
       {
       private:
-        std::list<BufferEntry*> _buffer;
+        std::list<BufferEntryPtr> _buffer;
         /** Number of entries in the FIFO buffer */
 
         /** Flag in case the end of the trace file was reached. */
         bool eof;
+        /** Number of outsanding fill requests to the memory */
+        int pendingFills;
 
         std::string name() {
           return parent.name() + ".replBuffer";
@@ -311,12 +444,20 @@ namespace gem5
          *
          * @param n Number of addresses to be generated.
          */
-    std::vector<Addr> generateNAddresses(int n);
+        std::vector<Addr> generateNAddresses(int n);
+
         /**
-         * Fills the replay buffer by reading the instruction trace.
-         * Returns the number of entires read from the file.
+         * Refill the replay buffer upto its maximum capacity by requesting
+         * the next records from memory.
          */
-        int fill();
+        void refill();
+
+        /**
+         * Fill a new entry into the replay buffer.
+         *
+         * @param entry The entry that should be added.
+         */
+        void fill(BufferEntryPtr entry);
 
         bool empty() { return _buffer.empty(); }
         bool traceEnd() { return eof; }
@@ -330,6 +471,11 @@ namespace gem5
         }
         void clear() {_buffer.clear();}
       };
+
+
+
+
+
 
       class TraceStream
       {
@@ -362,6 +508,198 @@ namespace gem5
       };
 
 
+      /** * *
+       *  Memory port interface
+       *  The prefetcher uses this interface to read a write the instruction
+       *  traces form memory.
+       */
+      class MemoryInterface
+      {
+      public:
+
+        /**
+         * Helper class that implements the access functionality
+         * to the instruction traces in memory
+         *
+         * @param _port the memory port it belong to
+         * @param record_addr_range The address range the record trace should
+         *                be placed in memory
+         * @param replay_addr_range The address range the replay trace should
+         *                be placed in memory
+         * @param max_outstanding_reqs The maximum number of outstanding
+         *                requests the memory interface can handle.
+         */
+        MemoryInterface(IStream& _parent,
+                        AddrRange record_addr_range,
+                        AddrRange replay_addr_range,
+                        int max_outstanding_reqs=0);
+        ~MemoryInterface();
+
+        /**
+         * Send one entry to be written into the trace file in memory.
+         * The entry enqueued into the write buffer with lower priority
+         * than reads.
+         *
+         * @param entry The entry that should be written to the file.
+         * @param atomic If set the atomic protocol is used tho write
+         *         the entry instead of the standard and correct timing one.
+         *         This is mainly for testing and maintenance.
+         * @return true if there is still enough space in the trace
+         *         false in case the number of entries reached the maximum.
+         */
+        bool writeRecord(BufferEntryPtr entry, bool atomic=false);
+
+        /**
+         * Request the next entry from the trace in memory. The
+         * interface will fill the data in the replay buffer as soon
+         * as the entry is retrived from memory
+         * @param atomic If set the atomic protocol is used tho write
+         *         the entry instead of the standard and correct timing one.
+         *         This is mainly for testing and maintenance.
+         * @return true in case there are still entries left. false if
+         *          the last entry was already requested. So no entry
+         */
+        bool getNextRecord(bool atomic=false);
+
+        /**
+         * Initialize the replay memory a list of entries
+         *
+         * @param entries list of entries with that the replay memory should
+         *          be initialized.
+         * @return true if successful. false otherwise.
+         */
+        bool initReplayMem(std::vector<BufferEntryPtr>& entries);
+
+        /**
+         * Read all entries of the record memory into a provided list
+         *
+         * @param entries empty list where the read entries will be put.
+         * @return true if successful. false otherwise.
+         */
+        bool readRecordMem(std::vector<BufferEntryPtr>& entries);
+
+
+        std::string name() {
+          return parent.name() + ".memInterface";
+        }
+
+        void reset() {
+          recordIdx = 0;
+          totalRecordEntries = 0;
+          replayIdx = 0;
+        };
+
+      private:
+        /** The port to use to make accesses */
+        /** The parent I Stream prefetcher */
+        IStream& parent;
+
+      private:
+        // ReqPacketQueue reqQueue;
+        // SnoopRespPacketQueue snoopRespQueue;
+
+
+        /** The address range where the record trace should be located. */
+        AddrRange record_addr_range;
+        /** The address range where the replay trace should be located. */
+        AddrRange replay_addr_range;
+
+        /** Index to write the next record entry */
+        unsigned int recordIdx;
+        /** Number of record entries in memory */
+        unsigned int totalRecordEntries;
+
+        /** Actual index of the next replay entry */
+        unsigned int replayIdx;
+        /** Number of replay entries in memory */
+        unsigned int totalReplayEntries;
+
+        /** Size one buffer entry requires to store in memory */
+        const unsigned int entry_size;
+
+        /** Packets waiting to be sent. */
+        std::list<PacketPtr> blockedPkts;
+        PacketPtr retryPkt;
+
+        /** Tick when the stalled packet was meant to be sent. */
+        Tick retryPktTick;
+
+        /** Set when we blocked waiting for outstanding reqs */
+        bool blockedWaitingResp;
+
+        const int maxOutstandingReqs;
+
+        /** Reqs waiting for response **/
+        std::unordered_map<RequestPtr,Tick> waitingResp;
+
+        /**
+         * Puts this packet in the waitingResp list and returns true if
+         * we are above the maximum number of oustanding requests.
+         */
+        bool allocateWaitingRespSlot(PacketPtr pkt);
+
+        /**
+         * Generate a new request and associated packet
+         *
+         * @param addr Physical address to use
+         * @param size Size of the request
+         * @param cmd Memory command to send
+         * @param flags Optional request flags
+         */
+        PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
+                            Request::FlagsType flags = 0);
+        /**
+         * Generate a new request and associated packet
+         *
+         * @param pkt The packet to be send.
+         * @param atomic The protocol used for sending. Default is timining.
+         */
+        bool sendPacket(PacketPtr pkt, bool atomic=false);
+
+        public:
+        /**
+         * Receive a retry from the neighbouring port and attempt to
+         * resend the waiting packet.
+         */
+        void recvReqRetry();
+        void retryReq();
+
+        /**
+         * Callback to receive responses for outstanding memory requests.
+         */
+        bool recvTimingResp(PacketPtr pkt);
+
+      };
+
+    protected:
+      Port &getPort(const std::string &if_name,
+                    PortID idx=InvalidPortID) override;
+      bool trySatisfyFunctional(PacketPtr pkt);
+
+
+      /** Request port specialisation for the Stream prefetcher */
+      class IStreamMemPort : public RequestPort
+      {
+        public:
+
+          IStreamMemPort(const std::string& name, IStream& _parent);
+
+        protected:
+
+          void recvReqRetry() { parent.memInterface->recvReqRetry(); }
+
+          bool recvTimingResp(PacketPtr pkt)
+          { return parent.memInterface->recvTimingResp(pkt); }
+
+          // void recvTimingSnoopReq(PacketPtr pkt) { }
+          // void recvFunctionalSnoop(PacketPtr pkt) { }
+          // Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
+
+        private:
+          IStream& parent;
+      };
+
+
       Addr regionAddress(Addr addr);
       unsigned regionIndex(Addr addr);
       std::pair<Addr, unsigned> regionAddrIdx(Addr addr);
@@ -379,7 +717,9 @@ namespace gem5
 /** Pointr to the parent components. */
       TraceStream* recordStream;
       TraceStream* replayStream;
-      RecordBuffer* buf;
+      MemoryInterface* memInterface;
+      IStreamMemPort port;
+      RecordBuffer* recordBuffer;
       ReplayBuffer* replayBuffer;
 
       /**
@@ -393,9 +733,10 @@ namespace gem5
       const int degree;
       /** The size of one spatial region. */
       const unsigned regionSize;
-
       /** log_2(block size spatil region). */
       unsigned lRegionSize;
+      /** Number of blocks that fit in one region */
+      unsigned blksPerRegion;
 
 
       /**
@@ -403,30 +744,6 @@ namespace gem5
        * we were calling the destructor it could be done there.
        */
       void closeStreams();
-
-    /**
-     * Generate a new request and associated packet
-     *
-     * @param addr Physical address to use
-     * @param size Size of the request
-     * @param cmd Memory command to send
-     * @param flags Optional request flags
-     */
-    PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
-                        Request::FlagsType flags = 0);
-
-      /**
-       * Callback to receive responses for outstanding memory requests.
-       */
-      bool recvTimingResp(PacketPtr pkt);
-
-      /** Reqs waiting for response **/
-      std::unordered_map<RequestPtr,Tick> outstandingResp;
-
-
-      AddrRange recordTrace;
-      AddrRange replayTrace;
-
 
 
 
@@ -497,14 +814,14 @@ namespace gem5
         /** Number of writes and drops of entires to the record trace */
         statistics::Scalar entryWrites;
         statistics::Scalar entryDrops;
+        statistics::Scalar entryOverflows;
 
         /** Average usefullness of a entry that falls out of the fifo buffer */
         statistics::Scalar cumUsefullness;
         statistics::Formula avgUsefullness;
 
-
-        /** Count the number of generated packets. */
-        statistics::Scalar numPackets;
+        /** Count the number writes. */
+        statistics::Scalar totalWrites;
 
         /** Count the number of retries. */
         statistics::Scalar numRetries;
@@ -517,9 +834,6 @@ namespace gem5
 
         /** Total num of ticks write reqs took to complete  */
         statistics::Scalar totalWriteLatency;
-
-        /** Count the number writes. */
-        statistics::Scalar totalWrites;
 
         /** Avg num of ticks each write reqs took to complete  */
         statistics::Formula avgWriteLatency;
@@ -553,8 +867,8 @@ namespace gem5
         statistics::Formula avgUsefullness;
 
 
-        /** Count the number of generated packets. */
-        statistics::Scalar numPackets;
+        /** Count the number reads. */
+        statistics::Scalar totalReads;
 
         /** Count the number of retries. */
         statistics::Scalar numRetries;
@@ -567,9 +881,6 @@ namespace gem5
 
         /** Total num of ticks read reqs took to complete  */
         statistics::Scalar totalReadLatency;
-
-        /** Count the number reads. */
-        statistics::Scalar totalReads;
 
         /** Avg num of ticks each read req took to complete  */
         statistics::Formula avgReadLatency;
