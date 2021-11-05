@@ -33,6 +33,8 @@
 
 #include "mem/cache/prefetch/istream.hh"
 
+#include <algorithm>
+
 #include "debug/HWPrefetch.hh"
 #include "mem/cache/base.hh"
 #include "params/IStreamPrefetcher.hh"
@@ -47,18 +49,23 @@ namespace prefetch
 IStream::IStream(const IStreamPrefetcherParams& p)
   : Queued(p),
 
-  recordStream(nullptr),
-  replayStream(nullptr),
+  // recordStream(nullptr),
+  // replayStream(nullptr),
   memInterface(nullptr),
-  port(name() + "-port", *this),
+  port(this, p.sys),
+  // backdoor(name() + "-backdoor", *this),
+  // dmaPort(this, p.sys),
+  enable_record(false), enable_replay(false),
   degree(p.degree),
   regionSize(p.region_size),
 
   // recordTrace(p.record_trace),
   // replayTrace(p.replay_trace),
+  rec_filename(""),
 
   recordStats(this, "recordStats"),
-  replayStats(this, "replayStats")
+  replayStats(this, "replayStats"),
+  memIFStats(this, "memIFStats")
 {
   lRegionSize = floorLog2(regionSize);
   blksPerRegion = regionSize / blkSize;
@@ -67,22 +74,20 @@ IStream::IStream(const IStreamPrefetcherParams& p)
                     blksPerRegion);
 
 
-  recordStream = new TraceStream(p.trace_record_file);
-  replayStream = new TraceStream(p.trace_replay_file);
+  // recordStream = new TraceStream(p.trace_record_file);
+  // replayStream = new TraceStream(p.trace_replay_file);
   memInterface = new MemoryInterface(*this,
                     p.record_addr_range,
                     p.replay_addr_range,
-                    p.max_outstanding_reqs);
+                    p.sys->physProxy);
   recordBuffer = new RecordBuffer(*this, p.buffer_entries, regionSize);
   replayBuffer = new ReplayBuffer(*this, p.buffer_entries, regionSize);
-
-
 
 
   // Register a callback to compensate for the destructor not
   // being called. The callback forces the stream to flush and
   // closes the output file.
-  registerExitCallback([this]() { closeStreams(); });
+  // registerExitCallback([this]() { closeStreams(); });
 }
 
 void
@@ -92,23 +97,53 @@ IStream::init()
         fatal("IStream prefetcher need to be connected to memory.\n");
 }
 
+DrainState
+IStream::drain()
+{
+  // Before reading and writting traces the system and prefetcher must be
+  // in drained state.
+  // for draining the simulator will repead to call this function until
+  // we return 'Drained'
+  //
+  // To be drained we want:
+  // 1. All record buffer entries to be send to memory
+  // 2. All queues in the memory interface to be empty
+  //
+  return DrainState::Drained;
+  // If recordBuffer not empty
+  // if (!recordBuffer->empty()) {
+  //   DPRINTF(HWPrefetch, "Record Buffer not empty. "
+  //                          "Flush content to memory.\n");
+  //   // flush all content.
+  //   recordBuffer->flush(true);
+  //   // Disable the prefetcher
+  //   enable_record = false;
+  //   enable_replay = false;
+  //   return DrainState::Draining;
+  // }
 
+  // Wait for the MemIF to be drained as well.
+  // return memInterface->drain();
+  // return DrainState::Drained;
+}
 
-
-    void
-      IStream::closeStreams()
-    {
-      if (recordStream != NULL)
-        delete recordStream;
-      if (replayStream != NULL)
-        delete replayStream;
-    }
+    // void
+    //   IStream::closeStreams()
+    // {
+    //   // if (recordStream != NULL)
+    //   //   delete recordStream;
+    //   // if (replayStream != NULL)
+    //   //   delete replayStream;
+    // }
 
     void
       IStream::calculatePrefetch(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses)
     {
-      record(pfi);
+      if (enable_record) {
+        record(pfi);
+      }
+
 
       Addr blkAddr = blockAddress(pfi.getAddr());
 
@@ -120,8 +155,9 @@ IStream::init()
       //   addresses.push_back(AddrPriority(newAddr, 0));
       // }
 
-      replay(pfi, addresses);
-
+      if (enable_replay) {
+        replay(pfi, addresses);
+      }
     }
 
     void IStream::squashPrefetches(Addr addr, bool is_secure)
@@ -307,9 +343,7 @@ IStream::init()
       IStream::replay(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses)
     {
-      // TODO: Fill up timely
-      replayBuffer->refill();
-      if (replayBuffer->empty()) {
+      if (!replayBuffer->refill()) {
         DPRINTF(HWPrefetch, "Reached end of trace file. No more records "
           "for prefetching \n");
         return;
@@ -329,10 +363,12 @@ IStream::init()
       // address.
       replayBuffer->probe(blkAddr);
       DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
-      // Generate new addresses
-      int max = queueSize - pfq.size() - pfqMissingTranslation.size() - 16;
+      // Generate new prefetch addresses.
+      int max = queueSize - pfq.size() - pfqMissingTranslation.size();
       if (max > 0) {
-        auto _addresses = replayBuffer->generateNAddresses(4);
+        auto _addresses = replayBuffer->generateNAddresses(max);
+        DPRINTF(HWPrefetch, "Generated %i new pref. candidates. (max: %i)\n",
+                      _addresses.size(), max);
         // Pass them to the prefetch queue.
         // TODO: add priority
         for (auto addr : _addresses) {
@@ -348,65 +384,165 @@ void
   IStream::startRecord()
 {
   DPRINTF(HWPrefetch, "Start Recoding instructions\n");
-  recordStream->reset();
+  // recordStream->reset();
   recordBuffer->clear();
-  memInterface->reset();
+  memInterface->resetRecord();
+  enable_record = true;
+}
+
+bool
+  IStream::startReplay()
+{
+  if (!memInterface->replayReady()) {
+    warn("Cannot start replay because memory is not "
+         "completely initialized.\n");
+    return false;
+  }
+  DPRINTF(HWPrefetch, "Start Replaying instructions\n");
+  // recordStream->reset();
+  replayBuffer->clear();
+  replayBuffer->refill();
+  memInterface->resetReplay();
+  enable_replay = true;
+  return true;
+}
+
+
+
+
+
+
+
+std::string
+IStream::readFileIntoString(const std::string& filename) {
+    auto ss = std::ostringstream{};
+    std::ifstream input_file(filename);
+    if (!input_file.is_open()) {
+        std::cerr << "Could not open the file - '"
+             << filename << "'" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    ss << input_file.rdbuf();
+    return ss.str();
 }
 
 
 void
   IStream::initReplay(std::string filename)
 {
-  std::fstream fileStream(filename.c_str(), std::ios::in);
-  if (!fileStream.good()) {
-    panic("Could not open %s\n", filename);
-    return;
-  }
-
+  std::string file_contents = readFileIntoString(filename);
   std::vector<std::shared_ptr<BufferEntry>> trace;
 
-  while (!fileStream.eof()) {
+  std::istringstream sstream(file_contents);
+  std::string line;
+  while (std::getline(sstream,line)) {
     // File was in binary format.
     // fileStream.read((char*)entry, sizeof(*entry));
 
     // File was in human readable format.
     auto tmp = std::make_shared<BufferEntry>();
-    if (!tmp->parseLine(fileStream)) {
+    if (!tmp->parseLine(line)) {
       break;
     }
     trace.push_back(tmp);
   }
 
-  fileStream.close();
-
   DPRINTF(HWPrefetch, "Read %i entries from %s: Init mem.\n",
                 trace.size(), filename);
   // Write the entries to memory
-  memInterface->initReplayMem(trace);
-  // After writting the stream
-  // set the stream pointer to the start again.
-  replayStream->reset();
-  replayBuffer->clear();
-  memInterface->reset();
+  if (!memInterface->initReplayMem(trace)) {
+    panic("Could not initialize replay memory.\n");
+  }
 }
+
+void
+  IStream::initReplayComplete()
+{
+  // // After initializing the memory completes
+  // // We reset the replay buffer and enable replay
+  // // replayStream->reset();
+  // replayBuffer->clear();
+  // memInterface->resetReplay();
+  // // The call back after initializing is finish will enable replaying
+  // // enable_replay = true;
+}
+
+
+
+
+
+
+
 
 void
   IStream::dumpRecTrace(std::string filename)
 {
-  std::fstream fileStream(filename.c_str(),
-                            std::ios::out|std::ios::trunc);
+  // remember the filename
+  rec_filename = filename;
   // Make sure the content is fully written to memory.
   recordBuffer->flush(true);
+  memInterface->readRecordMem();
+  DPRINTF(HWPrefetch, "Start dumping record trace.\n");
+}
 
-  std::vector<BufferEntryPtr> trace;
-  memInterface->readRecordMem(trace);
 
-  DPRINTF(HWPrefetch, "Got %i entries from memory\n", trace.size());
+void
+  IStream::writeRecordFile(std::vector<BufferEntryPtr>& trace)
+{
+  std::fstream fileStream(rec_filename.c_str(),
+                            std::ios::out|std::ios::trunc);
+  if (!fileStream.good()) {
+    panic("Could not open %s\n", rec_filename);
+    return;
+  }
+
+  DPRINTF(HWPrefetch, "Got %i entries from memory. Write them to %s.\n",
+                  trace.size(), rec_filename);
   for (auto it : trace) {
     fileStream << it->toReadable() << "\n";
   }
   fileStream.close();
 }
+
+
+
+
+
+
+
+
+
+
+
+void
+IStream::calcStackDistance(Addr addr)
+{
+  // Align the address to a cache line size
+  // const Addr aligned_addr(roundDown(pkt_info.addr, lineSize));
+  const Addr aligned_addr(addr);
+
+  // Calculate the stack distance
+  const uint64_t sd(sdcalc.calcStackDistAndUpdate(aligned_addr).first);
+  if (sd == StackDistCalc::Infinity) {
+      // stats.infiniteSD++;
+      DPRINTF(HWPrefetch, "InfiniteSD\n");
+      return;
+  }
+
+  // Sample the stack distance of the address in lin and log bins
+  recordStats.hitSDlinHist.sample(sd);
+  int sd_lg2 = sd == 0 ? 1 : floorLog2(sd);
+  recordStats.hitSDlogHist.sample(sd_lg2);
+}
+
+
+
+
+
+
+
+
+
 
 
 
@@ -450,6 +586,8 @@ void
   }
   // Mark the entry block in the region as used
   _buffer[hit_idx]->touch(region.second);
+
+  parent.calcStackDistance(region.first);
 }
 
 void
@@ -470,8 +608,7 @@ void
       DPRINTF(HWPrefetch, "Rec. buffer entry %#x:[%x]: write to memory."
         " Usefullness: %.3f\n", wrEntry->_addr, wrEntry->_mask, use);
 
-      if (!parent.memInterface->writeRecord(wrEntry, all ? true : false)) {
-        // if (!parent.memInterface->writeRecord(wrEntry, true)) {
+      if (!parent.memInterface->writeRecord(wrEntry)) {
         parent.recordStats.entryOverflows++;
       }
       // parent.recordStream->write(wrEntry);
@@ -485,6 +622,22 @@ void
     _buffer.pop_back();
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 /*****************************************************************
@@ -557,32 +710,32 @@ std::vector<Addr>
   return addresses;
 }
 
-void
+
+bool
   IStream::ReplayBuffer::refill()
 {
   // In case we are already at the end of the stream we
   // cannot request more entries.
-  if (eof) {
-    return;
+  if (parent.memInterface->replayDone()) {
+    return false;
   }
-  while (_buffer.size() < (bufferEntries + pendingFills)) {
-    // if (!parent.memInterface->getNextRecord(true)) {
-    if (!parent.memInterface->getNextRecord()) {
-      DPRINTF(HWPrefetch, "Reached end of file.\n");
-      eof = true;
-      break;
+  while ((_buffer.size() + pendingFills) < bufferEntries) {
+    if (!parent.memInterface->readRecord()) {
+      DPRINTF(HWPrefetch, "Reached end of trace.\n");
+      return false;
     }
     pendingFills++;
   }
+  return true;
 }
-
 
 void
   IStream::ReplayBuffer::fill(BufferEntryPtr entry)
 {
-  DPRINTF(HWPrefetch, "Fill: %s\n", entry->print());
   _buffer.push_back(entry);
   pendingFills--;
+  DPRINTF(HWPrefetch, "Fill: [%s]. size buf.:%i pend. fills %i\n",
+                      entry->print(), _buffer.size(), pendingFills);
 }
 
 
@@ -605,24 +758,30 @@ void
 IStream::MemoryInterface::MemoryInterface(IStream& _parent,
                         AddrRange record_addr_range,
                         AddrRange replay_addr_range,
-                        int max_outstanding_reqs):
-  parent(_parent),
-  // port(name() + "-port", *this),
-  // reqQueue(*this, port),
-  // snoopRespQueue(*this, port),
+                        PortProxy &_memProxy)
+  : replayMemState(ReplayMemState::not_init),
+    recordMemState(RecordMemState::clean),
+    memProxy(&_memProxy),
+    parent(_parent),
+    // bd(nullptr),
+    // port(name() + "-port", *this),
+    // reqQueue(*this, port),
+    // snoopRespQueue(*this, port),
 
-  record_addr_range(record_addr_range),
-  replay_addr_range(replay_addr_range),
-  recordIdx(0), totalRecordEntries(0),
-  replayIdx(0), totalReplayEntries(0),
-  entry_size(2*sizeof(uint64_t)),
-  retryPkt(NULL),
-  retryPktTick(0), blockedWaitingResp(false),
-  maxOutstandingReqs(max_outstanding_reqs)
+    record_addr_range(record_addr_range),
+    replay_addr_range(replay_addr_range),
+    recordIdx(0), totalRecordEntries(0),
+    replayIdx(0), totalReplayEntries(0),
+    entry_size(2*sizeof(uint64_t))
+    // retryPkt(NULL),
+    // retryPktTick(0), blockedWaitingResp(false),
+    // maxOutstandingReqs(max_outstanding_reqs)
+    // initMemCompleteEvent([this]{ initMemComplete(uint8_t* data); }, name()),
+    // readMemCompleteEvent([this]{ readMemComplete(); }, name())
 {
   // Before enabling this feature we need to ensure that everything works as
   // intended.
-  assert(maxOutstandingReqs == 0);
+  // assert(maxOutstandingReqs == 0);
   int max_record_entries = record_addr_range.size() / entry_size;
   int max_replay_entries = replay_addr_range.size() / entry_size;
   DPRINTF(HWPrefetch, "Record mem cfg: range: %s"
@@ -637,24 +796,33 @@ IStream::MemoryInterface::MemoryInterface(IStream& _parent,
 
 
 bool
-IStream::MemoryInterface::writeRecord(BufferEntryPtr entry, bool atomic)
+IStream::MemoryInterface::writeRecord(BufferEntryPtr entry)
 {
   // Calculate the address in the record memory
   Addr addr = record_addr_range.start() + (recordIdx*entry_size);
 
   if (!record_addr_range.contains(addr)) {
-    DPRINTF(HWPrefetch,"Record memory space is full. Drop record.\n");
+    warn_once("Record memory space is full. Drop record.\n");
+    // DPRINTF(HWPrefetch,"Record memory space is full. Drop record.\n");
     return false;
   }
 
-  // Create a packet and write the entry data to it.
-  PacketPtr pkt = getPacket(addr, entry_size, MemCmd::WriteReq);
-  entry->writeTo(pkt->getPtr<uint8_t>());
+  // Create a data buffer and write the entry to it.
+  uint8_t* data = new uint8_t[entry_size];
+  entry->writeTo(data);
 
-  // try to send the packet. We might fail to send the packet
-  // right away but then the packet gets appended to the blocking queue
-  bool success = sendPacket(pkt,atomic);
+  DPRINTF(HWPrefetch, "WR %#x -> [%s] to MEM\n", addr, entry->print());
 
+  // Define what happens when the response is received.
+  auto completeEvent = new EventFunctionWrapper(
+    [this, addr, data] () {
+      writeRecordComplete(addr, curTick());
+      delete[] data;
+    },
+    name(),true);
+
+  parent.port.dmaAction(MemCmd::WriteReq, addr, entry_size,
+                              completeEvent, data, 0);
   // Entry is written increment record idx
   recordIdx++;
   totalRecordEntries++;
@@ -662,8 +830,21 @@ IStream::MemoryInterface::writeRecord(BufferEntryPtr entry, bool atomic)
 }
 
 
+void
+IStream::MemoryInterface::writeRecordComplete(Addr addr, Tick wr_start)
+{
+  parent.memIFStats.totalWrites++;
+  parent.memIFStats.bytesWritten += entry_size;
+  parent.memIFStats.totalWriteLatency += curTick() - wr_start;
+
+  DPRINTF(HWPrefetch, "WR %#x complete\n", addr);
+}
+
+
+
+
 bool
-IStream::MemoryInterface::getNextRecord(bool atomic)
+IStream::MemoryInterface::readRecord()
 {
   if (replayIdx >= totalReplayEntries) {
     return false;
@@ -671,9 +852,21 @@ IStream::MemoryInterface::getNextRecord(bool atomic)
   // Calculate the address in the replay memory
   Addr addr = replay_addr_range.start() + (replayIdx*entry_size);
 
-  // Create a packet.
-  PacketPtr pkt = getPacket(addr, entry_size, MemCmd::ReadReq);
-  sendPacket(pkt,atomic);
+  // Create a data buffer where the data can be written.
+  uint8_t* data = new uint8_t[entry_size];
+
+  DPRINTF(HWPrefetch, "RD %#x <- from MEM\n", addr);
+
+  // Define what happens when the response is received.
+  auto completeEvent = new EventFunctionWrapper(
+    [this, addr, data] () {
+      readRecordComplete(addr, data, curTick());
+      delete[] data;
+    },
+    name(),true);
+
+  parent.port.dmaAction(MemCmd::ReadReq, addr, entry_size,
+                              completeEvent, data, 0);
 
   // Entry is written increment replay idx.
   replayIdx++;
@@ -681,279 +874,574 @@ IStream::MemoryInterface::getNextRecord(bool atomic)
 }
 
 
-bool
-IStream::MemoryInterface::sendPacket(PacketPtr pkt, bool atomic)
+void
+IStream::MemoryInterface::readRecordComplete(Addr addr,
+                                              uint8_t* data, Tick rd_start)
 {
-  DPRINTF(HWPrefetch, "%s %#x -> send request. \n",
-          pkt->isWrite() ? "WR" : "RD", pkt->req->getPaddr());
+  // Upon receiving a read packet from memory we first update the stats.
+  parent.memIFStats.totalReads++;
+  parent.memIFStats.bytesRead += entry_size;
+  parent.memIFStats.totalReadLatency += curTick() - rd_start;
 
-  // Try to send the packet.
-  // Only attempts to send if not blocked by pending responses
-  blockedWaitingResp = allocateWaitingRespSlot(pkt);
+  // // Now create a new buffer entry and copy the data into it.
+  auto newEntry = std::make_shared<BufferEntry>();
+  newEntry->readFrom(data);
+  // delete data;
+  // Finally fill the entry in the replay buffer.
+  parent.replayBuffer->fill(newEntry);
+  DPRINTF(HWPrefetch, "RD %#x -> [%s] complete\n",
+                          addr, newEntry->print());
+}
 
-  // For atomic mode we send and the packet and receive the response
-  // immediately
-  // if (atomic) {
-  if (true) {
-    // Send the packet.
-    parent.port.sendAtomic(pkt);
-    recvTimingResp(pkt);
+
+
+
+
+
+// bool
+// IStream::MemoryInterface::tryGetBackdoor()
+// {
+//   // We try to get the a backdoor to the trace location in memory
+//   // With the first access some dummy data are read.
+//   // We do this only once
+//   if (bd != nullptr) {
+//     // We already have a backdoor pointer
+//     return true;
+//   }
+
+//   PacketPtr pkt = getPacket(record_addr_range.start(),
+//                                 entry_size, MemCmd::ReadReq);
+//   parent.backdoor.sendAtomicBackdoor(pkt,bd);
+//   delete pkt;
+
+//   if (bd == nullptr) {
+//   warn("Cannot create backdoor. We try to use atomic reads/writes instead");
+//     return false;
+//   }
+
+//   DPRINTF(HWPrefetch, "Created backdoor to memory: [%#x:%#x]\n",
+//         bd->range().start(), bd->range().end());
+
+//   // Invalidation callback which finds this backdoor and removes it.
+//   auto callback = [this](const MemBackdoor &backdoor) {
+//     // This should be the correct backdoor.
+//     assert(bd == &backdoor);
+//     bd = nullptr;
+//   };
+//   bd->addInvalidationCallback(callback);
+//   return true;
+// }
+
+
+
+
+
+// bool
+// IStream::MemoryInterface::readRecordMem(std::vector<BufferEntryPtr>& trace)
+// {
+//   // Check if the backdoor is connected to the memory
+//   if (!parent.backdoor.isConnected())
+//   fatal("The backdoor needs to be connected to read the record memory.\n");
+
+//   // Try to get a backdoor to the meta data memory.
+//   tryGetBackdoor();
+
+//   // First we will read out the trace from memory.
+//   for (int idx = 0; idx < totalRecordEntries; idx++){
+
+//     // Calculate the address in the record memory
+//     Addr addr = record_addr_range.start() + (idx*entry_size);
+//     assert(record_addr_range.contains(addr));
+
+//     auto entry = std::make_shared<BufferEntry>();
+
+
+//     if (bd != nullptr) {
+//       // Get address in backdoor
+//       Addr offset = addr - bd->range().start();
+//       entry->readFrom(bd->ptr() + offset);
+//     }
+//     else {
+//       // In case we cannot use the backdoor need to use atomic reads.
+//       PacketPtr pkt = getPacket(addr, entry_size, MemCmd::ReadReq);
+//       parent.backdoor.sendAtomic(pkt);
+//       entry->readFrom(pkt->getPtr<uint8_t>());
+//       delete pkt;
+//     }
+
+//     // DPRINTF(HWPrefetch, "Read [%s] from address: %#x\n",
+//     //             entry->print(), addr);
+
+//     trace.push_back(entry);
+//   }
+
+//   DPRINTF(HWPrefetch, "Read %i entries from the record memory.\n",
+//             trace.size());
+//   return true;
+// }
+
+
+
+
+
+
+bool
+IStream::MemoryInterface::readRecordMem()
+{
+  if (totalRecordEntries <= 0) {
+    warn("IStream prefetcher has not recorded any entry.\n");
+    return false;
   }
+  uint64_t size = totalRecordEntries * entry_size;
+  uint8_t* buffer = new uint8_t[size];
 
-  // In timing mode we send the packet but we will get the reponse
-  // asyncron later.
-  else {
-    assert(false); // Not implemented yet.
-    if (// In case there are already waiting packets we will not try now.
-        // Just enqueue the packet. It will be send later.
-        blockedPkts.size() > 0
-        // we will also not try in case the there are we are blocked on
-        // waiting resp capacity limit.
-        || blockedWaitingResp
-        // In case the attempt fail we enqueue the packet in the blocked queue.
-        || !parent.port.sendTimingReq(pkt)){
 
-      blockedPkts.push_back(pkt);
-      DPRINTF(HWPrefetch, "Cannot send now. Try later: %i packets "
-                    "already blocked for sending.\n",
-                    blockedPkts.size() > 0);
-      Tick retryPktTick;
-      return false;
-    }
-  }
+  // Now get the data from the memory
+  Addr addr = record_addr_range.start();
+  auto completeEvent = new EventFunctionWrapper(
+                  [this, buffer] () {
+                    std::vector<BufferEntryPtr> trace;
+                    readRecordMemComplete(buffer, trace);
+                    delete[] buffer;
+                    parent.writeRecordFile(trace);
+                  }, name(),true);
+  parent.port.dmaAction(MemCmd::ReadReq, addr, size,
+                              completeEvent, buffer, 0);
+
+  // Reset the record pointer to the beginning.
+  recordMemState = RecordMemState::read;
+
+  DPRINTF(HWPrefetch, "Start reading record data from memory (%i entries).\n",
+            totalRecordEntries);
   return true;
 }
 
-bool
-IStream::MemoryInterface::allocateWaitingRespSlot(PacketPtr pkt)
+
+void
+IStream::MemoryInterface::readRecordMemComplete(uint8_t* buffer,
+                                          std::vector<BufferEntryPtr>& trace)
 {
-  assert(waitingResp.find(pkt->req) == waitingResp.end());
-  assert(pkt->needsResponse());
 
-  waitingResp[pkt->req] = curTick();
-
-  return (maxOutstandingReqs > 0) &&
-        (waitingResp.size() > maxOutstandingReqs);
-}
-
-bool
-IStream::MemoryInterface::readRecordMem(std::vector<BufferEntryPtr>& trace)
-{
-  // We try to get the a backdoor to the trace location in memory
-  // With the first access some dummy data are read.
-  PacketPtr pkt = getPacket(replay_addr_range.start(),
-                                entry_size, MemCmd::ReadReq);
-  MemBackdoorPtr bd = nullptr;
-  parent.port.sendAtomicBackdoor(pkt,bd);
-  delete pkt;
-
-  if (bd == nullptr) {
-    warn("Cannot create backdoor. Trace cannot be read from memory.");
-    return false;
-  }
-  DPRINTF(HWPrefetch, "Created backdoor to memory: [%#x:%#x]\n",
-            bd->range().start(), bd->range().end());
-
-
+  // First we will read out the trace from memory.
   for (int idx = 0; idx < totalRecordEntries; idx++){
 
-    // Calculate the address in the record memory
-    Addr addr = record_addr_range.start() + (idx*entry_size);
-    assert(record_addr_range.contains(addr));
-
     auto entry = std::make_shared<BufferEntry>();
+    // Calculate the address in the record buffer
+    int bufferAddr = idx*entry_size;
 
-    // Get address in backdoor
-    Addr offset = addr - bd->range().start();
-    entry->readFrom(bd->ptr() + offset);
-
-    // DPRINTF(HWPrefetch, "Read [%s] from address: %#x\n",
-    //             entry->print(), addr);
+    entry->readFrom(&buffer[bufferAddr]);
+    DPRINTF(HWPrefetch, "Copy [%s]: from address: %#x\n",
+                entry->print(), bufferAddr);
 
     trace.push_back(entry);
   }
 
-  DPRINTF(HWPrefetch, "Read %i entries from the record memory.\n",
+  DPRINTF(HWPrefetch, "Read %i entries from the record memory complete.\n",
             trace.size());
-  return true;
 }
 
+
+
+
+
+
+// bool
+// IStream::MemoryInterface::initReplayMem(std::vector<BufferEntryPtr>& trace)
+// {
+//   // Check if the backdoor is connected to the memory
+//   if (!parent.backdoor.isConnected())
+//    fatal("The backdoor needs to be connected to init the replay memory.\n");
+
+//   // // Try to get a backdoor to the meta data memory.
+//   // tryGetBackdoor();
+
+
+//   Addr addr = replay_addr_range.start();
+//   uint64_t size = entry_size * trace.size();
+//   if (replay_addr_range.size() < size) {
+//         warn("Given address space is not large enough to full with %i en
+// tries "
+//                 "and cannot hold more entries\n", replayIdx);
+
+
+
+
+
+
+//   bool ret_val=true;
+//   for (replayIdx = 0; replayIdx < trace.size(); replayIdx++){
+
+//     // Calculate the address in the replay memory
+//     Addr addr = replay_addr_range.start() + (replayIdx*entry_size);
+//     if (!replay_addr_range.contains(addr)) {
+//       warn("Given address space is full with %i entries "
+//                       "and cannot hold more entries\n", replayIdx);
+//       ret_val = false;
+//       break;
+//     }
+
+//     if (bd != nullptr) {
+//       // Get address in backdoor
+//       Addr offset = addr - bd->range().start();
+//       trace[replayIdx]->writeTo(bd->ptr() + offset);
+//     }
+//     else {
+//       // In case we cannot use the backdoor need to use atomic reads.
+//       PacketPtr pkt = getPacket(addr, entry_size, MemCmd::WriteReq);
+//       trace[replayIdx]->writeTo(pkt->getPtr<uint8_t>());
+//       parent.backdoor.sendAtomic(pkt);
+//       delete pkt;
+//     }
+
+//     DPRINTF(HWPrefetch, "Copy [%s]: to address: %#x\n",
+//                 trace[replayIdx]->print(), addr);
+//   }
+
+//   // Reset the replay pointer to the beginning.
+//   totalReplayEntries = replayIdx;
+//   replayIdx = 0;
+
+//   DPRINTF(HWPrefetch, "Initialize replay memory with %i entries.\n",
+//             totalReplayEntries);
+
+//   return ret_val;
+// }
 
 bool
 IStream::MemoryInterface::initReplayMem(std::vector<BufferEntryPtr>& trace)
 {
-  // We try to the a backdoor to the trace location in memory
-  // With the first access some dummy data are written but we do not
-  // care because we overwrite them anyway later.
-  PacketPtr pkt = getPacket(replay_addr_range.start(),
-                              entry_size, MemCmd::WriteReq);
-  MemBackdoorPtr bd = nullptr;
-  parent.port.sendAtomicBackdoor(pkt,bd);
-  delete pkt;
+  totalReplayEntries = trace.size();
 
-  if (bd == nullptr) {
-    warn("Cannot create backdoor. Trace cannot be initialized.");
-    return false;
+  bool ret_val = true;
+  if (replay_addr_range.size()/entry_size < totalReplayEntries) {
+    totalReplayEntries = replay_addr_range.size()/entry_size;
+    warn("Given address space is not large enough. "
+          "Will only write the first %i entries.\n", totalReplayEntries);
+    ret_val = false;
   }
-  DPRINTF(HWPrefetch, "Created backdoor to memory: [%#x:%#x]\n",
-            bd->range().start(), bd->range().end());
 
-  for (replayIdx = 0; replayIdx < trace.size(); replayIdx++){
+  // Prepare a buffer
+  uint64_t size = totalReplayEntries * entry_size;
+  uint8_t* buffer = new uint8_t[size];
 
+  // Write the initialisation entries to it.
+  for (replayIdx = 0; replayIdx < totalReplayEntries; replayIdx++){
     // Calculate the address in the replay memory
-    Addr addr = replay_addr_range.start() + (replayIdx*entry_size);
-    if (!replay_addr_range.contains(addr)) {
-      warn("Given address space is full with %i entries "
-                      "and cannot hold more entries\n", replayIdx);
-      break;
-    }
+    int bufferAddr = replayIdx*entry_size;
 
-    // Get address in backdoor
-    Addr offset = addr - bd->range().start();
-    trace[replayIdx]->writeTo(bd->ptr() + offset);
-
+    trace[replayIdx]->writeTo(&buffer[bufferAddr]);
     DPRINTF(HWPrefetch, "Copy [%s]: to address: %#x\n",
-                trace[replayIdx]->print(), addr);
+                trace[replayIdx]->print(), bufferAddr);
   }
+
+  // Now send the data to memory
+  Addr addr = replay_addr_range.start();
+  auto completeEvent = new EventFunctionWrapper(
+                  [this, buffer] () {
+                    initReplayMemComplete(buffer);
+                    delete[] buffer;
+                  }, name(),true);
+  parent.port.dmaAction(MemCmd::WriteReq, addr, size,
+                              completeEvent, buffer, 0);
 
   // Reset the replay pointer to the beginning.
-  totalReplayEntries = replayIdx;
   replayIdx = 0;
+  replayMemState = init;
 
-  DPRINTF(HWPrefetch, "Initialize replay memory with %i entries.\n",
+  DPRINTF(HWPrefetch, "Start writting replay data to memory (%i entries).\n",
             totalReplayEntries);
 
-  return true;
-}
-
-
-
-
-
-
-
-
-PacketPtr
-IStream::MemoryInterface::getPacket(Addr addr, unsigned size,
-                          const MemCmd& cmd, Request::FlagsType flags)
-{
-    // Create new request
-    RequestPtr req = std::make_shared<Request>(addr, size, flags,
-                                               parent.requestorId);
-    // Dummy PC to have PC-based prefetchers latch on; get entropy into higher
-    // bits
-    req->setPC(((Addr)parent.requestorId) << 2);
-
-    // Embed it in a packet
-    PacketPtr pkt = new Packet(req, cmd);
-
-    uint8_t* pkt_data = new uint8_t[req->getSize()];
-    pkt->dataDynamic(pkt_data);
-
-    if (cmd.isWrite()) {
-        std::fill_n(pkt_data, req->getSize(), (uint8_t)parent.requestorId);
-    }
-
-    return pkt;
+  return ret_val;
 }
 
 
 void
-IStream::MemoryInterface::recvReqRetry()
+IStream::MemoryInterface::initReplayMemComplete(uint8_t* buffer)
 {
-    DPRINTF(HWPrefetch, "Received retry\n");
-    retryReq();
-}
-
-void
-IStream::MemoryInterface::retryReq()
-{
-  assert(retryPkt != NULL);
-  assert(retryPktTick != 0);
-  assert(!blockedWaitingResp);
-
-  auto wr = retryPkt->isWrite();
-  if (wr) {
-    parent.recordStats.numRetries++;
-  } else {
-    parent.replayStats.numRetries++;
-  }
-
-  // attempt to send the packet, and if we are successful start up
-  // the machinery again
-  if (parent.port.sendTimingReq(retryPkt)) {
-    retryPkt = NULL;
-    // remember how much delay was incurred due to back-pressure
-    // when sending the request, we also use this to derive
-    // the tick for the next packet
-    Tick delay = curTick() - retryPktTick;
-    retryPktTick = 0;
-    if (wr) {
-      parent.recordStats.retryTicks += delay;
-    } else {
-      parent.replayStats.retryTicks += delay;
-    }
-  }
+  DPRINTF(HWPrefetch, "Initializing replay memory complete.\n");
+  replayMemState = ready;
+  replayIdx=0;
 }
 
 
-bool
-IStream::MemoryInterface::recvTimingResp(PacketPtr pkt)
+
+// void
+// IStream::MemoryInterface::initMem(Addr addr, uint8_t *data, uint64_t size)
+// {
+
+// }
+// void
+// IStream::MemoryInterface::initMemComplete()
+// {
+
+// }
+
+
+
+
+
+
+
+
+
+
+
+// PacketPtr
+// IStream::MemoryInterface::getPacket(Addr addr, unsigned size,
+//                           const MemCmd& cmd, Request::FlagsType flags)
+// {
+//   // Create new request
+//   RequestPtr req = std::make_shared<Request>(addr, size, flags,
+//                                               parent.requestorId);
+//   // Dummy PC to have PC-based prefetchers latch on; get entropy into higher
+//   // bits
+//   req->setPC(((Addr)parent.requestorId) << 2);
+
+//   // Embed it in a packet
+//   PacketPtr pkt = new Packet(req, cmd);
+
+//   uint8_t* pkt_data = new uint8_t[req->getSize()];
+//   pkt->dataDynamic(pkt_data);
+
+//   if (cmd.isWrite()) {
+//       std::fill_n(pkt_data, req->getSize(), (uint8_t)parent.requestorId);
+//   }
+//   parent.memIFStats.numPackets++;
+//   return pkt;
+// }
+
+
+// bool
+// IStream::MemoryInterface::sendPacket(PacketPtr pkt, bool atomic)
+// {
+//   DPRINTF(HWPrefetch, "%s %#x -> send request. \n",
+//           pkt->isWrite() ? "WR" : "RD", pkt->req->getPaddr());
+
+//   // Try to send the packet.
+//   // Only attempts to send if not blocked by pending responses
+//   blockedWaitingResp = allocateWaitingRespSlot(pkt);
+
+//   // For atomic mode we send and the packet and receive the response
+//   // immediately
+//   if (atomic) {
+//   // if (true) {
+//     // Send the packet.
+//     parent.port.sendAtomic(pkt);
+//     recvTimingResp(pkt);
+//     return true;
+//   }
+
+//   if (// In case there are already waiting packets we will not try now.
+//       // Just enqueue the packet. It will be send later.
+//       blockedPkts.size() > 0
+//       // we will also not try in case the there are we are blocked on
+//       // waiting resp capacity limit.
+//       || blockedWaitingResp
+//      // In case the attempt fail we enqueue the packet in the blocked queue.
+//       || !parent.port.sendTimingReq(pkt)){
+
+//     blockedPkts.push_back(pkt);
+//     DPRINTF(HWPrefetch, "Cannot send now. Try later: %i packets "
+//                   "already blocked for sending.\n",
+//                   blockedPkts.size());
+//     // In case the retry tick was not set we will do it now.
+//     if (retryPktTick == 0) {
+//       retryPktTick = curTick();
+//     }
+//     return false;
+//   }
+//   return true;
+
+//   // parent.dmaPort
+
+// }
+
+
+// // void
+// // CntLogic::read(Addr addr, uint8_t* data, uint64_t size,
+// //         std::function<void(void)> callback)
+// // {
+// //     // Callback will install the line in the cache although it has not
+// //     // been yet verified by the counter logic (unverifiedAddresses takes
+// //     // care of this)
+// //     counterPort.dmaAction(MemCmd::ReadReq, addr, size,
+// //     new EventFunctionWrapper(callback, "Read counter from memory", true),
+// //         data, 0);
+// // }
+
+// // void
+// // CntLogic::write(Addr addr, uint8_t* data, uint64_t size,
+// //         std::function<void(void)> callback)
+// // {
+// //     const ChannelAddr ch_addr(chRange, addr);
+// //     handleEviction(ProbeEvictionReturn(ch_addr, [=](int counter) {
+// //         counterPort.dmaAction(
+// //             MemCmd::WriteReq, addr, size,
+// //          new EventFunctionWrapper(callback, "CCL written back to memory",
+// //                     true),
+// //             data, macLatency + queues.hashAndAes.getWaitAndInc());
+// //     }));
+// // }
+
+
+
+
+
+
+// bool
+// IStream::MemoryInterface::allocateWaitingRespSlot(PacketPtr pkt)
+// {
+//   assert(waitingResp.find(pkt->req) == waitingResp.end());
+//   assert(pkt->needsResponse());
+
+//   waitingResp[pkt->req] = curTick();
+
+//   return (maxOutstandingReqs > 0) &&
+//         (waitingResp.size() > maxOutstandingReqs);
+// }
+
+
+// // void
+// // IStream::MemoryInterface::recvReqRetry()
+// // {
+
+// //   retryReq();
+// // }
+
+// void
+// IStream::MemoryInterface::retryReq()
+// {
+//   DPRINTF(HWPrefetch, "Received retry\n");
+//   assert(blockedPkts.size() > 0);
+
+//   // Attempt to send the first packet in the blocked queue.
+//   // Because this was the one causing the blocking.
+//   // We might get blocked again.
+//   auto retryPkt = blockedPkts.front();
+//   parent.memIFStats.numRetries++;
+
+//   // Since the port notify that its now ready again to receive new requests
+//   // the first request should never fail
+//   assert(parent.port.sendTimingReq(retryPkt));
+//   // if () {
+//   //   DPRINTF(HWPrefetch, "%s %#x Fail again to resend. \n",
+//   //       retryPkt->isWrite() ? "WR" : "RD", retryPkt->req->getPaddr());
+//   //   return;
+//   // }
+//   DPRINTF(HWPrefetch, "%s %#x retry successfull. \n",
+//         retryPkt->isWrite() ? "WR" : "RD", retryPkt->req->getPaddr());
+
+//   // We can remove the packet from the blocking queue.
+//   blockedPkts.pop_front();
+
+//   // In there are more packets blocked we will try to send one more packet.
+//   // This one will fail again but cases that the port inform us when its
+//   // free again.
+//   if (blockedPkts.size() > 0) {
+//     DPRINTF(HWPrefetch, "Still %i packets are waiting to be send. "
+//                     "Blocked again.\n", blockedPkts.size());
+//     retryPkt = blockedPkts.front();
+//     // The second request should fail.
+//     assert(!parent.port.sendTimingReq(retryPkt));
+//     return;
+//   }
+
+//   DPRINTF(HWPrefetch, "No more blocked packets waiting \n");
+//   // remember how much delay was incurred due to back-pressure
+//   // when sending the request
+//   Tick delay = curTick() - retryPktTick;
+//   retryPktTick = 0;
+//   parent.memIFStats.retryTicks += delay;
+// }
+
+
+// bool
+// IStream::MemoryInterface::recvTimingResp(PacketPtr pkt)
+// {
+//   auto iter = waitingResp.find(pkt->req);
+
+//   panic_if(iter == waitingResp.end(), "%s: "
+//           "Received unexpected response [%s reqPtr=%x]\n",
+//               pkt->print(), pkt->req);
+//   assert(iter->second <= curTick());
+
+//   // Handle Write response ----
+//   if (pkt->isWrite()) {
+//     // For a write only the stats need to be updated.
+//     parent.memIFStats.totalWrites++;
+//     parent.memIFStats.bytesWritten += pkt->req->getSize();
+//     parent.memIFStats.totalWriteLatency += curTick() - iter->second;
+
+//     DPRINTF(HWPrefetch, "WR %#x complete\n", pkt->req->getPaddr());
+//   }
+
+//   // Handle Read response ----
+//   if (pkt->isRead()) {
+//     // Upon receiving a read packet from memory we first update the stats.
+//     parent.memIFStats.totalReads++;
+//     parent.memIFStats.bytesRead += pkt->req->getSize();
+//     parent.memIFStats.totalReadLatency += curTick() - iter->second;
+
+//     // Now create a new buffer entry and copy the data into it.
+//     auto newEntry = std::make_shared<BufferEntry>();
+//     newEntry->readFrom(pkt->getPtr<uint8_t>());
+//     parent.replayBuffer->fill(newEntry);
+
+//     DPRINTF(HWPrefetch, "RD %#x -> [%s] complete\n",
+//                             pkt->req->getPaddr(), newEntry->print());
+//   }
+
+//   // Delete the response from the waiting list and the packet
+//   waitingResp.erase(iter);
+//   delete pkt;
+
+//   // Retry to send blocked packets in case there are some.
+//   // if (blockedPkts.size() > 0) {
+//   //   retryReq();
+//   // }
+
+//   //
+//   // if (blockedWaitingResp) {
+//   //   blockedWaitingResp = false;
+//   //   retryReq();
+//   // }
+//   return true;
+// }
+
+DrainState
+IStream::MemoryInterface::drain()
 {
-  auto iter = waitingResp.find(pkt->req);
-
-  panic_if(iter == waitingResp.end(), "%s: "
-          "Received unexpected response [%s reqPtr=%x]\n",
-              pkt->print(), pkt->req);
-  assert(iter->second <= curTick());
-
-  // Handle Write response ----
-  if (pkt->isWrite()) {
-    // For a write only the stats need to be updated.
-    parent.recordStats.totalWrites++;
-    parent.recordStats.bytesWritten += pkt->req->getSize();
-    parent.recordStats.totalWriteLatency += curTick() - iter->second;
-    DPRINTF(HWPrefetch, "WR %#x complete\n", pkt->req->getPaddr());
-  }
-
-  // Handle Read response ----
-  if (pkt->isRead()) {
-    // Upon receiving a read packet from memory we first update the stats.
-    parent.replayStats.totalReads++;
-    parent.replayStats.bytesRead += pkt->req->getSize();
-    parent.replayStats.totalReadLatency += curTick() - iter->second;
-
-    // Now create a new buffer entry and copy the data into it.
-    auto newEntry = std::make_shared<BufferEntry>();
-    newEntry->readFrom(pkt->getPtr<uint8_t>());
-    parent.replayBuffer->fill(newEntry);
-    DPRINTF(HWPrefetch, "RD %#x -> [%s] complete\n",
-                            pkt->req->getPaddr(), newEntry->print());
-  }
-
-  // Delete the response from the waiting list and the packet
-  waitingResp.erase(iter);
-  delete pkt;
-
-  // Sends up the request if we were blocked
-  if (blockedWaitingResp) {
-    blockedWaitingResp = false;
-    retryReq();
-  }
-  return true;
+  // // All blocked packtets need to be send.
+  // if (!blockedPkts.empty()) {
+  //   DPRINTF(HWPrefetch, "Not all blocked packets are send yet.\n");
+  //   return DrainState::Draining;
+  // }
+  // // All responses need to received.
+  // if (!waitingResp.empty()) {
+  //   DPRINTF(HWPrefetch, "Not all waiting responses received yet.\n");
+  //   return DrainState::Draining;
+  // }
+  return DrainState::Drained;
 }
 
 Port &
 IStream::getPort(const std::string &if_name, PortID idx)
 {
-  return port;
+  if (if_name == "port") {
+      return port;
+  }
+  return ClockedObject::getPort(if_name, idx);
 }
 
-IStream::IStreamMemPort::IStreamMemPort(
-            const std::string &_name, IStream &_parent)
-  : RequestPort(_name, &_parent), parent(_parent)
-{}
+// IStream::IStreamMemPort::IStreamMemPort(
+//             const std::string &_name, IStream &_parent)
+//   : RequestPort(_name, &_parent), parent(_parent)
+// {}
 
+// IStream::IStreamMemBDPort::IStreamMemBDPort(
+//             const std::string &_name, IStream &_parent)
+//   : RequestPort(_name, &_parent), parent(_parent)
+// {}
 
 // bool
 // IStream::trySatisfyFunctional(PacketPtr pkt)
@@ -977,62 +1465,62 @@ IStream::IStreamMemPort::IStreamMemPort(
 
 
 
-    IStream::TraceStream::TraceStream(const std::string& filename) :
-      fileStream(filename.c_str(), std::ios::in|std::ios::out|std::ios::trunc)
-    {
-      if (!fileStream.good())
-        panic("Could not open %s\n", filename);
-    }
+    // IStream::TraceStream::TraceStream(const std::string& filename) :
+    // fileStream(filename.c_str(), std::ios::in|std::ios::out|std::ios::trunc)
+    // {
+    //   if (!fileStream.good())
+    //     panic("Could not open %s\n", filename);
+    // }
 
-    IStream::TraceStream::~TraceStream()
-    {
-      // As the compression is optional, see if the stream exists
-      // if (gzipStream != NULL)
-      //     delete gzipStream;
-      // delete wrappedFileStream;
-      fileStream.close();
-    }
+    // IStream::TraceStream::~TraceStream()
+    // {
+    //   // As the compression is optional, see if the stream exists
+    //   // if (gzipStream != NULL)
+    //   //     delete gzipStream;
+    //   // delete wrappedFileStream;
+    //   fileStream.close();
+    // }
 
-    void
-      IStream::TraceStream::write(BufferEntry* entry)
-    {
-      // DPRINTF(HWPrefetch, "WR: %s\n",entry->print());
-      // std::getline(sstream, record);
-      // fileStream << entry->_addr << "," << entry->_mask << "\n";
+    // void
+    //   IStream::TraceStream::write(BufferEntry* entry)
+    // {
+    //   // DPRINTF(HWPrefetch, "WR: %s\n",entry->print());
+    //   // std::getline(sstream, record);
+    //   // fileStream << entry->_addr << "," << entry->_mask << "\n";
 
-      fileStream.write((char*)entry, sizeof(*entry));
-    }
+    //   fileStream.write((char*)entry, sizeof(*entry));
+    // }
 
-    bool
-      IStream::TraceStream::read(BufferEntry* entry)
-    {
-      if (!fileStream.eof()) {
-        fileStream.read((char*)entry, sizeof(*entry));
+    // bool
+    //   IStream::TraceStream::read(BufferEntry* entry)
+    // {
+    //   if (!fileStream.eof()) {
+    //     fileStream.read((char*)entry, sizeof(*entry));
 
-        // std::string record;
-        // std::getline(fileStream, record);
-        // std::istringstream line(record);
-        // if (fileStream.eof()) {
-        //   return false;
-        // }
+    //     // std::string record;
+    //     // std::getline(fileStream, record);
+    //     // std::istringstream line(record);
+    //     // if (fileStream.eof()) {
+    //     //   return false;
+    //     // }
 
-        // std::getline(line, record, ',');
-        // entry->_addr = Addr(std::stoull(record));
-        // std::getline(line, record, ',');
-        // entry->_mask = std::stoull(record);
+    //     // std::getline(line, record, ',');
+    //     // entry->_addr = Addr(std::stoull(record));
+    //     // std::getline(line, record, ',');
+    //     // entry->_mask = std::stoull(record);
 
-        DPRINTF(HWPrefetch, "RD: %s\n",entry->print());
-        return true;
-      }
-      return false;
-    }
-    void
-      IStream::TraceStream::reset()
-    {
-      // seek to the start of the input file and clear any flags
-      fileStream.clear();
-      fileStream.seekg(0, std::ifstream::beg);
-    }
+    //     DPRINTF(HWPrefetch, "RD: %s\n",entry->print());
+    //     return true;
+    //   }
+    //   return false;
+    // }
+    // void
+    //   IStream::TraceStream::reset()
+    // {
+    //   // seek to the start of the input file and clear any flags
+    //   fileStream.clear();
+    //   fileStream.seekg(0, std::ifstream::beg);
+    // }
 
 
 
@@ -1060,23 +1548,10 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     "fifo buffer"),
   ADD_STAT(avgUsefullness, statistics::units::Count::get(),
     "Average usefullness of the entries that fall out of the fifo buffer"),
-
-  ADD_STAT(totalWrites, statistics::units::Count::get(),
-            "Total num of writes"),
-  ADD_STAT(numRetries, statistics::units::Count::get(), "Number of retries"),
-  ADD_STAT(retryTicks, statistics::units::Tick::get(),
-            "Time spent waiting due to back-pressure"),
-  ADD_STAT(bytesWritten, statistics::units::Byte::get(),
-            "Number of bytes written"),
-  ADD_STAT(totalWriteLatency, statistics::units::Tick::get(),
-            "Total latency of write requests"),
-  ADD_STAT(avgWriteLatency, statistics::units::Rate<
-                statistics::units::Tick, statistics::units::Count>::get(),
-            "Avg latency of write requests",
-            totalWriteLatency / totalWrites),
-  ADD_STAT(writeBW, statistics::units::Rate<
-                statistics::units::Byte, statistics::units::Second>::get(),
-            "Write bandwidth", bytesWritten / simSeconds)
+  ADD_STAT(hitSDlinHist, statistics::units::Count::get(),
+               "Hit stack distance linear distribution"),
+  ADD_STAT(hitSDlogHist, statistics::units::Ratio::get(),
+               "Hit stack distance logarithmic distribution")
 {
   using namespace statistics;
 
@@ -1084,11 +1559,19 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
 
   bufferHitDistHist
-    .init(p.buffer_entries)
+    .init((p.buffer_entries < 2) ? 2 : p.buffer_entries)
     .flags(pdf);
 
   avgUsefullness.flags(total);
   avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
+
+  hitSDlinHist
+      .init(16)
+      .flags(pdf);
+
+  hitSDlogHist
+      .init(32)
+      .flags(pdf);
 
 }
 
@@ -1112,21 +1595,7 @@ IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
     "Cummulative usefullness of the entries that fall out of the "
     "fifo buffer"),
   ADD_STAT(avgUsefullness, statistics::units::Count::get(),
-    "Average usefullness of the entries that fall out of the fifo buffer"),
-
-  ADD_STAT(totalReads, statistics::units::Count::get(), "Total num of reads"),
-  ADD_STAT(numRetries, statistics::units::Count::get(), "Number of retries"),
-  ADD_STAT(retryTicks, statistics::units::Tick::get(),
-            "Time spent waiting due to back-pressure"),
-  ADD_STAT(bytesRead, statistics::units::Byte::get(), "Number of bytes read"),
-  ADD_STAT(totalReadLatency, statistics::units::Tick::get(),
-            "Total latency of read requests"),
-  ADD_STAT(avgReadLatency, statistics::units::Rate<
-                statistics::units::Tick, statistics::units::Count>::get(),
-            "Avg latency of read requests", totalReadLatency / totalReads),
-  ADD_STAT(readBW, statistics::units::Rate<
-                statistics::units::Byte, statistics::units::Second>::get(),
-            "Read bandwidth", bytesRead / simSeconds)
+    "Average usefullness of the entries that fall out of the fifo buffer")
 {
   using namespace statistics;
 
@@ -1134,7 +1603,7 @@ IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
     dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
 
   bufferHitDistHist
-    .init(p.buffer_entries)
+    .init((p.buffer_entries < 2) ? 2 : p.buffer_entries)
     .flags(pdf);
 
   avgUsefullness.flags(total);
@@ -1142,7 +1611,42 @@ IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
 
 }
 
-
+IStream::IStreamMemIFStats::IStreamMemIFStats(IStream* parent,
+  const std::string& name)
+  : statistics::Group(parent, name.c_str()),
+    ADD_STAT(numPackets, statistics::units::Count::get(),
+              "Number of packets generated"),
+    ADD_STAT(numRetries, statistics::units::Count::get(),
+              "Number of retries"),
+    ADD_STAT(retryTicks, statistics::units::Tick::get(),
+              "Time spent waiting due to back-pressure"),
+    ADD_STAT(bytesRead, statistics::units::Byte::get(),
+              "Number of bytes read"),
+    ADD_STAT(bytesWritten, statistics::units::Byte::get(),
+              "Number of bytes written"),
+    ADD_STAT(totalReadLatency, statistics::units::Tick::get(),
+              "Total latency of read requests"),
+    ADD_STAT(totalWriteLatency, statistics::units::Tick::get(),
+              "Total latency of write requests"),
+    ADD_STAT(totalReads, statistics::units::Count::get(),
+              "Total num of reads"),
+    ADD_STAT(totalWrites, statistics::units::Count::get(),
+              "Total num of writes"),
+    ADD_STAT(avgReadLatency, statistics::units::Rate<
+                  statistics::units::Tick, statistics::units::Count>::get(),
+              "Avg latency of read requests", totalReadLatency / totalReads),
+    ADD_STAT(avgWriteLatency, statistics::units::Rate<
+                  statistics::units::Tick, statistics::units::Count>::get(),
+              "Avg latency of write requests",
+              totalWriteLatency / totalWrites),
+    ADD_STAT(readBW, statistics::units::Rate<
+                  statistics::units::Byte, statistics::units::Second>::get(),
+              "Read bandwidth", bytesRead / simSeconds),
+    ADD_STAT(writeBW, statistics::units::Rate<
+                  statistics::units::Byte, statistics::units::Second>::get(),
+              "Write bandwidth", bytesWritten / simSeconds)
+{
+}
 
 
 

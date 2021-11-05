@@ -38,10 +38,12 @@
 #include <vector>
 
 #include "debug/HWPrefetch.hh"
+#include "dev/dma_device.hh"
 #include "mem/cache/prefetch/queued.hh"
 #include "mem/packet.hh"
-#include "mem/port.hh"
+// #include "mem/port.hh"
 #include "mem/request.hh"
+#include "mem/stack_dist_calc.hh"
 
 namespace gem5
 {
@@ -59,6 +61,8 @@ namespace gem5
         ~IStream() = default;
 
         void init() override;
+
+        DrainState drain() override;
 
       private:
       /** Buffer to track accesses
@@ -215,8 +219,8 @@ namespace gem5
 
         std::string print() {
           std::stringstream ss;
-          ss << "A: " << std::hex << _addr;
-          ss << " |M: " << std::hex << _mask;
+          ss << "A:" << std::hex << _addr;
+          ss << ">M:" << std::hex << _mask;
           // } else {
           //   s = "Invalid";
           // }
@@ -231,11 +235,7 @@ namespace gem5
           // std::ostring
           return std::to_string(_addr) + "," + std::to_string(_mask);
         }
-        bool parseLine(std::fstream& str) {
-          std::string line;
-          if (!std::getline(str,line)) {
-            return false;
-          }
+        bool parseLine(std::string line) {
           std::stringstream lineStream(line);
           std::string cell;
           if (!std::getline(lineStream,cell, ',')) {
@@ -287,16 +287,21 @@ namespace gem5
         IStream& parent;
         const unsigned bufferEntries;
         const unsigned regionSize;
+        unsigned lRegionSize;
         const unsigned blkSize;
+        const unsigned blocksPerRegion;
 
 
         // public:
           Buffer(IStream& _parent, unsigned size,
-            unsigned _regionSize = 64, unsigned _blkSize = 64)
-          :  parent(_parent),
-            bufferEntries(size),
-            regionSize(_regionSize),
-            blkSize(_blkSize) {}
+            unsigned _regionSize, unsigned _blkSize)
+            :  parent(_parent),
+              bufferEntries(size),
+              regionSize(_regionSize),
+              blkSize(_blkSize),
+              blocksPerRegion(_regionSize/_blkSize) {
+            lRegionSize = floorLog2(regionSize);
+          }
 
 
         /** Calculate the usefullness of a given entry:
@@ -311,7 +316,7 @@ namespace gem5
             }
             n = n >> 1; //right shift 1 bit
           }
-          return (float)count / (float)regionSize;
+          return (float)count / (float)blocksPerRegion;
         }
 
         /** Calculate the address for the given entry and index
@@ -321,7 +326,7 @@ namespace gem5
          */
         Addr calcAddr(BufferEntryPtr e, uint idx)
         {
-          assert(idx < regionSize);
+          assert(idx < blocksPerRegion);
           return e->_addr + idx * blkSize;
         }
         /**
@@ -411,7 +416,8 @@ namespace gem5
          * @param all Will write all entries to memory
          */
         void flush(bool all = false);
-        void clear() {_buffer.clear();}
+        void clear() { _buffer.clear(); }
+        bool empty() { return _buffer.empty(); }
       };
 
       class ReplayBuffer : public Buffer
@@ -450,7 +456,7 @@ namespace gem5
          * Refill the replay buffer upto its maximum capacity by requesting
          * the next records from memory.
          */
-        void refill();
+        bool refill();
 
         /**
          * Fill a new entry into the replay buffer.
@@ -469,7 +475,10 @@ namespace gem5
           }
           return s + "]";
         }
-        void clear() {_buffer.clear();}
+        void clear() {
+          _buffer.clear();
+          eof = false;
+          }
       };
 
 
@@ -477,35 +486,35 @@ namespace gem5
 
 
 
-      class TraceStream
-      {
-      public:
+      // class TraceStream
+      // {
+      // public:
 
-        /**
-         * Create an output stream for a given file name.
-         * @param filename Path to the file to create or truncate
-         */
-        TraceStream(const std::string& filename);
-        ~TraceStream();
+      //   /**
+      //    * Create an output stream for a given file name.
+      //    * @param filename Path to the file to create or truncate
+      //    */
+      //   TraceStream(const std::string& filename);
+      //   ~TraceStream();
 
-        /**
-         * Read or write a buffer entry to the trace stream.
-         *
-         * @param entry The entry that should be written to the file.
-         */
-        void write(BufferEntry* entry);
-        bool read(BufferEntry* entry);
+      //   /**
+      //    * Read or write a buffer entry to the trace stream.
+      //    *
+      //    * @param entry The entry that should be written to the file.
+      //    */
+      //   void write(BufferEntry* entry);
+      //   bool read(BufferEntry* entry);
 
-        std::string name() {
-          return ".tracestream";
-        }
+      //   std::string name() {
+      //     return ".tracestream";
+      //   }
 
-        void reset();
+      //   void reset();
 
-      private:
-        /// Underlying file output stream
-        std::fstream fileStream;
-      };
+      // private:
+      //   /// Underlying file output stream
+      //   std::fstream fileStream;
+      // };
 
 
       /** * *
@@ -526,13 +535,11 @@ namespace gem5
          *                be placed in memory
          * @param replay_addr_range The address range the replay trace should
          *                be placed in memory
-         * @param max_outstanding_reqs The maximum number of outstanding
-         *                requests the memory interface can handle.
          */
         MemoryInterface(IStream& _parent,
                         AddrRange record_addr_range,
                         AddrRange replay_addr_range,
-                        int max_outstanding_reqs=0);
+                        PortProxy &_memProxy);
         ~MemoryInterface();
 
         /**
@@ -541,25 +548,19 @@ namespace gem5
          * than reads.
          *
          * @param entry The entry that should be written to the file.
-         * @param atomic If set the atomic protocol is used tho write
-         *         the entry instead of the standard and correct timing one.
-         *         This is mainly for testing and maintenance.
          * @return true if there is still enough space in the trace
          *         false in case the number of entries reached the maximum.
          */
-        bool writeRecord(BufferEntryPtr entry, bool atomic=false);
+        bool writeRecord(BufferEntryPtr entry);
 
         /**
          * Request the next entry from the trace in memory. The
          * interface will fill the data in the replay buffer as soon
          * as the entry is retrived from memory
-         * @param atomic If set the atomic protocol is used tho write
-         *         the entry instead of the standard and correct timing one.
-         *         This is mainly for testing and maintenance.
          * @return true in case there are still entries left. false if
          *          the last entry was already requested. So no entry
          */
-        bool getNextRecord(bool atomic=false);
+        bool readRecord();
 
         /**
          * Initialize the replay memory a list of entries
@@ -569,25 +570,49 @@ namespace gem5
          * @return true if successful. false otherwise.
          */
         bool initReplayMem(std::vector<BufferEntryPtr>& entries);
+        enum ReplayMemState {not_init, init, ready, done};
+        ReplayMemState replayMemState;
+        bool replayReady() { return replayMemState == ReplayMemState::ready; }
+        bool replayDone() { return replayIdx < totalReplayEntries; }
+      private:
+        void initReplayMemComplete(uint8_t* buffer);
 
+
+      public:
         /**
          * Read all entries of the record memory into a provided list
          *
-         * @param entries empty list where the read entries will be put.
+         * @param callback A call back that should be executed upon completion.
+         *                 The callback will receive a vector of
+         *                 BufferEntryPtrs.
          * @return true if successful. false otherwise.
          */
-        bool readRecordMem(std::vector<BufferEntryPtr>& entries);
+        bool readRecordMem();
+        enum RecordMemState {clean, full, read, read_done};
+        RecordMemState recordMemState;
+      private:
+        void readRecordMemComplete(uint8_t* buffer,
+                                    std::vector<BufferEntryPtr>& trace);
 
 
+        PortProxy *memProxy;
+
+
+      public:
         std::string name() {
           return parent.name() + ".memInterface";
         }
 
-        void reset() {
+
+        void resetRecord() {
           recordIdx = 0;
           totalRecordEntries = 0;
+        };
+        void resetReplay() {
           replayIdx = 0;
         };
+
+        DrainState drain();
 
       private:
         /** The port to use to make accesses */
@@ -597,7 +622,9 @@ namespace gem5
       private:
         // ReqPacketQueue reqQueue;
         // SnoopRespPacketQueue snoopRespQueue;
-
+        // // Backdoor pointer
+        // MemBackdoorPtr bd;
+        // bool tryGetBackdoor();
 
         /** The address range where the record trace should be located. */
         AddrRange record_addr_range;
@@ -617,87 +644,166 @@ namespace gem5
         /** Size one buffer entry requires to store in memory */
         const unsigned int entry_size;
 
-        /** Packets waiting to be sent. */
-        std::list<PacketPtr> blockedPkts;
-        PacketPtr retryPkt;
+        // /** Packets waiting to be sent. */
+        // std::list<PacketPtr> blockedPkts;
+        // // PacketPtr retryPkt;
 
-        /** Tick when the stalled packet was meant to be sent. */
-        Tick retryPktTick;
+        // /** Tick when the stalled packet was meant to be sent. */
+        // Tick retryPktTick;
 
-        /** Set when we blocked waiting for outstanding reqs */
-        bool blockedWaitingResp;
+        // /** Set when we blocked waiting for outstanding reqs */
+        // bool blockedWaitingResp;
 
-        const int maxOutstandingReqs;
+        // const int maxOutstandingReqs;
 
-        /** Reqs waiting for response **/
-        std::unordered_map<RequestPtr,Tick> waitingResp;
+        // /** Reqs waiting for response **/
+        // std::unordered_map<RequestPtr,Tick> waitingResp;
 
-        /**
-         * Puts this packet in the waitingResp list and returns true if
-         * we are above the maximum number of oustanding requests.
-         */
-        bool allocateWaitingRespSlot(PacketPtr pkt);
+        // /**
+        //  * Puts this packet in the waitingResp list and returns true if
+        //  * we are above the maximum number of oustanding requests.
+        //  */
+        // bool allocateWaitingRespSlot(PacketPtr pkt);
 
-        /**
-         * Generate a new request and associated packet
-         *
-         * @param addr Physical address to use
-         * @param size Size of the request
-         * @param cmd Memory command to send
-         * @param flags Optional request flags
-         */
-        PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
-                            Request::FlagsType flags = 0);
-        /**
-         * Generate a new request and associated packet
-         *
-         * @param pkt The packet to be send.
-         * @param atomic The protocol used for sending. Default is timining.
-         */
-        bool sendPacket(PacketPtr pkt, bool atomic=false);
+        // /**
+        //  * Generate a new request and associated packet
+        //  *
+        //  * @param addr Physical address to use
+        //  * @param size Size of the request
+        //  * @param cmd Memory command to send
+        //  * @param flags Optional request flags
+        //  */
+        // PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
+        //                     Request::FlagsType flags = 0);
+        // /**
+        //  * Generate a new request and associated packet
+        //  *
+        //  * @param pkt The packet to be send.
+        //  * @param atomic The protocol used for sending. Default is timining.
+        //  */
+        // bool sendPacket(PacketPtr pkt, bool atomic=false);
+
+        // void readResp(BufferEntry);
+        // // GenericCache::ExternalInterface
+        // // Cache will call these methods to read data from
+        //       external (main memory)
+        // // to the cache and write data the other way round
+        // void read(Addr addr, uint8_t *data, uint64_t size,
+        //           std::function<void(void)> callback);
+
+        // void write(Addr addr, uint8_t *data, uint64_t size,
+        //        std::function<void(void)> callback);
+
+
+
+        void writeRecordComplete(Addr addr, Tick wr_start);
+        void readRecordComplete(Addr addr, uint8_t* data, Tick rd_start);
+
+        /** Read */
+        // void fetchDescriptor(Addr address);
+        // void fetchDescComplete();
+        // EventFunctionWrapper fetchCompleteEvent;
+
+
+
+        // void initMem(Addr addr, uint8_t *data, uint64_t size);
+        // void initMemComplete(uint8_t *data);
+        // // EventFunctionWrapper initMemCompleteEvent;
+
+        // void readMem(Addr addr, uint8_t *data, uint64_t size);
+        // void readMemComplete();
+        // EventFunctionWrapper readMemCompleteEvent;
+
+
+
+
 
         public:
         /**
-         * Receive a retry from the neighbouring port and attempt to
-         * resend the waiting packet.
-         */
-        void recvReqRetry();
-        void retryReq();
+        //  * Receive a retry from the neighbouring port and attempt to
+        //  * resend the waiting packet.
+        //  */
+        // void recvReqRetry();
+        // void retryReq();
 
-        /**
-         * Callback to receive responses for outstanding memory requests.
-         */
-        bool recvTimingResp(PacketPtr pkt);
+        // /**
+        //  * Callback to receive responses for outstanding memory requests.
+        //  */
+        // bool recvTimingResp(PacketPtr pkt);
 
       };
 
     protected:
       Port &getPort(const std::string &if_name,
                     PortID idx=InvalidPortID) override;
-      bool trySatisfyFunctional(PacketPtr pkt);
+      // bool trySatisfyFunctional(PacketPtr pkt);
 
 
-      /** Request port specialisation for the Stream prefetcher */
-      class IStreamMemPort : public RequestPort
-      {
-        public:
+      // /** Request port specialisation for the Stream prefetcher */
+      // class IStreamMemPort : public RequestPort
+      // {
+      //   public:
 
-          IStreamMemPort(const std::string& name, IStream& _parent);
+      //     IStreamMemPort(const std::string& name, IStream& _parent);
 
-        protected:
+      //   protected:
 
-          void recvReqRetry() { parent.memInterface->recvReqRetry(); }
+      //     void recvReqRetry() { parent.memInterface->retryReq(); }
 
-          bool recvTimingResp(PacketPtr pkt)
-          { return parent.memInterface->recvTimingResp(pkt); }
+      //     bool recvTimingResp(PacketPtr pkt)
+      //     { return parent.memInterface->recvTimingResp(pkt); }
 
-          // void recvTimingSnoopReq(PacketPtr pkt) { }
-          // void recvFunctionalSnoop(PacketPtr pkt) { }
-          // Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
+      //     // void recvTimingSnoopReq(PacketPtr pkt) { }
+      //     // void recvFunctionalSnoop(PacketPtr pkt) { }
+      //     // Tick recvAtomicSnoop(PacketPtr pkt) { return 0; }
 
-        private:
-          IStream& parent;
-      };
+      //   private:
+      //     IStream& parent;
+      // };
+
+      // /** Request port specialisation for the Stream prefetcher */
+      // class IStreamMemBDPort : public RequestPort
+      // {
+      //   public:
+      //     IStreamMemBDPort(const std::string& name, IStream& _parent);
+
+      //   protected:
+      //     void recvReqRetry() {  }
+      //     bool recvTimingResp(PacketPtr pkt) { return false; }
+      //   private:
+      //     IStream& parent;
+      // };
+
+
+
+
+
+
+// Main memory port
+    class IStreamMemPort : public DmaPort
+    {
+      public:
+        IStreamMemPort(IStream *_parent, System *sys)
+            : DmaPort(_parent, sys), parent(*_parent) {}
+      private:
+        IStream& parent;
+    };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
       Addr regionAddress(Addr addr);
@@ -715,10 +821,10 @@ namespace gem5
     protected:
       // PARAMETERS
 /** Pointr to the parent components. */
-      TraceStream* recordStream;
-      TraceStream* replayStream;
       MemoryInterface* memInterface;
       IStreamMemPort port;
+      // IStreamMemBDPort backdoor;
+      // IStreamMemdmaPort dmaPort;
       RecordBuffer* recordBuffer;
       ReplayBuffer* replayBuffer;
 
@@ -738,14 +844,20 @@ namespace gem5
       /** Number of blocks that fit in one region */
       unsigned blksPerRegion;
 
+      /** Stack distance of meta data */
+      StackDistCalc sdcalc;
 
+      // /**
+      //  * Callback to flush and close all open output streams on exit. If
+      //  * we were calling the destructor it could be done there.
+      //  */
+      // void closeStreams();
+      std::string readFileIntoString(const std::string& path);
       /**
-       * Callback to flush and close all open output streams on exit. If
-       * we were calling the destructor it could be done there.
+       * Function to calculate the stack distance statistics for the record
+       * accesses.
        */
-      void closeStreams();
-
-
+      void calcStackDistance(Addr addr);
 
 
     public:
@@ -765,7 +877,7 @@ namespace gem5
         PrefetchInfo &new_pfi, int32_t priority);
 
       /**
-       * Calculate the traget physical address (PA).
+       * Calculate the target physical address (PA).
        */
       void proceedWithTranslation(const PacketPtr &pkt,
         PrefetchInfo &new_pfi, int32_t priority);
@@ -773,10 +885,18 @@ namespace gem5
       void squashPrefetches(Addr addr, bool is_secure);
 
       void startRecord();
+      bool startReplay();
 
+    public:
       void initReplay(std::string filename);
+    private:
+      void initReplayComplete();
 
+    public:
       void dumpRecTrace(std::string filename);
+    private:
+      std::string rec_filename;
+      void writeRecordFile(std::vector<BufferEntryPtr>& trace);
 
 
 
@@ -820,27 +940,9 @@ namespace gem5
         statistics::Scalar cumUsefullness;
         statistics::Formula avgUsefullness;
 
-        /** Count the number writes. */
-        statistics::Scalar totalWrites;
-
-        /** Count the number of retries. */
-        statistics::Scalar numRetries;
-
-        /** Count the time incurred from back-pressure. */
-        statistics::Scalar retryTicks;
-
-        /** Count the number of bytes written. */
-        statistics::Scalar bytesWritten;
-
-        /** Total num of ticks write reqs took to complete  */
-        statistics::Scalar totalWriteLatency;
-
-        /** Avg num of ticks each write reqs took to complete  */
-        statistics::Formula avgWriteLatency;
-
-        /** Write bandwidth in bytes/s  */
-        statistics::Formula writeBW;
-
+        // Hit stack distance histograms
+        statistics::Histogram hitSDlinHist;
+        statistics::SparseHistogram hitSDlogHist;
 
       } recordStats;
 
@@ -866,9 +968,15 @@ namespace gem5
         statistics::Scalar cumUsefullness;
         statistics::Formula avgUsefullness;
 
+      } replayStats;
 
-        /** Count the number reads. */
-        statistics::Scalar totalReads;
+
+      struct IStreamMemIFStats : public statistics::Group
+      {
+        IStreamMemIFStats(IStream* parent, const std::string& name);
+
+        /** Count the number of generated packets. */
+        statistics::Scalar numPackets;
 
         /** Count the number of retries. */
         statistics::Scalar numRetries;
@@ -879,16 +987,33 @@ namespace gem5
         /** Count the number of bytes read. */
         statistics::Scalar bytesRead;
 
+        /** Count the number of bytes written. */
+        statistics::Scalar bytesWritten;
+
         /** Total num of ticks read reqs took to complete  */
         statistics::Scalar totalReadLatency;
+
+        /** Total num of ticks write reqs took to complete  */
+        statistics::Scalar totalWriteLatency;
+
+        /** Count the number reads. */
+        statistics::Scalar totalReads;
+
+        /** Count the number writes. */
+        statistics::Scalar totalWrites;
 
         /** Avg num of ticks each read req took to complete  */
         statistics::Formula avgReadLatency;
 
+        /** Avg num of ticks each write reqs took to complete  */
+        statistics::Formula avgWriteLatency;
+
         /** Read bandwidth in bytes/s  */
         statistics::Formula readBW;
 
-      } replayStats;
+        /** Write bandwidth in bytes/s  */
+        statistics::Formula writeBW;
+      } memIFStats;
 
       // unsigned cumHitDistance
 

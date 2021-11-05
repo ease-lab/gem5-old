@@ -541,9 +541,10 @@ class IStreamPrefetcher(QueuedPrefetcher):
     cxx_header = "mem/cache/prefetch/istream.hh"
     cxx_exports = [
         # PyBindMethod("addEventProbeRetiredInsts"),
-        PyBindMethod("initReplay"),
         PyBindMethod("startRecord"),
+        PyBindMethod("startReplay"),
         PyBindMethod("dumpRecTrace"),
+        PyBindMethod("initReplay"),
     ]
     use_virtual_addresses = True
 
@@ -565,6 +566,10 @@ class IStreamPrefetcher(QueuedPrefetcher):
 
     port = RequestPort("Interface of the IStream prefetcher to "
                             "read and write the traces directly to memory")
+    # backdoor = RequestPort("Backdoor to get/set meta data magically "
+    #                         "directly to memory")
+    # dmaport = RequestPort("Backdoor to get/set meta data magically "
+    #                         "directly to memory")
 
     record_addr_range = Param.AddrRange("10kB",
         "Address where the record trace is placed in memory. "
@@ -574,12 +579,7 @@ class IStreamPrefetcher(QueuedPrefetcher):
     replay_addr_range = Param.AddrRange("10kB",
         "Same as 'record_addr_range' but the replaying functionality.")
 
-    # packet trace output file, disabled by default
-    trace_record_file = Param.String("itrace.out", "Address trace output file")
-    trace_replay_file = Param.String("itrace.in", "Address trace output file")
 
-    def dumpRecordTrace(self, filename):
-        self.getCCObject().dumpRecTrace(filename)
 
 
 
