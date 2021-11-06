@@ -563,6 +563,13 @@ namespace gem5
         bool readRecord();
 
         /**
+         * Read all entries of the record memory into a provided list
+         *
+         * @return true if successful. false otherwise.
+         */
+        bool readRecordMem(std::vector<BufferEntryPtr>& entries);
+
+        /**
          * Initialize the replay memory a list of entries
          *
          * @param entries list of entries with that the replay memory should
@@ -570,32 +577,25 @@ namespace gem5
          * @return true if successful. false otherwise.
          */
         bool initReplayMem(std::vector<BufferEntryPtr>& entries);
-        enum ReplayMemState {not_init, init, ready, done};
-        ReplayMemState replayMemState;
-        bool replayReady() { return replayMemState == ReplayMemState::ready; }
-        bool replayDone() { return replayIdx < totalReplayEntries; }
-      private:
-        void initReplayMemComplete(uint8_t* buffer);
+        // enum ReplayMemState {not_init, init, ready, done};
+        // ReplayMemState replayMemState;
 
 
-      public:
-        /**
-         * Read all entries of the record memory into a provided list
-         *
-         * @param callback A call back that should be executed upon completion.
-         *                 The callback will receive a vector of
-         *                 BufferEntryPtrs.
-         * @return true if successful. false otherwise.
-         */
-        bool readRecordMem();
-        enum RecordMemState {clean, full, read, read_done};
-        RecordMemState recordMemState;
-      private:
-        void readRecordMemComplete(uint8_t* buffer,
-                                    std::vector<BufferEntryPtr>& trace);
+
+        bool replayReady() {
+          return (totalReplayEntries > 0) && !replayDone() ? true : false;
+        }
+        bool replayDone() {
+          return (replayIdx >= totalReplayEntries) ? true : false;
+        }
+        bool recordFull() {
+          return recordIdx >= (record_addr_range.size() / entry_size)
+                ? true : false;
+        }
 
 
-        PortProxy *memProxy;
+
+
 
 
       public:
@@ -615,16 +615,14 @@ namespace gem5
         DrainState drain();
 
       private:
-        /** The port to use to make accesses */
+
         /** The parent I Stream prefetcher */
         IStream& parent;
 
-      private:
-        // ReqPacketQueue reqQueue;
-        // SnoopRespPacketQueue snoopRespQueue;
-        // // Backdoor pointer
-        // MemBackdoorPtr bd;
-        // bool tryGetBackdoor();
+        /** The proxy the memory for reading and initializing the record
+         * and replay memory.
+         */
+        PortProxy *memProxy;
 
         /** The address range where the record trace should be located. */
         AddrRange record_addr_range;
@@ -889,14 +887,9 @@ namespace gem5
 
     public:
       void initReplay(std::string filename);
-    private:
-      void initReplayComplete();
 
     public:
       void dumpRecTrace(std::string filename);
-    private:
-      std::string rec_filename;
-      void writeRecordFile(std::vector<BufferEntryPtr>& trace);
 
 
 

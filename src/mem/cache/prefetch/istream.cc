@@ -59,10 +59,6 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   degree(p.degree),
   regionSize(p.region_size),
 
-  // recordTrace(p.record_trace),
-  // replayTrace(p.replay_trace),
-  rec_filename(""),
-
   recordStats(this, "recordStats"),
   replayStats(this, "replayStats"),
   memIFStats(this, "memIFStats")
@@ -93,8 +89,8 @@ IStream::IStream(const IStreamPrefetcherParams& p)
 void
 IStream::init()
 {
-    if (!port.isConnected())
-        fatal("IStream prefetcher need to be connected to memory.\n");
+  if (!port.isConnected())
+      fatal("IStream prefetcher need to be connected to memory.\n");
 }
 
 DrainState
@@ -355,8 +351,8 @@ IStream::drain()
         // then we are already to late. We want to fetch the other addresses as
         // soon as possible.
 
-      DPRINTF(HWPrefetch, "pfq size: %u, pfqMissingTr size: %u\n", pfq.size(),
-        pfqMissingTranslation.size());
+      DPRINTF(HWPrefetch, "pfq size: %u, pfqMissingTr size: %u\n",
+                pfq.size(), pfqMissingTranslation.size());
 
 
       // Test if there is an entry in the replay buffer that meats this
@@ -411,8 +407,6 @@ bool
 
 
 
-
-
 std::string
 IStream::readFileIntoString(const std::string& filename) {
     auto ss = std::ostringstream{};
@@ -431,7 +425,7 @@ void
   IStream::initReplay(std::string filename)
 {
   std::string file_contents = readFileIntoString(filename);
-  std::vector<std::shared_ptr<BufferEntry>> trace;
+  std::vector<BufferEntryPtr> trace;
 
   std::istringstream sstream(file_contents);
   std::string line;
@@ -451,25 +445,9 @@ void
                 trace.size(), filename);
   // Write the entries to memory
   if (!memInterface->initReplayMem(trace)) {
-    panic("Could not initialize replay memory.\n");
+    warn("Could not initialize replay memory correctly.\n");
   }
 }
-
-void
-  IStream::initReplayComplete()
-{
-  // // After initializing the memory completes
-  // // We reset the replay buffer and enable replay
-  // // replayStream->reset();
-  // replayBuffer->clear();
-  // memInterface->resetReplay();
-  // // The call back after initializing is finish will enable replaying
-  // // enable_replay = true;
-}
-
-
-
-
 
 
 
@@ -477,32 +455,27 @@ void
 void
   IStream::dumpRecTrace(std::string filename)
 {
-  // remember the filename
-  rec_filename = filename;
   // Make sure the content is fully written to memory.
   recordBuffer->flush(true);
-  memInterface->readRecordMem();
-  DPRINTF(HWPrefetch, "Start dumping record trace.\n");
-}
 
+  // Get the entries from the memory interface.
+  std::vector<BufferEntryPtr> entries;
+  memInterface->readRecordMem(entries);
 
-void
-  IStream::writeRecordFile(std::vector<BufferEntryPtr>& trace)
-{
-  std::fstream fileStream(rec_filename.c_str(),
-                            std::ios::out|std::ios::trunc);
+  // Write the entries into the give file
+  std::fstream fileStream(filename.c_str(), std::ios::out|std::ios::trunc);
   if (!fileStream.good()) {
-    panic("Could not open %s\n", rec_filename);
-    return;
+    panic("Could not open %s\n", filename);
   }
 
   DPRINTF(HWPrefetch, "Got %i entries from memory. Write them to %s.\n",
-                  trace.size(), rec_filename);
-  for (auto it : trace) {
+                                entries.size(), filename);
+  for (auto it : entries) {
     fileStream << it->toReadable() << "\n";
   }
   fileStream.close();
 }
+
 
 
 
@@ -673,7 +646,7 @@ void
   parent.replayStats.hits++;
   parent.replayStats.bufferHitDistHist.sample(hit_idx);
   DPRINTF(HWPrefetch, "hit: Region (%#x:%u). Move to front.\n",
-    (*it)->_addr, region.second);
+                    (*it)->_addr, region.second);
 
   // In the case we found an entry within the replay buffer we are
   // already to late to for this to be prefetched.
@@ -759,25 +732,14 @@ IStream::MemoryInterface::MemoryInterface(IStream& _parent,
                         AddrRange record_addr_range,
                         AddrRange replay_addr_range,
                         PortProxy &_memProxy)
-  : replayMemState(ReplayMemState::not_init),
-    recordMemState(RecordMemState::clean),
-    memProxy(&_memProxy),
+  :
     parent(_parent),
-    // bd(nullptr),
-    // port(name() + "-port", *this),
-    // reqQueue(*this, port),
-    // snoopRespQueue(*this, port),
-
+    memProxy(&_memProxy),
     record_addr_range(record_addr_range),
     replay_addr_range(replay_addr_range),
     recordIdx(0), totalRecordEntries(0),
     replayIdx(0), totalReplayEntries(0),
     entry_size(2*sizeof(uint64_t))
-    // retryPkt(NULL),
-    // retryPktTick(0), blockedWaitingResp(false),
-    // maxOutstandingReqs(max_outstanding_reqs)
-    // initMemCompleteEvent([this]{ initMemComplete(uint8_t* data); }, name()),
-    // readMemCompleteEvent([this]{ readMemComplete(); }, name())
 {
   // Before enabling this feature we need to ensure that everything works as
   // intended.
@@ -855,7 +817,8 @@ IStream::MemoryInterface::readRecord()
   // Create a data buffer where the data can be written.
   uint8_t* data = new uint8_t[entry_size];
 
-  DPRINTF(HWPrefetch, "RD %#x <- from MEM\n", addr);
+  DPRINTF(HWPrefetch, "RD %#x <- from MEM (%i/%i)\n",
+              addr, replayIdx, totalReplayEntries);
 
   // Define what happens when the response is received.
   auto completeEvent = new EventFunctionWrapper(
@@ -868,8 +831,8 @@ IStream::MemoryInterface::readRecord()
   parent.port.dmaAction(MemCmd::ReadReq, addr, entry_size,
                               completeEvent, data, 0);
 
-  // Entry is written increment replay idx.
-  replayIdx++;
+  // Entry is requested increment replay idx.
+  ++replayIdx;
   return true;
 }
 
@@ -889,8 +852,8 @@ IStream::MemoryInterface::readRecordComplete(Addr addr,
   // delete data;
   // Finally fill the entry in the replay buffer.
   parent.replayBuffer->fill(newEntry);
-  DPRINTF(HWPrefetch, "RD %#x -> [%s] complete\n",
-                          addr, newEntry->print());
+  DPRINTF(HWPrefetch, "RD %#x -> [%s] complete (%i/%i)\n",
+                  addr, newEntry->print(),replayIdx, totalReplayEntries);
 }
 
 
@@ -986,7 +949,7 @@ IStream::MemoryInterface::readRecordComplete(Addr addr,
 
 
 bool
-IStream::MemoryInterface::readRecordMem()
+IStream::MemoryInterface::readRecordMem(std::vector<BufferEntryPtr>& entries)
 {
   if (totalRecordEntries <= 0) {
     warn("IStream prefetcher has not recorded any entry.\n");
@@ -994,35 +957,12 @@ IStream::MemoryInterface::readRecordMem()
   }
   uint64_t size = totalRecordEntries * entry_size;
   uint8_t* buffer = new uint8_t[size];
-
-
-  // Now get the data from the memory
   Addr addr = record_addr_range.start();
-  auto completeEvent = new EventFunctionWrapper(
-                  [this, buffer] () {
-                    std::vector<BufferEntryPtr> trace;
-                    readRecordMemComplete(buffer, trace);
-                    delete[] buffer;
-                    parent.writeRecordFile(trace);
-                  }, name(),true);
-  parent.port.dmaAction(MemCmd::ReadReq, addr, size,
-                              completeEvent, buffer, 0);
 
-  // Reset the record pointer to the beginning.
-  recordMemState = RecordMemState::read;
+  // 1. Read the raw data from the memory into the prepared buffer.
+  memProxy->readBlob(addr, buffer, size);
 
-  DPRINTF(HWPrefetch, "Start reading record data from memory (%i entries).\n",
-            totalRecordEntries);
-  return true;
-}
-
-
-void
-IStream::MemoryInterface::readRecordMemComplete(uint8_t* buffer,
-                                          std::vector<BufferEntryPtr>& trace)
-{
-
-  // First we will read out the trace from memory.
+  // 2. Parse the raw data and pass the entries back to the writting function
   for (int idx = 0; idx < totalRecordEntries; idx++){
 
     auto entry = std::make_shared<BufferEntry>();
@@ -1030,16 +970,14 @@ IStream::MemoryInterface::readRecordMemComplete(uint8_t* buffer,
     int bufferAddr = idx*entry_size;
 
     entry->readFrom(&buffer[bufferAddr]);
-    DPRINTF(HWPrefetch, "Copy [%s]: from address: %#x\n",
+    DPRINTF(HWPrefetch, "Copy [%s]: from idx: %#x\n",
                 entry->print(), bufferAddr);
 
-    trace.push_back(entry);
+    entries.push_back(entry);
   }
-
-  DPRINTF(HWPrefetch, "Read %i entries from the record memory complete.\n",
-            trace.size());
+  delete[] buffer;
+  return true;
 }
-
 
 
 
@@ -1113,8 +1051,9 @@ IStream::MemoryInterface::initReplayMem(std::vector<BufferEntryPtr>& trace)
   totalReplayEntries = trace.size();
 
   bool ret_val = true;
-  if (replay_addr_range.size()/entry_size < totalReplayEntries) {
-    totalReplayEntries = replay_addr_range.size()/entry_size;
+  int max_entries = replay_addr_range.size()/entry_size;
+  if (totalReplayEntries > max_entries) {
+    totalReplayEntries = max_entries;
     warn("Given address space is not large enough. "
           "Will only write the first %i entries.\n", totalReplayEntries);
     ret_val = false;
@@ -1125,42 +1064,26 @@ IStream::MemoryInterface::initReplayMem(std::vector<BufferEntryPtr>& trace)
   uint8_t* buffer = new uint8_t[size];
 
   // Write the initialisation entries to it.
-  for (replayIdx = 0; replayIdx < totalReplayEntries; replayIdx++){
+  for (int idx = 0; idx < totalReplayEntries; idx++){
     // Calculate the address in the replay memory
-    int bufferAddr = replayIdx*entry_size;
+    int bufferAddr = idx*entry_size;
 
-    trace[replayIdx]->writeTo(&buffer[bufferAddr]);
+    trace[idx]->writeTo(&buffer[bufferAddr]);
     DPRINTF(HWPrefetch, "Copy [%s]: to address: %#x\n",
-                trace[replayIdx]->print(), bufferAddr);
+                trace[idx]->print(), bufferAddr);
   }
 
   // Now send the data to memory
   Addr addr = replay_addr_range.start();
-  auto completeEvent = new EventFunctionWrapper(
-                  [this, buffer] () {
-                    initReplayMemComplete(buffer);
-                    delete[] buffer;
-                  }, name(),true);
-  parent.port.dmaAction(MemCmd::WriteReq, addr, size,
-                              completeEvent, buffer, 0);
+  memProxy->writeBlob(addr, buffer, size);
+  delete[] buffer;
 
   // Reset the replay pointer to the beginning.
   replayIdx = 0;
-  replayMemState = init;
 
-  DPRINTF(HWPrefetch, "Start writting replay data to memory (%i entries).\n",
+  DPRINTF(HWPrefetch, "Initializing replay memory complete. (%i entries).\n",
             totalReplayEntries);
-
   return ret_val;
-}
-
-
-void
-IStream::MemoryInterface::initReplayMemComplete(uint8_t* buffer)
-{
-  DPRINTF(HWPrefetch, "Initializing replay memory complete.\n");
-  replayMemState = ready;
-  replayIdx=0;
 }
 
 
