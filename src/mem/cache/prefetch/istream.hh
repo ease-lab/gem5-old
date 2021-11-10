@@ -79,7 +79,7 @@ namespace gem5
         // Buffer* parent;
         public:
         Addr _addr;
-        unsigned long _mask;
+        uint64_t _mask;
 
 
         // TODO: This with parameter
@@ -88,7 +88,7 @@ namespace gem5
 
 
         // BufferEntry() : _addr(0), _mask(0){};
-        BufferEntry(Addr a = 0, int mask = 0)
+        BufferEntry(Addr a = 0, uint64_t mask = 0)
           : _addr(a), _mask(mask)
         {
         }
@@ -98,7 +98,7 @@ namespace gem5
         void touch(uint idx)
         {
           assert(idx < MASK_SIZE);
-          _mask |= (1 << idx);
+          _mask |= (1ULL << idx);
         }
 
         bool check(uint idx)
@@ -111,6 +111,20 @@ namespace gem5
         // {
         //   return addr;
         // }
+
+        /** Calculate the number of bits set within a given entry. */
+        int bitsSet()
+        {
+          int count = 0;
+          uint64_t n = _mask;
+          while (n != 0) {
+            if ((n & 1ULL) == 1ULL) {
+              count++;
+            }
+            n = n >> 1ULL; //right shift 1 bit
+          }
+          return count;
+        }
 
 //         float usefullness()
 //         {
@@ -308,14 +322,7 @@ namespace gem5
          * n block touched in a region / total blocks in one region */
         float usefullness(BufferEntryPtr e)
         {
-          int count = 0;
-          unsigned long n = e->_mask;
-          while (n != 0) {
-            if ((n & 1) == 1) {
-              count++;
-            }
-            n = n >> 1; //right shift 1 bit
-          }
+          int count = e->bitsSet();
           return (float)count / (float)blocksPerRegion;
         }
 
@@ -335,12 +342,12 @@ namespace gem5
         */
         int genAllAddr(BufferEntryPtr e, std::vector<Addr>& addresses)
         {
-          unsigned long n = e->_mask;
+          uint64_t n = e->_mask;
           for (int i = 0; n != 0; i++) {
-            if ((n & 1) == 1) {
+            if ((n & 1ULL) == 1ULL) {
               addresses.push_back(calcAddr(e,i));
             }
-            n = n >> 1; //right shift 1 bit
+            n = n >> 1ULL; //right shift 1 bit
           }
           return addresses.size();
         }
@@ -357,12 +364,16 @@ namespace gem5
           */
         int genNAddr(BufferEntryPtr e, int n, std::vector<Addr>& addresses)
         {
-          int i = 0, _n = 0;
+          uint64_t i = 0, _n = 0;
           for (; e->_mask != 0 && _n < n; i++) {
-            if (e->_mask & (1<<i)) {
+            // warn("Entry[%s]. cont.: %i i: %i\n",
+            //       e->print(), e->bitsSet(), i, _n);
+            if (e->_mask & (1ULL<<i)) {
+              // warn("Create for i = %i %x\n",i, e->_mask);
               addresses.push_back(calcAddr(e,i));
               _n++;
-              e->_mask &= ~(1<<i);
+              e->_mask &= ~(1ULL << i);
+              // warn("Create for i = %i %x\n",i, e->_mask);
             }
           }
           return _n;
@@ -439,7 +450,7 @@ namespace gem5
         ReplayBuffer(IStream& _parent, unsigned size,
           unsigned _regionSize = 64, unsigned _blkSize = 64)
           : Buffer(_parent, size, _regionSize, _blkSize),
-            eof(false)
+            eof(false), pendingFills(0)
         {
         }
 
@@ -478,6 +489,7 @@ namespace gem5
         void clear() {
           _buffer.clear();
           eof = false;
+          pendingFills = 0;
           }
       };
 
@@ -842,6 +854,11 @@ namespace gem5
       /** Number of blocks that fit in one region */
       unsigned blksPerRegion;
 
+      /** Number number of prefetches where already created. */
+      unsigned pfComputed;
+      /** Total number number of prefetches the trace contains. */
+      unsigned totalPrefetches;
+
       /** Stack distance of meta data */
       StackDistCalc sdcalc;
 
@@ -879,6 +896,17 @@ namespace gem5
        */
       void proceedWithTranslation(const PacketPtr &pkt,
         PrefetchInfo &new_pfi, int32_t priority);
+
+      /**
+       * Indicates that the translation of the address of the provided
+       * deferred packet has been successfully completed, and it can be
+       * enqueued as a new prefetch request.
+       * In case the translation fails it will remain in the queue and the
+       * translation will be retried later again.
+       * @param dp the deferred packet that has completed the translation req.
+       * @param failed whether the translation was successful
+       */
+      void translationComplete(DeferredPacket *dp, bool failed) override;
 
       void squashPrefetches(Addr addr, bool is_secure);
 
@@ -943,23 +971,31 @@ namespace gem5
       {
         IStreamReplStats(IStream* parent, const std::string& name);
 
+        /** Number of hits of an notification in the replay buffer */
+        statistics::Scalar notifyHits;
+
         /** Number of hits and misses in the replay buffer */
-        statistics::Scalar hits;
-        statistics::Scalar misses;
+        statistics::Scalar pfGenerated;
+        statistics::Scalar pfInsertedInQueue;
+        statistics::Scalar totalPrefetchesInTrace;
+        statistics::Scalar pfUseful;
+        // statistics::Scalar pfUsefulButData;
+        statistics::Scalar pfUsefulButMiss;
 
-        // /** The hitting entries average distance to the head of
-        //  *  the record buffer */
-        // statistics::Formula avgHitDistance;
+        statistics::Scalar pfBufferHit;
+        statistics::Scalar pfHitInCache;
+        statistics::Scalar pfTranslationFail;
+        // statistics::Scalar translationRetries;
+        statistics::Formula pfDrops;
 
-        // Record buffer hits distance distribution
-        statistics::Histogram bufferHitDistHist;
+        statistics::Formula accuracy;
+        statistics::Formula coverage;
 
         /** Number of writes and drops of entires to the record trace */
-        statistics::Scalar entryWrites;
+        statistics::Scalar entryReads;
         statistics::Scalar entryDrops;
         // Average usefullness of a entry that falls out of the fifo buffer
-        statistics::Scalar cumUsefullness;
-        statistics::Formula avgUsefullness;
+        statistics::Formula avgPrefetchesPerEntry;
 
       } replayStats;
 

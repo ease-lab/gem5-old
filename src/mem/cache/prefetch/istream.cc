@@ -58,6 +58,7 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   enable_record(false), enable_replay(false),
   degree(p.degree),
   regionSize(p.region_size),
+  pfComputed(0),totalPrefetches(0),
 
   recordStats(this, "recordStats"),
   replayStats(this, "replayStats"),
@@ -76,8 +77,8 @@ IStream::IStream(const IStreamPrefetcherParams& p)
                     p.record_addr_range,
                     p.replay_addr_range,
                     p.sys->physProxy);
-  recordBuffer = new RecordBuffer(*this, p.buffer_entries, regionSize);
-  replayBuffer = new ReplayBuffer(*this, p.buffer_entries, regionSize);
+  recordBuffer = new RecordBuffer(*this, p.record_buffer_entries, regionSize);
+  replayBuffer = new ReplayBuffer(*this, p.replay_buffer_entries, regionSize);
 
 
   // Register a callback to compensate for the destructor not
@@ -188,6 +189,14 @@ IStream::drain()
         return;
       }
 
+      if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
+        replayStats.pfUseful++;
+        if (pfi.isCacheMiss())
+            // This case happens when a demand hits on a prefetched line
+            // that's not in the requested coherency state.
+            replayStats.pfUsefulButMiss++;
+    }
+
 
       Addr blk_addr = blockAddress(pfi.getAddr());
       // Incase we see a request to the same address the prefetch
@@ -229,79 +238,133 @@ IStream::drain()
     }
 
 
-    void
-      IStream::proceedWithTranslation(const PacketPtr& pkt,
-        PrefetchInfo& new_pfi, int32_t priority)
-    {
-      /*
-       * Physical address computation
-       * As we record addresses we only need to compute the PA
-       * in case we recorded virtual once.
-       */
+void
+  IStream::proceedWithTranslation(const PacketPtr& pkt,
+    PrefetchInfo& new_pfi, int32_t priority)
+{
+  /*
+    * Physical address computation
+    * As we record addresses we only need to compute the PA
+    * in case we recorded virtual once.
+    */
 
-       // ContextID is needed for translation
-      if (!pkt->req->hasContextId()) {
-        return;
-      }
+    // ContextID is needed for translation
+  if (!pkt->req->hasContextId()) {
+    return;
+  }
 
-      RequestPtr translation_req = createPrefetchRequest(
-        new_pfi.getAddr(), new_pfi, pkt);
+  RequestPtr translation_req = createPrefetchRequest(
+    new_pfi.getAddr(), new_pfi, pkt);
 
-      /* Create the packet and find the spot to insert it */
-      DeferredPacket dpp(this, new_pfi, 0, priority);
+  /* Create the packet and find the spot to insert it */
+  DeferredPacket dpp(this, new_pfi, 0, priority);
 
-      // Add the translation request.
-      dpp.setTranslationRequest(translation_req);
-      dpp.tc = cache->system->threads[translation_req->contextId()];
-      DPRINTF(HWPrefetch, "Prefetch queued with no translation. "
-        "addr:%#x priority: %3d\n", new_pfi.getAddr(), priority);
-      addToQueue(pfqMissingTranslation, dpp);
+  // Add the translation request.
+  dpp.setTranslationRequest(translation_req);
+  dpp.tc = cache->system->threads[translation_req->contextId()];
+  DPRINTF(HWPrefetch, "Prefetch queued with no translation. "
+    "addr:%#x priority: %3d\n", new_pfi.getAddr(), priority);
+  addToQueue(pfqMissingTranslation, dpp);
+}
+
+
+
+void
+  IStream::insert(const PacketPtr& pkt,
+    PrefetchInfo& new_pfi, int32_t priority)
+{
+  if (queueFilter) {
+    if (alreadyInQueue(pfq, new_pfi, priority)) {
+      return;
+    }
+    if (alreadyInQueue(pfqMissingTranslation, new_pfi, priority)) {
+      return;
+    }
+  }
+
+  /* In case we work with virtual addresses we need to translate first */
+  if (useVirtualAddresses) {
+    proceedWithTranslation(pkt, new_pfi, priority);
+    return;
+  }
+
+  // Using PA: no translation necessary.
+  Addr target_paddr = new_pfi.getAddr();
+
+  if (cacheSnoop &&
+    (inCache(target_paddr, new_pfi.isSecure()) ||
+      inMissQueue(target_paddr, new_pfi.isSecure()))) {
+    statsQueued.pfInCache++;
+    replayStats.pfHitInCache++;
+    DPRINTF(HWPrefetch, "Dropping redundant in "
+      "cache/MSHR prefetch addr:%#x\n", target_paddr);
+    return;
+  }
+
+  /* Create the packet and insert it in the prefetch queue */
+  DeferredPacket dpp(this, new_pfi, 0, priority);
+
+  Tick pf_time = curTick() + clockPeriod() * latency;
+  dpp.createPkt(target_paddr, blkSize, requestorId,
+    tagPrefetch, pf_time);
+  DPRINTF(HWPrefetch, "Prefetch queued. "
+    "addr:%#x priority: %3d tick:%lld.\n",
+    new_pfi.getAddr(), priority, pf_time);
+
+  replayStats.pfInsertedInQueue++;
+  addToQueue(pfq, dpp);
+}
+
+void
+IStream::translationComplete(DeferredPacket *dp, bool failed)
+{
+    auto it = pfqMissingTranslation.begin();
+    while (it != pfqMissingTranslation.end()) {
+        if (&(*it) == dp) {
+            break;
+        }
+        it++;
+    }
+    assert(it != pfqMissingTranslation.end());
+    if (!failed) {
+        DPRINTF(HWPrefetch, "%s Translation of vaddr %#x succeeded: "
+                "paddr %#x \n", tlb->name(),
+                it->translationRequest->getVaddr(),
+                it->translationRequest->getPaddr());
+        Addr target_paddr = it->translationRequest->getPaddr();
+        // check if this prefetch is already redundant
+        if (cacheSnoop && (inCache(target_paddr, it->pfInfo.isSecure()) ||
+                    inMissQueue(target_paddr, it->pfInfo.isSecure()))) {
+            statsQueued.pfInCache++;
+            replayStats.pfHitInCache++;
+            DPRINTF(HWPrefetch, "Dropping redundant in "
+                    "cache/MSHR prefetch addr:%#x\n", target_paddr);
+        } else {
+            Tick pf_time = curTick() + clockPeriod() * latency;
+            it->createPkt(it->translationRequest->getPaddr(), blkSize,
+                    requestorId, tagPrefetch, pf_time);
+            addToQueue(pfq, *it);
+        }
+
+        pfqMissingTranslation.erase(it);
+
+    } else {
+        DPRINTF(HWPrefetch, "%s Translation of vaddr %#x failed, dropping "
+                "prefetch request %#x \n", tlb->name(),
+                it->translationRequest->getVaddr());
+        // statsQueued.pfTranslationFail++;
+        replayStats.pfTranslationFail++;
+        // replayStats.translationRetries++;
+        // We will leave the deferred packet in the outstanding queue
+        // and try to do the translation again.
     }
 
+}
 
 
-    void
-      IStream::insert(const PacketPtr& pkt,
-        PrefetchInfo& new_pfi, int32_t priority)
-    {
-      if (queueFilter) {
-        if (alreadyInQueue(pfq, new_pfi, priority)) {
-          return;
-        }
-        if (alreadyInQueue(pfqMissingTranslation, new_pfi, priority)) {
-          return;
-        }
-      }
 
-      /* In case we work with virtual addresses we need to translate first */
-      if (useVirtualAddresses) {
-        proceedWithTranslation(pkt, new_pfi, priority);
-        return;
-      }
 
-      // Using PA: no translation necessary.
-      Addr target_paddr = new_pfi.getAddr();
 
-      if (cacheSnoop &&
-        (inCache(target_paddr, new_pfi.isSecure()) ||
-          inMissQueue(target_paddr, new_pfi.isSecure()))) {
-        statsQueued.pfInCache++;
-        DPRINTF(HWPrefetch, "Dropping redundant in "
-          "cache/MSHR prefetch addr:%#x\n", target_paddr);
-        return;
-      }
-
-      /* Create the packet and insert it in the prefetch queue */
-      DeferredPacket dpp(this, new_pfi, 0, priority);
-
-      Tick pf_time = curTick() + clockPeriod() * latency;
-      dpp.createPkt(target_paddr, blkSize, requestorId,
-        tagPrefetch, pf_time);
-      DPRINTF(HWPrefetch, "Prefetch queued. "
-        "addr:%#x priority: %3d tick:%lld.\n",
-        new_pfi.getAddr(), priority, pf_time);
-      addToQueue(pfq, dpp);
-    }
 
     Addr
       IStream::regionAddress(Addr a)
@@ -342,7 +405,12 @@ IStream::drain()
       if (!replayBuffer->refill()) {
         DPRINTF(HWPrefetch, "Reached end of trace file. No more records "
           "for prefetching \n");
-        return;
+        if (pfComputed >= totalPrefetches) {
+          DPRINTF(HWPrefetch, "All prefetches are issued. Replaying done!!\n");
+          enable_replay = false;
+          return;
+        }
+        DPRINTF(HWPrefetch, "Replay buffer still contains entries\n");
       }
 
       std::vector<Addr> _tmpAddresses;
@@ -363,8 +431,10 @@ IStream::drain()
       int max = queueSize - pfq.size() - pfqMissingTranslation.size();
       if (max > 0) {
         auto _addresses = replayBuffer->generateNAddresses(max);
-        DPRINTF(HWPrefetch, "Generated %i new pref. candidates. (max: %i)\n",
-                      _addresses.size(), max);
+        pfComputed += _addresses.size();
+        replayStats.pfGenerated += _addresses.size();
+        DPRINTF(HWPrefetch, "Generated %i new pref. cand. (max: %i) (%i/%i)\n",
+                      _addresses.size(), max, pfComputed, totalPrefetches);
         // Pass them to the prefetch queue.
         // TODO: add priority
         for (auto addr : _addresses) {
@@ -396,9 +466,9 @@ bool
   }
   DPRINTF(HWPrefetch, "Start Replaying instructions\n");
   // recordStream->reset();
+  memInterface->resetReplay();
   replayBuffer->clear();
   replayBuffer->refill();
-  memInterface->resetReplay();
   enable_replay = true;
   return true;
 }
@@ -429,20 +499,24 @@ void
 
   std::istringstream sstream(file_contents);
   std::string line;
+  totalPrefetches = 0;
   while (std::getline(sstream,line)) {
     // File was in binary format.
     // fileStream.read((char*)entry, sizeof(*entry));
 
     // File was in human readable format.
     auto tmp = std::make_shared<BufferEntry>();
+
     if (!tmp->parseLine(line)) {
       break;
     }
+    totalPrefetches += tmp->bitsSet();
     trace.push_back(tmp);
   }
+  replayStats.totalPrefetchesInTrace += totalPrefetches;
 
-  DPRINTF(HWPrefetch, "Read %i entries from %s: Init mem.\n",
-                trace.size(), filename);
+  DPRINTF(HWPrefetch, "Read %i entries from %s: Init mem. Trace contains "
+                  "%i prefetches\n", trace.size(), filename, totalPrefetches);
   // Write the entries to memory
   if (!memInterface->initReplayMem(trace)) {
     warn("Could not initialize replay memory correctly.\n");
@@ -469,10 +543,15 @@ void
   }
 
   DPRINTF(HWPrefetch, "Got %i entries from memory. Write them to %s.\n",
-                                entries.size(), filename);
+                        entries.size(), filename);
+  int num_prefetches = 0;
   for (auto it : entries) {
+    num_prefetches += it->bitsSet();
     fileStream << it->toReadable() << "\n";
   }
+  DPRINTF(HWPrefetch, "Record trace contains %i entries to generate %i "
+                      "prefetches. Write the trace to %s.\n",
+                      entries.size(), num_prefetches, filename);
   fileStream.close();
 }
 
@@ -643,10 +722,10 @@ void
     return;
   }
 
-  parent.replayStats.hits++;
-  parent.replayStats.bufferHitDistHist.sample(hit_idx);
-  DPRINTF(HWPrefetch, "hit: Region (%#x:%u). Move to front.\n",
-                    (*it)->_addr, region.second);
+  parent.replayStats.notifyHits++;
+  // parent.replayStats.bufferHitDistHist.sample(hit_idx);
+  // DPRINTF(HWPrefetch, "hit: Region (%#x:%u). Move to front.\n",
+  //                   (*it)->_addr, region.second);
 
   // In the case we found an entry within the replay buffer we are
   // already to late to for this to be prefetched.
@@ -692,6 +771,8 @@ bool
   if (parent.memInterface->replayDone()) {
     return false;
   }
+  // DPRINTF(HWPrefetch, "Refill: bsz: %i, pending: %i, entries: %i\n",
+  //                         _buffer.size(),pendingFills, bufferEntries);
   while ((_buffer.size() + pendingFills) < bufferEntries) {
     if (!parent.memInterface->readRecord()) {
       DPRINTF(HWPrefetch, "Reached end of trace.\n");
@@ -709,6 +790,7 @@ void
   pendingFills--;
   DPRINTF(HWPrefetch, "Fill: [%s]. size buf.:%i pend. fills %i\n",
                       entry->print(), _buffer.size(), pendingFills);
+  parent.replayStats.entryReads++;
 }
 
 
@@ -773,7 +855,8 @@ IStream::MemoryInterface::writeRecord(BufferEntryPtr entry)
   uint8_t* data = new uint8_t[entry_size];
   entry->writeTo(data);
 
-  DPRINTF(HWPrefetch, "WR %#x -> [%s] to MEM\n", addr, entry->print());
+  DPRINTF(HWPrefetch, "WR %#x -> [%s] to MEM. (Nr. %i)\n",
+                    addr, entry->print(), totalRecordEntries + 1);
 
   // Define what happens when the response is received.
   auto completeEvent = new EventFunctionWrapper(
@@ -1482,7 +1565,7 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
 
   bufferHitDistHist
-    .init((p.buffer_entries < 2) ? 2 : p.buffer_entries)
+    .init((p.record_buffer_entries < 2) ? 2 : p.record_buffer_entries)
     .flags(pdf);
 
   avgUsefullness.flags(total);
@@ -1501,36 +1584,54 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
 IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
   const std::string& name)
   : statistics::Group(parent, name.c_str()),
-  ADD_STAT(hits, statistics::units::Count::get(),
-    "Number of hits in the record buffer"),
-  ADD_STAT(misses, statistics::units::Count::get(),
-    "Number of misses in the record buffer"),
-  // ADD_STAT(avgHitDistance, statistics::units::Count::get(),
-  //   "The hitting entries average distance to the head of "
-        // "the record buffer"),
-  ADD_STAT(bufferHitDistHist, statistics::units::Count::get(),
-    "Record buffer hits distance distribution"),
-  ADD_STAT(entryWrites, statistics::units::Count::get(),
-    "Number of entries written to the record trace"),
-  ADD_STAT(entryDrops, statistics::units::Count::get(),
-    "Number of entires dropped to write to the record trace"),
-  ADD_STAT(cumUsefullness, statistics::units::Count::get(),
-    "Cummulative usefullness of the entries that fall out of the "
-    "fifo buffer"),
-  ADD_STAT(avgUsefullness, statistics::units::Count::get(),
-    "Average usefullness of the entries that fall out of the fifo buffer")
+  ADD_STAT(notifyHits, statistics::units::Count::get(),
+        "Number of hits in of a cache notify access in the replay buffer."),
+
+  ADD_STAT(pfGenerated, statistics::units::Count::get(),
+        "Number of prefetches created from the trace."),
+  ADD_STAT(pfInsertedInQueue, statistics::units::Count::get(),
+        "Number of prefetches finally inserted in the pfq"),
+  ADD_STAT(totalPrefetchesInTrace, statistics::units::Count::get(),
+        "Total number of prefetches that the traces contain."),
+  ADD_STAT(pfUseful, statistics::units::Count::get(),
+        "Number of useful prefetches"),
+  ADD_STAT(pfUsefulButMiss, statistics::units::Count::get(),
+        "Number of useful prefetches but still miss in cache"),
+  ADD_STAT(pfBufferHit, statistics::units::Count::get(),
+        "Number prefetches dropped because already in the prefetch buffer."),
+  ADD_STAT(pfHitInCache, statistics::units::Count::get(),
+        "number prefetches dropped because already in cache"),
+  ADD_STAT(pfTranslationFail, statistics::units::Count::get(),
+        "number prefetches dropped because already in cache"),
+  ADD_STAT(pfDrops, statistics::units::Count::get(),
+        "Total number of prefetches dropped."),
+  ADD_STAT(accuracy, statistics::units::Count::get(),
+        "Total number of prefetches dropped."),
+  ADD_STAT(coverage, statistics::units::Count::get(),
+        "Total number of prefetches dropped."),
+
+  ADD_STAT(entryReads, statistics::units::Count::get(),
+    "Number of entries read from the record trace"),
+  // ADD_STAT(cumUsefullness, statistics::units::Count::get(),
+  //   "Cummulative usefullness of the entries read from the trace."),
+  ADD_STAT(avgPrefetchesPerEntry, statistics::units::Count::get(),
+    "Average usefullness of the entries read from the trace.")
 {
   using namespace statistics;
 
-  const IStreamPrefetcherParams& p =
-    dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
+  // const IStreamPrefetcherParams& p =
+  //   dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
+  pfDrops.flags(total);
+  pfDrops = pfBufferHit + pfHitInCache + pfTranslationFail;
 
-  bufferHitDistHist
-    .init((p.buffer_entries < 2) ? 2 : p.buffer_entries)
-    .flags(pdf);
+  accuracy.flags(total);
+  accuracy = pfUseful / pfInsertedInQueue;
 
-  avgUsefullness.flags(total);
-  avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
+  coverage.flags(total);
+  coverage = pfUseful / (pfUseful + parent->prefetchStats.demandMshrMisses);
+
+  avgPrefetchesPerEntry.flags(total);
+  avgPrefetchesPerEntry = pfGenerated / entryReads;
 
 }
 

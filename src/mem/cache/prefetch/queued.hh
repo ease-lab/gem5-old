@@ -232,7 +232,7 @@ class Queued : public Base
      * @param dp the deferred packet that has completed the translation request
      * @param failed whether the translation was successful
      */
-    void translationComplete(DeferredPacket *dp, bool failed);
+    virtual void translationComplete(DeferredPacket *dp, bool failed);
 
     /**
      * Checks whether the specified prefetch request is already in the

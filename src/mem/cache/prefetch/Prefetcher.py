@@ -552,7 +552,9 @@ class IStreamPrefetcher(QueuedPrefetcher):
 
     region_size = Param.MemorySize("4kB","size of the region that is covered "
         "within one buffer entry. Usually one page.")
-    buffer_entries = Param.Unsigned("4",
+    record_buffer_entries = Param.Unsigned("4",
+        "Number of entries in the FIFO buffer")
+    replay_buffer_entries = Param.Unsigned("4",
         "Number of entries in the FIFO buffer")
 
     usefullness_threshold = Param.Percent(50,
