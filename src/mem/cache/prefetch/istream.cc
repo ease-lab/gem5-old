@@ -56,6 +56,8 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   // backdoor(name() + "-backdoor", *this),
   // dmaPort(this, p.sys),
   enable_record(false), enable_replay(false),
+  recordMissesOnly(p.record_misses_only),
+  skipInCache(p.skip_in_cache),
   degree(p.degree),
   regionSize(p.region_size),
   pfComputed(0),totalPrefetches(0),
@@ -188,7 +190,6 @@ IStream::drain()
           " requires to register a TLB.\n");
         return;
       }
-
       if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
         replayStats.pfUseful++;
         if (pfi.isCacheMiss())
@@ -343,10 +344,11 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
             Tick pf_time = curTick() + clockPeriod() * latency;
             it->createPkt(it->translationRequest->getPaddr(), blkSize,
                     requestorId, tagPrefetch, pf_time);
+            replayStats.pfInsertedInQueue++;
             addToQueue(pfq, *it);
         }
 
-        pfqMissingTranslation.erase(it);
+
 
     } else {
         DPRINTF(HWPrefetch, "%s Translation of vaddr %#x failed, dropping "
@@ -358,7 +360,7 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
         // We will leave the deferred packet in the outstanding queue
         // and try to do the translation again.
     }
-
+    pfqMissingTranslation.erase(it);
 }
 
 
@@ -388,10 +390,47 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
     void
       IStream::record(const PrefetchInfo& pfi)
     {
+      recordStats.notifies++;
       Addr blkAddr = blockAddress(pfi.getAddr());
       auto region = regionAddrIdx(blkAddr);
       DPRINTF(HWPrefetch, "Record blk access [%#x] -> Region (%#x:%u)\n",
         blkAddr, region.first, region.second);
+
+      // We will skip recording the address when the entry still
+      // remain in the cache.
+      //
+      bool skip(false);
+      // Only record cache misses
+      if (recordMissesOnly && !pfi.isCacheMiss()) {
+        DPRINTF(HWPrefetch, "Skip recording address because "
+            "cache hit:%#x\n", blkAddr);
+        recordStats.cacheHit++;
+        skip = true;
+      }
+      Addr pBlkAddr = blockAddress(pfi.getPaddr());
+      if (cacheSnoop && (inCache(pBlkAddr, pfi.isSecure()))) {
+        DPRINTF(HWPrefetch, "Skip recording address because "
+            "still in cache: %#x PA: %#x\n", blkAddr, pBlkAddr);
+        recordStats.inCache++;
+        if (skipInCache) {
+          skip = true;
+        }
+      }
+      if (cacheSnoop && (inMissQueue(pBlkAddr, pfi.isSecure()))) {
+        DPRINTF(HWPrefetch, "Address is in miss queue. Record it "
+            "%#x PA: %#x\n", blkAddr, pBlkAddr);
+        recordStats.hitInMissQueue++;
+      }
+      if (cacheSnoop && (hasBeenPrefetched(pBlkAddr, pfi.isSecure()))) {
+        DPRINTF(HWPrefetch, "Do not skip recording when this was a prefetch. "
+            "Record it %#x PA: %#x\n", blkAddr, pBlkAddr);
+        recordStats.cacheHitBecausePrefetch++;
+        skip = false;
+      }
+      if (skip) {
+        recordStats.accessDrops++;
+        return;
+      }
 
       recordBuffer->access(blkAddr);
       recordBuffer->flush();
@@ -650,15 +689,17 @@ void
   // Write everything when the all flag is set.
   while (_buffer.size() > bufferEntries || (_buffer.size() && all)) {
     auto wrEntry = _buffer.back();
+    auto n_pref = wrEntry->bitsSet();
     float use = usefullness(wrEntry);
-    parent.recordStats.cumUsefullness += use;
+    parent.recordStats.totalNumPrefetches += n_pref;
 
     // TODO parameter
     const float threshold = 0;
     if (use > threshold) {
       parent.recordStats.entryWrites++;
       DPRINTF(HWPrefetch, "Rec. buffer entry %#x:[%x]: write to memory."
-        " Usefullness: %.3f\n", wrEntry->_addr, wrEntry->_mask, use);
+        "Contains: %i prefetches -> Usefullness: %.3f\n",
+        wrEntry->_addr, wrEntry->_mask, n_pref, use);
 
       if (!parent.memInterface->writeRecord(wrEntry)) {
         parent.recordStats.entryOverflows++;
@@ -1536,10 +1577,23 @@ IStream::getPort(const std::string &if_name, PortID idx)
 IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
   const std::string& name)
   : statistics::Group(parent, name.c_str()),
+  ADD_STAT(notifies, statistics::units::Count::get(),
+    "Number of notification accesses the recording got."),
   ADD_STAT(hits, statistics::units::Count::get(),
     "Number of hits in the record buffer"),
   ADD_STAT(misses, statistics::units::Count::get(),
     "Number of misses in the record buffer"),
+  ADD_STAT(cacheHit, statistics::units::Count::get(),
+    "Number of accesses we might skip recording because it is a cache hit"),
+  ADD_STAT(inCache, statistics::units::Count::get(),
+    "Number of accesses we might skip recording because pAddr is in cache"),
+  ADD_STAT(hitInMissQueue, statistics::units::Count::get(),
+    "Number of accesses we skipped for recording because addr in missqueue"),
+  ADD_STAT(cacheHitBecausePrefetch, statistics::units::Count::get(),
+    "Number of cache hits not skipped because they where useful cache hits."),
+  ADD_STAT(accessDrops, statistics::units::Count::get(),
+    "Number of accesses we actually dropped due to 'cacheHit',"
+    " 'inCache' or 'hitInMissQueue'"),
   ADD_STAT(bufferHitDistHist, statistics::units::Count::get(),
     "Record buffer hits distance distribution"),
   ADD_STAT(entryWrites, statistics::units::Count::get(),
@@ -1549,11 +1603,10 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
   ADD_STAT(entryOverflows, statistics::units::Count::get(),
     "Number of entires not be write to the record because of "
     "limited memory capacity."),
-  ADD_STAT(cumUsefullness, statistics::units::Count::get(),
-    "Cumulative usefullness of the entries that fall out of the "
-    "fifo buffer"),
-  ADD_STAT(avgUsefullness, statistics::units::Count::get(),
-    "Average usefullness of the entries that fall out of the fifo buffer"),
+  ADD_STAT(totalNumPrefetches, statistics::units::Count::get(),
+    "Total number of prefetches the trace we recorded contains"),
+  ADD_STAT(avgNumPrefetchesPerEntry, statistics::units::Count::get(),
+    "Average number of prefetches within one entry."),
   ADD_STAT(hitSDlinHist, statistics::units::Count::get(),
                "Hit stack distance linear distribution"),
   ADD_STAT(hitSDlogHist, statistics::units::Ratio::get(),
@@ -1565,11 +1618,12 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     dynamic_cast<const IStreamPrefetcherParams&>(parent->params());
 
   bufferHitDistHist
-    .init((p.record_buffer_entries < 2) ? 2 : p.record_buffer_entries)
+    .init((p.record_buffer_entries < 2) ? 2
+       : ((p.record_buffer_entries > 16) ? 16 : p.record_buffer_entries))
     .flags(pdf);
 
-  avgUsefullness.flags(total);
-  avgUsefullness = cumUsefullness / (entryWrites + entryDrops);
+  avgNumPrefetchesPerEntry.flags(total);
+  avgNumPrefetchesPerEntry = totalNumPrefetches / entryWrites;
 
   hitSDlinHist
       .init(16)
@@ -1586,7 +1640,6 @@ IStream::IStreamReplStats::IStreamReplStats(IStream* parent,
   : statistics::Group(parent, name.c_str()),
   ADD_STAT(notifyHits, statistics::units::Count::get(),
         "Number of hits in of a cache notify access in the replay buffer."),
-
   ADD_STAT(pfGenerated, statistics::units::Count::get(),
         "Number of prefetches created from the trace."),
   ADD_STAT(pfInsertedInQueue, statistics::units::Count::get(),

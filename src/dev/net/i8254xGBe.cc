@@ -1155,10 +1155,12 @@ IGbE::DescCache<T>::instrumentGRPCPacket(TcpPtr tcp) {
 
 
     // Check if and which type of grpc request.
-    bool grpc_req  = (tcp->dport() > 50000 && tcp->dport() < 50100)
-                            ? true : false;
-    bool grpc_resp = (tcp->sport() > 50000 && tcp->sport() < 50100)
-                            ? true : false;
+    bool grpc_req  = ((tcp->dport() > 50000 && tcp->dport() < 50100)
+                   || (tcp->dport() > 8000  && tcp->dport() < 8100)
+                     ) ? true : false;
+    bool grpc_resp = ((tcp->sport() > 50000 && tcp->sport() < 50100)
+                   || (tcp->sport() > 8000  && tcp->sport() < 8100)
+                     ) ? true : false;
 
     // We are only interested in grpc communication
     if (!(grpc_req || grpc_resp)) {

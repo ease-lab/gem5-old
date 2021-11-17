@@ -294,8 +294,20 @@ Base::regProbeListeners()
 void
 Base::addEventProbe(SimObject *obj, const char *name)
 {
+    warn("Register HWP event probe %s for obj: ", name, obj->name());
     ProbeManager *pm(obj->getProbeManager());
-    listeners.push_back(new PrefetchListener(*this, pm, name));
+    if (strcmp(name, "All") == 0) {
+        listeners.push_back(new PrefetchListener(*this, pm, "Miss", false,
+                                            true));
+        listeners.push_back(new PrefetchListener(*this, pm, "Fill", true,
+                                                    false));
+        listeners.push_back(new PrefetchListener(*this, pm, "Hit", false,
+                                                    false));
+    } else {
+        listeners.push_back(new PrefetchListener(*this, pm, name));
+    }
+}
+
 }
 
 void

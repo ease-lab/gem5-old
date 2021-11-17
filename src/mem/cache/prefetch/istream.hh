@@ -845,6 +845,10 @@ namespace gem5
       bool enable_record;
       bool enable_replay;
 
+      /** Record only cache misses */
+      const bool recordMissesOnly;
+      /** Skip recording for entries found in cache (L2) */
+      const bool skipInCache;
 
       const int degree;
       /** The size of one spatial region. */
@@ -942,8 +946,15 @@ namespace gem5
         IStreamRecStats(IStream* parent, const std::string& name);
 
         /** Number of hits and misses in the record buffer */
+        statistics::Scalar notifies;
         statistics::Scalar hits;
         statistics::Scalar misses;
+
+        statistics::Scalar cacheHit;
+        statistics::Scalar inCache;
+        statistics::Scalar hitInMissQueue;
+        statistics::Scalar cacheHitBecausePrefetch;
+        statistics::Scalar accessDrops;
 
         // /** The hitting entries average distance to the head of
         //  *  the record buffer */
@@ -957,9 +968,9 @@ namespace gem5
         statistics::Scalar entryDrops;
         statistics::Scalar entryOverflows;
 
-        /** Average usefullness of a entry that falls out of the fifo buffer */
-        statistics::Scalar cumUsefullness;
-        statistics::Formula avgUsefullness;
+        /** Number of prefetches we recorded in the trace */
+        statistics::Scalar totalNumPrefetches;
+        statistics::Formula avgNumPrefetchesPerEntry;
 
         // Hit stack distance histograms
         statistics::Histogram hitSDlinHist;

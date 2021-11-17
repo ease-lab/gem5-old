@@ -53,7 +53,7 @@ class HWPProbeEvent(object):
     def register(self):
         if self.obj:
             for name in self.names:
-                print("Register HWP probe ", name)
+                print("Register HWP probe ", name, self.obj)
                 self.prefetcher.getCCObject().addEventProbe(
                     self.obj.getCCObject(), name)
 
@@ -549,6 +549,9 @@ class IStreamPrefetcher(QueuedPrefetcher):
     use_virtual_addresses = True
 
     degree = Param.Int(2, "Number of prefetches to generate")
+
+    record_misses_only = Param.Bool(False, "Only record cache misses.")
+    skip_in_cache = Param.Bool(False, "Skip recording accesses found in cache")
 
     region_size = Param.MemorySize("4kB","size of the region that is covered "
         "within one buffer entry. Usually one page.")
