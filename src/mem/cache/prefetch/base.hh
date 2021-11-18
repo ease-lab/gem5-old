@@ -437,6 +437,12 @@ class Base : public ClockedObject
     void addEventProbe(SimObject *obj, const char *name);
 
     /**
+     * Add a Cache different to the default one to listen for events.
+     * @param obj The SimObject pointer of the cache to listen.
+     */
+    void addCacheProbes(SimObject *obj);
+
+    /**
      * Add a BaseTLB object to be used whenever a translation is needed.
      * This is generally required when the prefetcher is allowed to generate
      * page crossing references and/or uses virtual addresses for training.
