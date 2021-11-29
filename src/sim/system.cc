@@ -478,7 +478,7 @@ System::regStats()
         std::stringstream namestr;
         ccprintf(namestr, "work_item_type%d", j);
         workItemStats[j]->init(20)
-                         .name(namestr.str())
+                         .name(name() + "." + namestr.str())
                          .desc("Run time stat for" + namestr.str())
                          .prereq(*workItemStats[j]);
     }
