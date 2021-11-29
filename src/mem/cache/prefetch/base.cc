@@ -308,7 +308,6 @@ Base::addEventProbe(SimObject *obj, const char *name)
     }
 }
 
-}
 
 void
 Base::addTLB(BaseTLB *t)
