@@ -827,10 +827,12 @@ template<class T>
 IGbE::DescCache<T>::DescCache(IGbE *i, const std::string n, int s)
     : igbe(i), _name(n), cachePnt(0), size(s), curFetching(0),
       wbOut(0), moreToWb(false), wbAlignment(0), pktPtr(NULL),
+      enable_grpc_instr(false), port(50051),
       wbDelayEvent([this]{ writeback1(); }, n),
       fetchDelayEvent([this]{ fetchDescriptors1(); }, n),
       fetchEvent([this]{ fetchComplete(); }, n),
       wbEvent([this]{ wbComplete(); }, n)
+
 {
     fetchBuf = new T[size];
     wbBuf = new T[size];
@@ -1144,8 +1146,20 @@ IGbE::DescCache<T>::unserialize(CheckpointIn &cp)
 }
 
 template<class T>
+void
+IGbE::DescCache<T>::configGrpcInstrumentation(bool enable, int port) {
+    enable_grpc_instr = enable;
+    port = port;
+}
+
+template<class T>
 bool
 IGbE::DescCache<T>::instrumentGRPCPacket(TcpPtr tcp) {
+
+    if (!enable_grpc_instr) {
+        return false;
+    }
+
 
     constexpr bool rx = (std::is_same<T, RxDesc>::value) ? true : false;
     // Check in which system we are:

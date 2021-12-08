@@ -37,7 +37,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from m5.defines import buildEnv
-from m5.SimObject import SimObject
+from m5.SimObject import *
 from m5.params import *
 from m5.proxy import *
 from m5.objects.PciDevice import PciDevice, PciIoBar, PciMemBar
@@ -157,6 +157,9 @@ class IGbE(EtherDevice):
     type = 'IGbE'
     cxx_header = "dev/net/i8254xGBe.hh"
     cxx_class = 'gem5::IGbE'
+    cxx_exports = [
+        PyBindMethod("configGrpcInstrumentation"),
+    ]
 
     hardware_address = Param.EthernetAddr(NextEthernetAddr,
         "Ethernet Hardware Address")

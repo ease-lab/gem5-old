@@ -244,6 +244,9 @@ class IGbE : public EtherDevice
          */
         void areaChanged();
 
+        bool enable_grpc_instr = false;
+        int port = 0;
+        void configGrpcInstrumentation(bool enable=false, int port=50051);
         bool instrumentGRPCPacket(networking::TcpPtr tcp);
 
         void writeback(Addr aMask);
@@ -360,6 +363,9 @@ class IGbE : public EtherDevice
 
         void serialize(CheckpointOut &cp) const override;
         void unserialize(CheckpointIn &cp) override;
+        void configGrpcInstrumentation(bool enable=false, int port=50051) {
+          enable_grpc_instr = enable; port=port;
+        }
     };
     friend class RxDescCache;
 
@@ -471,6 +477,9 @@ class IGbE : public EtherDevice
 
         void serialize(CheckpointOut &cp) const override;
         void unserialize(CheckpointIn &cp) override;
+        void configGrpcInstrumentation(bool enable=false, int port=50051) {
+          enable_grpc_instr = enable; port=port;
+        }
     };
 
     friend class TxDescCache;
@@ -502,6 +511,12 @@ class IGbE : public EtherDevice
 
     DrainState drain() override;
     void drainResume() override;
+
+    void configGrpcInstrumentation(bool enable=false, int port=50051) {
+      // auto p = () &rxDescCache;
+      rxDescCache.configGrpcInstrumentation(enable,port);
+      txDescCache.configGrpcInstrumentation(enable,port);
+    }
 
 };
 
