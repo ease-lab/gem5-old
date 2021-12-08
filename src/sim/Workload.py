@@ -24,7 +24,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from m5.params import *
-from m5.SimObject import SimObject
+from m5.SimObject import SimObject, PyBindMethod
 
 from m5.objects.SimpleMemory import *
 
@@ -36,6 +36,29 @@ class Workload(SimObject):
 
     wait_for_remote_gdb = Param.Bool(False,
         "Wait for a remote GDB connection");
+
+class WorkloadHooks(SimObject):
+    type = 'WorkloadHooks'
+    cxx_header = "sim/workload_hooks.hh"
+    cxx_class = 'gem5::WorkloadHooks'
+
+    workload = Param.Workload(NULL, "Workload to run on this system")
+
+    enable_context_switch_hook = Param.Bool(False,
+        "Enable stats/task info dumping at context switch boundaries")
+
+    enable_getgid_hook = Param.Bool(False,
+        "enable tracing getgid syscall exits")
+    exit_on_context_switch = Param.Bool(False,
+        "Exit simulation on a context switch")
+
+    cxx_exports = [
+        PyBindMethod("addCSFilterConfig"),
+        PyBindMethod("clearCSFilter"),
+    ]
+    # def hookUpWorkload(self, workload):
+    #     self.getCCObject().hookUp(workload.getCCObject())
+
 
 class KernelWorkload(Workload):
     type = 'KernelWorkload'

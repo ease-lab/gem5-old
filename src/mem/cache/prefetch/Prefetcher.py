@@ -545,6 +545,7 @@ class IStreamPrefetcher(QueuedPrefetcher):
         PyBindMethod("startReplay"),
         PyBindMethod("dumpRecTrace"),
         PyBindMethod("initReplay"),
+        PyBindMethod("addEventProbeCS"),
     ]
     use_virtual_addresses = True
 
@@ -584,7 +585,14 @@ class IStreamPrefetcher(QueuedPrefetcher):
     replay_addr_range = Param.AddrRange("10kB",
         "Same as 'record_addr_range' but the replaying functionality.")
 
+    start_on_context_switch = Param.Bool(False,
+                            "Trigger Record/Replay start by Context Switch")
+    stop_on_context_switch = Param.Bool(False,
+                            "Trigger Record/Replay stop by Context Switch")
 
+    def registerEventProbeCS(self, obj):
+        self.getCCObject().addEventProbeCS(
+                    obj.getCCObject(), "SwitchActiveIdle")
 
 
 

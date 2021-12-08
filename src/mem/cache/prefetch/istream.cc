@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005 The Regents of The University of Michigan
+ * Copyright (c) 2021 EASE Group, The University of Edinburgh
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,6 +46,39 @@ GEM5_DEPRECATED_NAMESPACE(Prefetcher, prefetch);
 namespace prefetch
 {
 
+void
+IStream::PrefetchListenerCS::notify(const bool &active)
+{
+  if (active) {
+    DPRINTF(HWPrefetch, "Notify Context switch from idle to active");
+    warn( "Notify Context switch from idle to active");
+    if (parent.waitForCSActive) {
+      parent.waitForCSActive = false;
+      parent.startRecord();
+      parent.startReplay();
+      if (parent.stopOnCS) {
+        parent.waitForCSIdle = true;
+      }
+    }
+  } else {
+    DPRINTF(HWPrefetch, "Notify Context switch from active to idle");
+    warn("Notify Context switch from active to idle");
+    // if (parent.stopOnCS && parent.waitForCSIdle){
+    //   // At the moment we send the packet from the drive system we want th
+    // exitSimLoop(csprintf("Exit on CS packet "
+    //                 "< %s %d->%d len: %d [%x %x %x %x] >"
+    //                 " tick: %ull",
+    //                     rx ? "rx" : "tx",
+    //                     tcp->sport(), tcp->dport(),
+    //                     plen,
+    //                     pload[plen-4],pload[plen-3],
+    //                     pload[plen-2],pload[plen-1],
+    //                     curTick()),
+    //             0);
+    // }
+  }
+}
+
 IStream::IStream(const IStreamPrefetcherParams& p)
   : Queued(p),
 
@@ -56,6 +89,8 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   // backdoor(name() + "-backdoor", *this),
   // dmaPort(this, p.sys),
   enable_record(false), enable_replay(false),
+  startOnCS(p.start_on_context_switch),stopOnCS(p.stop_on_context_switch),
+  waitForCSActive(false),waitForCSIdle(false),
   recordMissesOnly(p.record_misses_only),
   skipInCache(p.skip_in_cache),
   degree(p.degree),
@@ -486,8 +521,12 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
 
 
 void
-  IStream::startRecord()
+  IStream::startRecord(bool wait_for_cs)
 {
+  if (wait_for_cs) {
+    waitForCSActive = true;
+    return;
+  }
   DPRINTF(HWPrefetch, "Start Recoding instructions\n");
   // recordStream->reset();
   recordBuffer->clear();
@@ -496,13 +535,18 @@ void
 }
 
 bool
-  IStream::startReplay()
+  IStream::startReplay(bool wait_for_cs)
 {
   if (!memInterface->replayReady()) {
     warn("Cannot start replay because memory is not "
          "completely initialized.\n");
     return false;
   }
+  if (wait_for_cs) {
+    waitForCSActive = true;
+    return true;
+  }
+
   DPRINTF(HWPrefetch, "Start Replaying instructions\n");
   // recordStream->reset();
   memInterface->resetReplay();
@@ -628,6 +672,14 @@ IStream::calcStackDistance(Addr addr)
 
 
 
+
+void
+IStream::addEventProbeCS(SimObject *obj, const char *name)
+{
+    warn("Register HWP event probe %s for obj: %s", name, obj->name());
+    ProbeManager *pm(obj->getProbeManager());
+    listenersSC.push_back(new PrefetchListenerCS(*this, pm, name));
+}
 
 
 

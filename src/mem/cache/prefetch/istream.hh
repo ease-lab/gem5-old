@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005 The Regents of The University of Michigan
+ * Copyright (c) 2021 EASE Group, The University of Edinburgh
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -56,6 +56,37 @@ namespace gem5
 
     class IStream : public Queued
     {
+        /**
+         * Probe Listener to handle probe events probe events from context
+         * switches
+         */
+        class PrefetchListenerCS : public ProbeListenerArgBase<bool>
+        {
+          public:
+            PrefetchListenerCS(IStream &_parent, ProbeManager *pm,
+                             const std::string &name)
+                : ProbeListenerArgBase(pm, name),
+                  parent(_parent) {}
+            void notify(const bool &active) override;
+          protected:
+            IStream &parent;
+            std::string name() { return parent.name() + ".cs"; }
+        };
+
+        /** Array of probe listeners */
+        std::vector<PrefetchListenerCS *> listenersSC;
+
+
+    public:
+
+        /**
+         * Add a SimObject and a probe name to monitor context switches
+         * @param obj The SimObject pointer to listen from
+         * @param name The probe name
+         */
+        void addEventProbeCS(SimObject *obj, const char *name);
+
+
       public:
         IStream(const IStreamPrefetcherParams& p);
         ~IStream() = default;
@@ -652,7 +683,7 @@ namespace gem5
         unsigned int totalReplayEntries;
 
         /** Size one buffer entry requires to store in memory */
-        const unsigned int entry_size;
+        unsigned int entry_size;
 
         // /** Packets waiting to be sent. */
         // std::list<PacketPtr> blockedPkts;
@@ -845,6 +876,11 @@ namespace gem5
       bool enable_record;
       bool enable_replay;
 
+      const bool startOnCS;
+      const bool stopOnCS;
+      bool waitForCSActive;
+      bool waitForCSIdle;
+
       /** Record only cache misses */
       const bool recordMissesOnly;
       /** Skip recording for entries found in cache (L2) */
@@ -914,8 +950,8 @@ namespace gem5
 
       void squashPrefetches(Addr addr, bool is_secure);
 
-      void startRecord();
-      bool startReplay();
+      void startRecord(bool wait_for_cs = false);
+      bool startReplay(bool wait_for_cs = false);
 
     public:
       void initReplay(std::string filename);
