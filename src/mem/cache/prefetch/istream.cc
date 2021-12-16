@@ -49,34 +49,23 @@ namespace prefetch
 void
 IStream::PrefetchListenerCS::notify(const bool &active)
 {
-  if (active) {
-    DPRINTF(HWPrefetch, "Notify Context switch from idle to active");
-    warn( "Notify Context switch from idle to active");
-    if (parent.waitForCSActive) {
+  if (active && parent.waitForCSActive) {
+    DPRINTF(HWPrefetch, "Notify Context switch from idle to active.\n");
       parent.waitForCSActive = false;
       parent.startRecord();
       parent.startReplay();
       if (parent.stopOnCS) {
         parent.waitForCSIdle = true;
       }
-    }
-  } else {
-    DPRINTF(HWPrefetch, "Notify Context switch from active to idle");
-    warn("Notify Context switch from active to idle");
-    // if (parent.stopOnCS && parent.waitForCSIdle){
-    //   // At the moment we send the packet from the drive system we want th
-    // exitSimLoop(csprintf("Exit on CS packet "
-    //                 "< %s %d->%d len: %d [%x %x %x %x] >"
-    //                 " tick: %ull",
-    //                     rx ? "rx" : "tx",
-    //                     tcp->sport(), tcp->dport(),
-    //                     plen,
-    //                     pload[plen-4],pload[plen-3],
-    //                     pload[plen-2],pload[plen-1],
-    //                     curTick()),
-    //             0);
-    // }
   }
+
+  if (!active && parent.waitForCSIdle) {
+    DPRINTF(HWPrefetch, "Notify Context switch from active to idle.\n");
+    parent.stopRecord();
+  }
+
+
+
 }
 
 IStream::IStream(const IStreamPrefetcherParams& p)
@@ -103,9 +92,20 @@ IStream::IStream(const IStreamPrefetcherParams& p)
 {
   lRegionSize = floorLog2(regionSize);
   blksPerRegion = regionSize / blkSize;
+
+  // Calculate the real entry size not the one we have for modeling.
+  int bits_region_ptr = 48 - lRegionSize;
+  entrySize_n_addr = ceil(float(bits_region_ptr) / 8);
+  entrySize_n_mask = ceil(float(blksPerRegion) / 8);
+  realEntrySize = entrySize_n_addr + entrySize_n_mask;
+
+
+
   DPRINTF(HWPrefetch, "Cfg: region size: %i, blk size %i => "
-                "%i blocks per region.\n", regionSize, blkSize,
-                    blksPerRegion);
+                "%i blks/region => Entry size: %ib/%iB (%iB + %iB)\n",
+                    regionSize, blkSize, blksPerRegion,
+                    bits_region_ptr + blksPerRegion,
+                    realEntrySize, entrySize_n_addr, entrySize_n_mask);
 
 
   // recordStream = new TraceStream(p.trace_record_file);
@@ -181,8 +181,8 @@ IStream::drain()
 
       Addr blkAddr = blockAddress(pfi.getAddr());
 
-      DPRINTF(HWPrefetch, "Access to block %#x, pAddress %#x\n",
-        blkAddr, pfi.getPaddr());
+      // DPRINTF(HWPrefetch, "Access to block %#x, pAddress %#x\n",
+      //   blkAddr, pfi.getPaddr());
 
       // for (int d = 1; d <= degree; d++) {
       //   Addr newAddr = blkAddr + d * (blkSize);
@@ -227,7 +227,7 @@ IStream::drain()
       }
       if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
         replayStats.pfUseful++;
-        if (pfi.isCacheMiss())
+        if (!inCache(pkt->getAddr(), pkt->isSecure()))
             // This case happens when a demand hits on a prefetched line
             // that's not in the requested coherency state.
             replayStats.pfUsefulButMiss++;
@@ -437,28 +437,28 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
       bool skip(false);
       // Only record cache misses
       if (recordMissesOnly && !pfi.isCacheMiss()) {
-        DPRINTF(HWPrefetch, "Skip recording address because "
-            "cache hit:%#x\n", blkAddr);
+        // DPRINTF(HWPrefetch, "Skip recording address because "
+        //     "cache hit:%#x\n", blkAddr);
         recordStats.cacheHit++;
         skip = true;
       }
       Addr pBlkAddr = blockAddress(pfi.getPaddr());
       if (cacheSnoop && (inCache(pBlkAddr, pfi.isSecure()))) {
-        DPRINTF(HWPrefetch, "Skip recording address because "
-            "still in cache: %#x PA: %#x\n", blkAddr, pBlkAddr);
+        // DPRINTF(HWPrefetch, "Skip recording address because "
+        //     "still in cache: %#x PA: %#x\n", blkAddr, pBlkAddr);
         recordStats.inCache++;
         if (skipInCache) {
           skip = true;
         }
       }
       if (cacheSnoop && (inMissQueue(pBlkAddr, pfi.isSecure()))) {
-        DPRINTF(HWPrefetch, "Address is in miss queue. Record it "
-            "%#x PA: %#x\n", blkAddr, pBlkAddr);
+        // DPRINTF(HWPrefetch, "Address is in miss queue. Record it "
+        //     "%#x PA: %#x\n", blkAddr, pBlkAddr);
         recordStats.hitInMissQueue++;
       }
       if (cacheSnoop && (hasBeenPrefetched(pBlkAddr, pfi.isSecure()))) {
-        DPRINTF(HWPrefetch, "Do not skip recording when this was a prefetch. "
-            "Record it %#x PA: %#x\n", blkAddr, pBlkAddr);
+      // DPRINTF(HWPrefetch, "Do not skip recording when this was a prefetch. "
+      //     "Record it %#x PA: %#x\n", blkAddr, pBlkAddr);
         recordStats.cacheHitBecausePrefetch++;
         skip = false;
       }
@@ -556,6 +556,12 @@ bool
   return true;
 }
 
+void
+  IStream::startAtScheduling()
+{
+  waitForCSActive = true;
+  waitForCSIdle = false;
+}
 
 
 
@@ -914,7 +920,7 @@ IStream::MemoryInterface::MemoryInterface(IStream& _parent,
     replay_addr_range(replay_addr_range),
     recordIdx(0), totalRecordEntries(0),
     replayIdx(0), totalReplayEntries(0),
-    entry_size(2*sizeof(uint64_t))
+    entry_size(_parent.realEntrySize)
 {
   // Before enabling this feature we need to ensure that everything works as
   // intended.
@@ -945,8 +951,9 @@ IStream::MemoryInterface::writeRecord(BufferEntryPtr entry)
   }
 
   // Create a data buffer and write the entry to it.
-  uint8_t* data = new uint8_t[entry_size];
-  entry->writeTo(data);
+  // uint8_t* data = new uint8_t[entry_size];
+  // entry->writeTo(data);
+  uint8_t* data = serialize(entry);
 
   DPRINTF(HWPrefetch, "WR %#x -> [%s] to MEM. (Nr. %i)\n",
                     addr, entry->print(), totalRecordEntries + 1);
@@ -1023,8 +1030,11 @@ IStream::MemoryInterface::readRecordComplete(Addr addr,
   parent.memIFStats.totalReadLatency += curTick() - rd_start;
 
   // // Now create a new buffer entry and copy the data into it.
-  auto newEntry = std::make_shared<BufferEntry>();
-  newEntry->readFrom(data);
+  // auto newEntry = std::make_shared<BufferEntry>();
+  // newEntry->readFrom(data);
+  auto newEntry = deserialize(data);
+
+
   // delete data;
   // Finally fill the entry in the replay buffer.
   parent.replayBuffer->fill(newEntry);
@@ -1141,11 +1151,14 @@ IStream::MemoryInterface::readRecordMem(std::vector<BufferEntryPtr>& entries)
   // 2. Parse the raw data and pass the entries back to the writting function
   for (int idx = 0; idx < totalRecordEntries; idx++){
 
-    auto entry = std::make_shared<BufferEntry>();
+
     // Calculate the address in the record buffer
     int bufferAddr = idx*entry_size;
 
-    entry->readFrom(&buffer[bufferAddr]);
+    // auto entry = std::make_shared<BufferEntry>();
+    // entry->readFrom(&buffer[bufferAddr]);
+    auto entry = deserialize(&buffer[bufferAddr]);
+
     DPRINTF(HWPrefetch, "Copy [%s]: from idx: %#x\n",
                 entry->print(), bufferAddr);
 
@@ -1244,7 +1257,9 @@ IStream::MemoryInterface::initReplayMem(std::vector<BufferEntryPtr>& trace)
     // Calculate the address in the replay memory
     int bufferAddr = idx*entry_size;
 
-    trace[idx]->writeTo(&buffer[bufferAddr]);
+    // trace[idx]->writeTo(&buffer[bufferAddr]);
+    serialize(trace[idx], &buffer[bufferAddr]);
+
     DPRINTF(HWPrefetch, "Copy [%s]: to address: %#x\n",
                 trace[idx]->print(), bufferAddr);
   }

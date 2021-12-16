@@ -546,6 +546,7 @@ class IStreamPrefetcher(QueuedPrefetcher):
         PyBindMethod("dumpRecTrace"),
         PyBindMethod("initReplay"),
         PyBindMethod("addEventProbeCS"),
+        PyBindMethod("startAtScheduling"),
     ]
     use_virtual_addresses = True
 

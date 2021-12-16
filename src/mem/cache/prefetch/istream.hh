@@ -740,6 +740,75 @@ namespace gem5
         void writeRecordComplete(Addr addr, Tick wr_start);
         void readRecordComplete(Addr addr, uint8_t* data, Tick rd_start);
 
+        /** Serialize an buffer entry to byte array which can be written to
+         * memory.
+         *
+         * @param entry The buffer entry to be serialized
+         * @param data* A byte array pointer where the data will be written
+         *              The pointer needs to be null as the function will
+         *              allocate the neccessary memory
+         * @return Number of bytes that has been serialized.
+        */
+        int serialize(BufferEntryPtr entry, uint8_t* data) {
+          // We have 48 bit addresses. Therefore we first mask the 16 MSBs.
+          // Then we cut of the unnecessary LSBs and finaly we copy
+          // the remaining bytes to the data buffer.
+          int64_t tmp = entry->_addr << (64-48);
+          int64_t tmp2 = tmp >> ((64-48) + parent.lRegionSize);
+          DPRINTF(HWPrefetch, "%x | %x \n", tmp, tmp2);
+          memcpy(data, (uint8_t*)&tmp2, parent.entrySize_n_addr);
+          memcpy(data + parent.entrySize_n_addr,
+                (uint8_t*)&entry->_mask, parent.entrySize_n_mask);
+          DDUMP(HWPrefetch, data, parent.realEntrySize);
+          return parent.realEntrySize;
+        }
+
+        /** Deserialize an buffer entry from a byte array (which was read from
+         * memory.)
+         *
+         * @param entry The buffer entry be serialized
+         * @param data* A byte array pointer where the data should be written
+         * @return Number of bytes that has been serialized.
+        */
+        int deserialize(BufferEntryPtr entry, uint8_t* data) {
+          uint64_t tmp = 0;
+          memcpy((uint8_t*)&tmp, data, parent.entrySize_n_addr);
+
+          int64_t tmp2 = tmp << ((64-48) + parent.lRegionSize);
+          int64_t tmp3 = tmp2 >> (64-48);
+          DPRINTF(HWPrefetch, "%x | %x | %x \n", tmp, tmp2,tmp3);
+          entry->_addr = tmp3;
+
+          memcpy((uint8_t*)&entry->_mask,
+                  data + parent.entrySize_n_addr, parent.entrySize_n_mask);
+          DDUMP(HWPrefetch, data, parent.realEntrySize);
+          return parent.realEntrySize;
+        }
+
+        /** Serialize an buffer entry to byte array which can be written to
+         * memory.
+         *
+         * @param entry The buffer entry to be serialized
+         * @return A pointer to the serialized data
+        */
+        uint8_t* serialize(BufferEntryPtr entry) {
+          uint8_t* data = new uint8_t[parent.realEntrySize];
+          serialize(entry, data);
+          return data;
+        }
+
+        /** Deserialize an buffer entry from a byte array (which was read from
+         * memory.)
+         *
+         * @param data* A byte array pointer from where the data
+         *              for the new entry will be read.
+         * @return The desialized buffer entry.
+        */
+        BufferEntryPtr deserialize(uint8_t* data) {
+          BufferEntryPtr entry = std::make_shared<BufferEntry>();
+          deserialize(entry, data);
+          return entry;
+        }
         /** Read */
         // void fetchDescriptor(Addr address);
         // void fetchDescComplete();
@@ -893,6 +962,10 @@ namespace gem5
       unsigned lRegionSize;
       /** Number of blocks that fit in one region */
       unsigned blksPerRegion;
+      /** Real entry size in bytes */
+      unsigned realEntrySize;
+      unsigned entrySize_n_mask;
+      unsigned entrySize_n_addr;
 
       /** Number number of prefetches where already created. */
       unsigned pfComputed;
@@ -952,6 +1025,15 @@ namespace gem5
 
       void startRecord(bool wait_for_cs = false);
       bool startReplay(bool wait_for_cs = false);
+      void stopRecord() {
+        recordBuffer->flush(true);
+        enable_record = false;
+        enable_replay = false;
+      }
+      bool stopReplay() {
+        enable_replay = false;
+      }
+      void startAtScheduling();
 
     public:
       void initReplay(std::string filename);
