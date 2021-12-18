@@ -137,6 +137,12 @@ namespace gem5
           return (_mask & (1 << idx)) != 0;
         }
 
+        bool checkTouch(uint idx) {
+          auto r = check(idx);
+          touch(idx);
+          return r;
+        }
+
         bool empty() { return _mask == 0; }
         // bool check(Addr addr)
         // {
@@ -967,10 +973,19 @@ namespace gem5
       unsigned entrySize_n_mask;
       unsigned entrySize_n_addr;
 
-      /** Number number of prefetches where already created. */
-      unsigned pfComputed;
+      /** Number number of prefetches have already recorded and replayed. */
+      unsigned pfRecorded;
+      unsigned pfReplayed;
       /** Total number number of prefetches the trace contains. */
       unsigned totalPrefetches;
+      /** Counter to monitor how many of the issued prefetches we actually
+       * used. This counter is used to steer the replay run ahead.
+       */
+      unsigned pfIssued, pfUsed, pfUnused;
+
+      /** Replay run ahead distance */
+      const signed replayDistance;
+
 
       /** Stack distance of meta data */
       StackDistCalc sdcalc;
@@ -1022,6 +1037,18 @@ namespace gem5
       void translationComplete(DeferredPacket *dp, bool failed) override;
 
       void squashPrefetches(Addr addr, bool is_secure);
+
+      void prefetchUnused() override {
+        prefetchStats.pfUnused++;
+        pfUnused++;
+      }
+      PacketPtr getPacket() override {
+        PacketPtr pkt = Queued::getPacket();
+        if (pkt != nullptr) {
+          pfIssued++;
+        }
+        return pkt;
+      }
 
       void startRecord(bool wait_for_cs = false);
       bool startReplay(bool wait_for_cs = false);

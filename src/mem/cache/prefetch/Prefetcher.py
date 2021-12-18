@@ -566,10 +566,18 @@ class IStreamPrefetcher(QueuedPrefetcher):
         "Threashold to decide wheather a buffer entry will be written to the "
         "file or discarded.")
 
-    # Maximum number of requests waiting for response. Set to 0 for an
-    # unlimited number of outstanding requests.
-    max_outstanding_reqs = Param.Int(0,
-                            "Maximum number of outstanding requests")
+    # Replaying always needs to runs ahead of the actual recording to be
+    # effective. However if replaying is to fast we thrash the cache.
+    # Replayed prefetches will be evicted to fast to be useful. They will hurt
+    # the performance not to much because we still prefetch into the LLC.
+    # However, still we lose unnecessary cycles. In order to avoid the
+    # thrashing one can specify how much the replay can run ahead.
+    # This works because we know that there is a high similarity
+    # and a high accuray.
+    # Its self regulating.
+    # A negative value will not limit the prefetcher.
+    replay_distance = Param.Int(-1,
+                            "Allow replaying to run ahead of recording.")
 
     port = RequestPort("Interface of the IStream prefetcher to "
                             "read and write the traces directly to memory")

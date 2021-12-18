@@ -84,7 +84,9 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   skipInCache(p.skip_in_cache),
   degree(p.degree),
   regionSize(p.region_size),
-  pfComputed(0),totalPrefetches(0),
+  pfRecorded(0), pfReplayed(0), totalPrefetches(0),
+  pfIssued(0), pfUsed(0),pfUnused(0),
+  replayDistance(p.replay_distance),
 
   recordStats(this, "recordStats"),
   replayStats(this, "replayStats"),
@@ -226,6 +228,7 @@ IStream::drain()
         return;
       }
       if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
+        pfUsed++;
         replayStats.pfUseful++;
         if (!inCache(pkt->getAddr(), pkt->isSecure()))
             // This case happens when a demand hits on a prefetched line
@@ -476,10 +479,26 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
       IStream::replay(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses)
     {
+
+      // Pace down replay in case we are to far ahead.
+      // This will avoid thrashing the cache.
+      if (replayDistance >= 0) {
+        DPRINTF(HWPrefetch, "Steer replay distance: "
+                "Recorded/Replayed/Issued/Used/Unused prefetches: "
+                "%u/%u/%u/%u/%u\n",
+                  pfReplayed, pfRecorded, pfIssued, pfUsed, pfUnused);
+        if (pfIssued >= pfUsed + pfUnused + replayDistance) {
+          DPRINTF(HWPrefetch, "Slow down replaying.\n");
+          return;
+        }
+      }
+
+
+
       if (!replayBuffer->refill()) {
         DPRINTF(HWPrefetch, "Reached end of trace file. No more records "
           "for prefetching \n");
-        if (pfComputed >= totalPrefetches) {
+        if (pfReplayed >= totalPrefetches) {
           DPRINTF(HWPrefetch, "All prefetches are issued. Replaying done!!\n");
           enable_replay = false;
           return;
@@ -505,10 +524,10 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
       int max = queueSize - pfq.size() - pfqMissingTranslation.size();
       if (max > 0) {
         auto _addresses = replayBuffer->generateNAddresses(max);
-        pfComputed += _addresses.size();
+        pfReplayed += _addresses.size();
         replayStats.pfGenerated += _addresses.size();
         DPRINTF(HWPrefetch, "Generated %i new pref. cand. (max: %i) (%i/%i)\n",
-                      _addresses.size(), max, pfComputed, totalPrefetches);
+                      _addresses.size(), max, pfReplayed, totalPrefetches);
         // Pass them to the prefetch queue.
         // TODO: add priority
         for (auto addr : _addresses) {
@@ -531,6 +550,7 @@ void
   // recordStream->reset();
   recordBuffer->clear();
   memInterface->resetRecord();
+  pfRecorded = 0;
   enable_record = true;
 }
 
@@ -552,6 +572,7 @@ bool
   memInterface->resetReplay();
   replayBuffer->clear();
   replayBuffer->refill();
+  pfReplayed=0; pfIssued=0; pfUsed=0; pfUnused=0;
   enable_replay = true;
   return true;
 }
@@ -721,8 +742,8 @@ void
   if (hit_idx < _buffer.size()) {
     parent.recordStats.hits++;
     parent.recordStats.bufferHitDistHist.sample(hit_idx);
-    DPRINTF(HWPrefetch, "[%#x] hit: Region (%#x:%u)\n",
-      addr, _buffer[hit_idx]->_addr, region.second);
+    // DPRINTF(HWPrefetch, "[%#x] hit: Region (%#x:%u)\n",
+    //   addr, _buffer[hit_idx]->_addr, region.second);
   }
   else {
     parent.recordStats.misses++;
@@ -732,6 +753,10 @@ void
     // Create new entry and push it into the fifo buffer
     add(region.first);
     hit_idx = 0;
+  }
+
+  if (!_buffer[hit_idx]->check(region.second)) {
+    parent.pfRecorded++;
   }
   // Mark the entry block in the region as used
   _buffer[hit_idx]->touch(region.second);
