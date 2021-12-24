@@ -37,6 +37,9 @@
 // #include "kern/linux/events.hh"
 // #include "base/loader/symtab.hh"
 #include "cpu/pc_event.hh"
+#include "params/FunctionEvent.hh"
+#include "params/GetGIDEvent.hh"
+#include "params/SwitchToEvent.hh"
 #include "params/WorkloadHooks.hh"
 #include "sim/sim_object.hh"
 #include "sim/stats.hh"
@@ -51,12 +54,15 @@
 namespace gem5
 {
 
-class FunctionHook : public PCEvent
+class FunctionEvent : public SimObject, PCEvent
 {
   public:
-    FunctionHook(PCEventScope *s, const std::string &desc, Addr addr,
-                    WorkloadHooks *_parent)
-        : PCEvent(s, desc, addr), parent(_parent)
+  typedef FunctionEventParams Params;
+    FunctionEvent(const Params &p, PCEventScope *s,
+                  const std::string &desc, Addr addr,
+                  WorkloadHooks *_parent)
+        : SimObject(p), PCEvent(s, desc, addr),
+        parent(_parent)
     {}
     WorkloadHooks *parent;
     virtual void regProbePoints(ProbeManager *pm) {};
@@ -69,19 +75,12 @@ class WorkloadHooks : public SimObject
   /** The Workload where you want to hock up function events to */
     Workload *workload;
 
-    FunctionHook *switchToEvent = nullptr;
-    FunctionHook *getGidEvent = nullptr;
+    FunctionEvent *switchToEvent = nullptr;
+    FunctionEvent *getGidEvent = nullptr;
     // /** When enabled, dump stats/task info on context switches for
     //  *  Streamline and per-thread cache occupancy studies, etc. */
     const bool enableContextSwitchHook;
     const bool enableGetGIDHook;
-
-
-  public:
-    typedef std::tuple<int, int, int> Filter;
-    std::vector<Filter> filter;
-
-    const bool exitOnCS;
 
   public:
     typedef WorkloadHooksParams Params;
@@ -148,6 +147,44 @@ class WorkloadHooks : public SimObject
     // }
 
 
+// /**
+//  * Function to add a context switch filter.
+//  *
+//  * By default the hook will trigger exits and prob notifies on every
+//  * single context switch. With this function one can specify to trigger
+//  * only on certain events. You can filter by cpu, next, and previous
+//  * PID. If only one parameter matter set the others to a negative value.
+//  * You can add more than one filter
+//  *
+//  * @param cpu_id The cpu where the CS should happen
+//  * @param prev_pid Only tigger if the switch is from a a certain PID.
+//  * @param next_pid Only tigger if the switch is to a a certain PID.
+//  */
+// void addCSFilterConfig(int cpu_id =-1,int prev_pid =-1, int next_pid =-1) {
+//   // filter.push_back(std::make_tuple(cpu_id,prev_pid,next_pid));
+//   // switchToEvent->addCSFilterConfig
+// }
+// void clearCSFilter() {
+//   filter.clear();
+// }
+
+};
+
+
+class SwitchToEvent : public FunctionEvent
+{
+  public:
+  typedef SwitchToEventParams Params;
+    SwitchToEvent(const Params &p, PCEventScope *s, const std::string &desc,
+                    Addr addr, WorkloadHooks *_parent)
+        : FunctionEvent(p, s, desc, addr, _parent), exitOnCS(false)
+    {}
+
+    void process(ThreadContext* tc) override;
+    void regProbePoints(ProbeManager *pm) override {
+      ppSwitchIdleActive = new ProbePointArg<bool>(pm, "SwitchActiveIdle");
+    }
+
     /**
      * Function to add a context switch filter.
      *
@@ -168,53 +205,22 @@ class WorkloadHooks : public SimObject
       filter.clear();
     }
 
-};
 
-
-
-
-
-class DumpStats : public PCEvent
-{
   public:
-    DumpStats(PCEventScope *s, const std::string &desc, Addr addr)
-        : PCEvent(s, desc, addr)
-    {}
+    typedef std::tuple<int, int, int> Filter;
+    std::vector<Filter> filter;
 
-    void process(ThreadContext* tc) override;
-  protected:
-    virtual void getTaskDetails(ThreadContext *tc, uint32_t &pid,
-            uint32_t &tgid, std::string &next_task_str, int32_t &mm);
-
-};
-
-class DumpStats64 : public DumpStats
-{
-  public:
-    using DumpStats::DumpStats;
-
-  private:
-    void getTaskDetails(ThreadContext *tc, uint32_t &pid, uint32_t &tgid,
-                        std::string &next_task_str, int32_t &mm) override;
-};
+    const bool exitOnCS;
 
 
-class SwitchToEvent : public FunctionHook
-{
-  public:
-    SwitchToEvent(PCEventScope *s, const std::string &desc,
-                    Addr addr, WorkloadHooks *_parent)
-        : FunctionHook(s, desc, addr, _parent)
-    {}
 
-    void process(ThreadContext* tc) override;
-    void regProbePoints(ProbeManager *pm) override {
-      ppSwitchIdleActive = new ProbePointArg<bool>(pm, "SwitchActiveIdle");
+// void init() override
+    void init() override {
+      hookUp();
+      // switchToEvent->regProbePoints(this->getProbeManager());
     }
 
   protected:
-    // void getTaskDetails(ThreadContext *tc, uint32_t &pid,
-    //         uint32_t &tgid, std::string &next_task_str, int32_t &mm);
 
     ProbePoint *ppSwitch;
     /** To probe when one of the corese switches between idle and active.
@@ -224,18 +230,20 @@ class SwitchToEvent : public FunctionHook
     ProbePointArg<bool> *ppSwitchIdleActive;
 };
 
-class GetGIDEvent : public FunctionHook
+class GetGIDEvent : public FunctionEvent
 {
   public:
-    GetGIDEvent(PCEventScope *s, const std::string &desc,
+  typedef GetGIDEventParams Params;
+    GetGIDEvent(const Params &p, PCEventScope *s, const std::string &desc,
                   Addr addr, WorkloadHooks *_parent)
-        : FunctionHook(s, desc, addr, _parent)
+        : FunctionEvent(p, s, desc, addr, _parent)
     {}
 
     void process(ThreadContext* tc) override;
   protected:
     // void getTaskDetails(ThreadContext *tc, uint32_t &pid,
     //         uint32_t &tgid, std::string &next_task_str, int32_t &mm);
+
 
 };
 

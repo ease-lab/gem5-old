@@ -37,6 +37,29 @@ class Workload(SimObject):
     wait_for_remote_gdb = Param.Bool(False,
         "Wait for a remote GDB connection");
 
+
+class FunctionEvent(SimObject):
+    type = 'FunctionEvent'
+    cxx_header = "sim/workload_hooks.hh"
+    cxx_class = 'gem5::FunctionEvent'
+    abstract = True
+
+class SwitchToEvent(FunctionEvent):
+    type = 'SwitchToEvent'
+    cxx_header = "sim/workload_hooks.hh"
+    cxx_class = 'gem5::SwitchToEvent'
+
+    cxx_exports = [
+        PyBindMethod("addCSFilterConfig"),
+        PyBindMethod("clearCSFilter"),
+    ]
+
+class GetGIDEvent(FunctionEvent):
+    type = 'GetGIDEvent'
+    cxx_header = "sim/workload_hooks.hh"
+    cxx_class = 'gem5::GetGIDEvent'
+
+
 class WorkloadHooks(SimObject):
     type = 'WorkloadHooks'
     cxx_header = "sim/workload_hooks.hh"
@@ -52,12 +75,14 @@ class WorkloadHooks(SimObject):
     exit_on_context_switch = Param.Bool(False,
         "Exit simulation on a context switch")
 
-    cxx_exports = [
-        PyBindMethod("addCSFilterConfig"),
-        PyBindMethod("clearCSFilter"),
-    ]
+    switch_to_event = Param.FunctionEvent("Function event")
+
     # def hookUpWorkload(self, workload):
     #     self.getCCObject().hookUp(workload.getCCObject())
+
+
+
+
 
 
 class KernelWorkload(Workload):

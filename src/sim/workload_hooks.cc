@@ -75,8 +75,8 @@ WorkloadHooks::WorkloadHooks(const Params &p) :
     SimObject(p),
     workload(p.workload),
     enableContextSwitchHook(p.enable_context_switch_hook),
-    enableGetGIDHook(p.enable_getgid_hook),
-    exitOnCS(p.exit_on_context_switch)
+    enableGetGIDHook(p.enable_getgid_hook)
+    // exitOnCS(p.exit_on_context_switch)
 {}
 
 bool
@@ -257,13 +257,6 @@ WorkloadHooks::mapPid(ThreadContext *tc, uint32_t pid)
 void
 SwitchToEvent::process(ThreadContext *tc)
 {
-    // warn("Want to get task_info");
-    // linux::ThreadInfo ti(tc);
-    // warn("__switch_to(prev[rdi[%i]], next[rsi[%i]]), cpuID %i,
-    //socketId %i, contextID %i",
-    //     tc->readIntReg(X86ISA::INTREG_RDI),
-    //tc->readIntReg(X86ISA::INTREG_RSI),
-    //     tc->cpuId(), tc->socketId(), tc->contextId());
 
     linux::ThreadInfo ti(tc);
 
@@ -307,8 +300,8 @@ SwitchToEvent::process(ThreadContext *tc)
     // In the following we will check if this is a context switch we care about
 
     bool trigger = false;
-    if (parent->filter.size() > 0) {
-        for (auto flt : parent->filter) {
+    if (filter.size() > 0) {
+        for (auto flt : filter) {
             int _cpu_id, _prev_pid, _next_pid;
             std::tie(_cpu_id, _prev_pid, _next_pid) = flt;
             // warn("%s,%s,%s", _cpu_id, _prev_pid, _next_pid);
@@ -348,7 +341,7 @@ SwitchToEvent::process(ThreadContext *tc)
         ppSwitchIdleActive->notify(false);
     }
 
-    if (parent->exitOnCS) {
+    if (exitOnCS) {
         // At the moment we send the packet from the drive system we want th
         exitSimLoop(str,0, curTick(),0);
     }
