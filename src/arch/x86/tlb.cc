@@ -425,17 +425,32 @@ TLB::translate(const RequestPtr &req,
                     !(flags & (CPL0FlagBit << FlagShift)));
             CR0 cr0 = tc->readMiscRegNoEffect(MISCREG_CR0);
             bool badWrite = (!entry->writable && (inUser || cr0.wp));
-            if ((inUser && !entry->user) ||
-                (mode == BaseMMU::Write && badWrite)) {
+            if (inUser && !entry->user) {
                 // The page must have been present to get into the TLB in
                 // the first place. We'll assume the reserved bits are
                 // fine even though we're not checking them.
+                DPRINTF(TLB, "SKIP: Page fault. TLB in user mode but entry "
+                             "requires kernel mode "
+                             "In: %s entry: %s cr0.wp: %x\n",
+                            inUser ? "user" : "kernel",
+                            entry->user ? "user" : "kernel",
+                            cr0.wp);
+                // return std::make_shared<PageFault>(vaddr, true, mode,
+                //                                    inUser, false);
+            }
+            if (mode == BaseMMU::Write && badWrite) {
+                // The page must have been present to get into the TLB in
+                // the first place. We'll assume the reserved bits are
+                // fine even though we're not checking them.
+                DPRINTF(TLB, "Page fault. Translation request write mode but "
+                            " is write protected\n");
                 return std::make_shared<PageFault>(vaddr, true, mode, inUser,
                                                    false);
             }
             if (storeCheck && badWrite) {
                 // This would fault if this were a write, so return a page
                 // fault that reflects that happening.
+                DPRINTF(TLB, "Page fault. Bad write\n", entry->paddr);
                 return std::make_shared<PageFault>(
                     vaddr, true, BaseMMU::Write, inUser, false);
             }

@@ -390,7 +390,7 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
 
     } else {
         DPRINTF(HWPrefetch, "%s Translation of vaddr %#x failed, dropping "
-                "prefetch request %#x \n", tlb->name(),
+                "prefetch request. \n", tlb->name(),
                 it->translationRequest->getVaddr());
         // statsQueued.pfTranslationFail++;
         replayStats.pfTranslationFail++;
