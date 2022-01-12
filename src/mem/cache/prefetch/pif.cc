@@ -244,6 +244,7 @@ PIF::PrefetchListenerPC::notify(const Addr& pc)
 void
 PIF::addEventProbeRetiredInsts(SimObject *obj, const char *name)
 {
+    warn("Register HWP event probe %s for obj: %s", name, obj->name());
     ProbeManager *pm(obj->getProbeManager());
     listenersPC.push_back(new PrefetchListenerPC(*this, pm, name));
 }

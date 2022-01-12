@@ -531,7 +531,11 @@ class PIFPrefetcher(QueuedPrefetcher):
     def listenFromProbeRetiredInstructions(self, simObj):
         if not isinstance(simObj, SimObject):
             raise TypeError("argument must be of SimObject type")
-        self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))
+    # self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))
+
+    # def registerEventlistenFromProbeRetiredInstructionsProbeCS(self, obj):
+        self.getCCObject().addEventProbeRetiredInsts(
+                    simObj.getCCObject(), "RetiredInstsPC")
 
 
 

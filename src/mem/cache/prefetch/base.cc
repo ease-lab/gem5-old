@@ -280,6 +280,8 @@ Base::regProbeListeners()
      * parent cache using the probe "Miss". Also connect to "Hit", if the
      * cache is configured to prefetch on accesses.
      */
+    warn("Register %i HWP probe listeners for obj: %s\n",
+            listeners.size(), this->name());
     if (listeners.empty() && cache != nullptr) {
         ProbeManager *pm(cache->getProbeManager());
         listeners.push_back(new PrefetchListener(*this, pm, "Miss", false,
@@ -294,7 +296,7 @@ Base::regProbeListeners()
 void
 Base::addEventProbe(SimObject *obj, const char *name)
 {
-    warn("Register HWP event probe %s for obj: ", name, obj->name());
+    warn("Add HWP event probe %s for obj: %s\n", name, obj->name());
     ProbeManager *pm(obj->getProbeManager());
     if (strcmp(name, "All") == 0) {
         listeners.push_back(new PrefetchListener(*this, pm, "Miss", false,
