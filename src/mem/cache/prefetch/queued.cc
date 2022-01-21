@@ -467,16 +467,26 @@ Queued::insert(const PacketPtr &pkt, PrefetchInfo &new_pfi,
         dpp.tc = cache->system->threads[translation_req->contextId()];
         DPRINTF(HWPrefetch, "Prefetch queued with no translation. "
                 "addr:%#x priority: %3d\n", new_pfi.getAddr(), priority);
-        addToQueue(pfqMissingTranslation, dpp);
+        addToQueue(pfqMissingTranslation, dpp, true);
     }
 }
 
 void
 Queued::addToQueue(std::list<DeferredPacket> &queue,
-                             DeferredPacket &dpp)
+                             DeferredPacket &dpp, bool translation)
 {
+    /* Verify prefetch buffer space for request
+     * In case its a translation queue and this queue is full
+     * we will drop the new incoming packet instead of the old
+     */
+    if (translation && queue.size() == missingTranslationQueueSize) {
+        DPRINTF(HWPrefetch, "Missing translation Queue full, drop "
+                 "insertion of: %#x\n", dpp.pfInfo.getAddr());
+        statsQueued.pfRemovedFull++;
+        return;
+    }
     /* Verify prefetch buffer space for request */
-    if (queue.size() == queueSize) {
+    if (!translation && queue.size() == queueSize) {
         statsQueued.pfRemovedFull++;
         /* Lowest priority packet */
         iterator it = queue.end();

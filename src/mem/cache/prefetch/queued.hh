@@ -213,8 +213,11 @@ class Queued : public Base
      * Adds a DeferredPacket to the specified queue
      * @param queue selected queue to use
      * @param dpp DeferredPacket to add
+     * @param translation True if the target queue is a transation queue.
+     *                    False otherwise.
      */
-    void addToQueue(std::list<DeferredPacket> &queue, DeferredPacket &dpp);
+    void addToQueue(std::list<DeferredPacket> &queue, DeferredPacket &dpp,
+            bool translation = false);
 
     /**
      * Starts the translations of the queued prefetches with a
