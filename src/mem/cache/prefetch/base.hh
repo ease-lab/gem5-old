@@ -427,7 +427,7 @@ class Base : public ClockedObject
      * @param pkt The memory request causing the event
      * @param miss whether this event comes from a cache miss
      */
-    void probeNotify(const PacketPtr &pkt, bool miss);
+    virtual void probeNotify(const PacketPtr &pkt, bool miss);
 
     /**
      * Add a SimObject and a probe name to listen events from

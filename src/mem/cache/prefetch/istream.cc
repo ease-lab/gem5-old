@@ -173,13 +173,296 @@ IStream::drain()
     //   //   delete replayStream;
     // }
 
+/********************************************************
+ *         I-Stream prefetcher aka. Jukebox
+ ********************************************************
+ * This prefetcher is specially designed to limit the
+ * impact of cold hardware structures we investigate
+ * for serverless functions comming from the fact the
+ * 100s to thousands of functions are scheduled on the
+ * same CPU core and there are a lot of context switches
+ * between the different functions.
+ *
+ * The Instruction stream prefetcher exists of two part:
+ *
+ * - Record:
+ *    This component track instruction accesses and store
+ *    them in compressed form in a trace.
+ *    Note this is a prefetcher designed specifically for
+ *    optimizing start ups and cold starts that means as
+ *    soon as the trace cannot hold more entries the
+ *    prefetcher will stop recording.
+ *
+ * - Replay:
+ *    This component is independent of the recording.
+ *    It will read a prevously recorded trace, create
+ *    prefetches to the prevously recorded addresse in order
+ *    to basically restore the cache lines we loose while
+ *    the function was descheduled.
+ */
+
+
+/*
+ * RECORD ---------------------------------------------
+ */
+
+void IStream::squashPrefetches(Addr addr, bool is_secure)
+{
+    // Squash queued prefetches if demand miss to same line
+    if (queueSquash) {
+    auto itr = pfq.begin();
+    while (itr != pfq.end()) {
+        if (itr->pfInfo.getAddr() == addr &&
+        itr->pfInfo.isSecure() == is_secure) {
+        DPRINTF(HWPrefetch, "Removing pf candidate addr: %#x "
+            "(cl: %#x), demand request going to the same addr\n",
+            itr->pfInfo.getAddr(),
+            blockAddress(itr->pfInfo.getAddr()));
+        delete itr->pkt;
+        itr = pfq.erase(itr);
+        statsQueued.pfRemovedDemand++;
+        }
+        else {
+        ++itr;
+        }
+    }
+    }
+}
+
+void
+IStream::probeNotify(const PacketPtr &pkt, bool miss)
+{
+    // Don't notify prefetcher on SWPrefetch, cache maintenance
+    // operations or for writes that we are coaslescing.
+    if (pkt->cmd.isSWPrefetch()) return;
+    if (pkt->req->isCacheMaintenance()) return;
+    if (pkt->isWrite() && cache != nullptr && cache->coalesce()) return;
+    if (!pkt->req->hasPaddr()) {
+        panic("Request must have a physical address");
+    }
+    // Also do not notify clean evictions or invalidation requests
+    if (pkt->req->isUncacheable()) return;
+    if (pkt->cmd == MemCmd::CleanEvict) return;
+    if (pkt->isInvalidate() && !pkt->req->isInstFetch() && !pkt->isRead())
+        return;
+
+    // Update prefetch statistics
+    if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
+        usefulPrefetches += 1;
+        prefetchStats.pfUseful++;
+        // TODO:
+        replayStats.pfUseful++;
+        pfUsed++;
+        if (miss) {
+            // This case happens when a demand hits on a prefetched line
+            // that's not in the requested coherency state.
+            prefetchStats.pfUsefulButMiss++;
+            replayStats.pfUsefulButMiss++;
+        }
+    }
+
+    // Create prefetch information
+    Addr addr = 0;
+    if (useVirtualAddresses && pkt->req->hasVaddr()) {
+        addr = pkt->req->getVaddr();
+    } else if (!useVirtualAddresses) {
+        addr = pkt->req->getPaddr();
+    } else {
+        return;
+    }
+    PrefetchInfo pfi(pkt, addr, miss);
+    Addr blk_addr = blockAddress(addr);
+
+    // Incase we see a request to the same address the prefetch
+    // would be to late.
+    squashPrefetches(blk_addr, pfi.isSecure());
+
+    // notify(pkt, pfi);
+
+    // Check if this access should be recorded
+    if (observeAccess(pkt, blk_addr, miss)) {
+        record(blk_addr);
+    }
+
+
+
+    notify(pkt,pfi);
+}
+
+
+
+
+    // void
+    //   IStream::notify(const PacketPtr& pkt, const PrefetchInfo& pfi)
+    // {
+    //   if (useVirtualAddresses && (tlb == nullptr)) {
+    //     DPRINTF(HWPrefetch, "Using virtual for Record and replay "
+    //       " requires to register a TLB.\n");
+    //     return;
+    //   }
+    // //   if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
+    // //     pfUsed++;
+    // //     replayStats.pfUseful++;
+    // //     if (!inCache(pkt->getAddr(), pkt->isSecure()))
+    // //         // This case happens when a demand hits on a prefetched line
+    // //         // that's not in the requested coherency state.
+    // //         replayStats.pfUsefulButMiss++;
+    // // }
+
+
+    //   Addr blk_addr = blockAddress(pfi.getAddr());
+    //   // Incase we see a request to the same address the prefetch
+    //   // would be to late.
+    //   squashPrefetches(blk_addr, pfi.isSecure());
+    // }
+
+
+
+
+
+bool
+IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
+{
+    if (!enable_record) return false;
+
+    // For checking the caches we need the physical address
+    Addr pBlkAddr = blockAddress(pkt->req->getPaddr());
+
+    bool inst = pkt->req->isInstFetch();
+    bool read = pkt->isRead();
+    bool inv = pkt->isInvalidate();
+    bool prefetch = pkt->cmd.isPrefetch();
+    bool hitOnPrefetch = hasBeenPrefetched(pBlkAddr, pkt->isSecure());
+    bool cached_target = inCache(pBlkAddr, pkt->isSecure());
+    bool inMissq_target = inMissQueue(pBlkAddr, pkt->isSecure());
+
+    // We can configure the prefetcher to get notifications from another
+    // cache level. In this case we listen probe this cache as well.
+    bool cached_listener = (listenerCache) ?
+            listenerCache->inCache(pBlkAddr, pkt->isSecure()) : false;
+    bool inMissq_listener = (listenerCache) ?
+            listenerCache->inMissQueue(pBlkAddr, pkt->isSecure()) : false;
+
+    // if (pkt->req->isUncacheable()) return false;
+    // if (fetch && !onInst) return false;
+    // if (!fetch && !onData) return false;
+    // if (!fetch && read && !onRead) return false;
+    // if (!fetch && !read && !onWrite) return false;
+    // if (!fetch && !read && inv) return false;
+    // if (pkt->cmd == MemCmd::CleanEvict) return false;
+
+    // // Only record instructions
+    if (!inst) return false;
+
+    bool rec_addr(miss);
+
+    // Accesses that are already cached in the target cache we do not need
+    // to record. This probing is necessary because we can configure the
+    // recording to sit in another cache level then the target cache. In this
+    // case the misses we get are misses from the listening cache. But they
+    // might hit in the target cache.
+    if (cacheSnoop && skipInCache) {
+        if (cached_target) rec_addr = false;
+        // if (inMissq_target) rec_addr = true;
+    }
+
+    // if (!miss) {
+    //     // if (prefetchOnPfHit) {
+    //     //     rec_addr = true;
+    //     // }
+    //     // if (!prefetchOnAccess) {
+    //     //     rec_addr = false;
+    //     // }
+    //     // if (recordMissesOnly)
+    //     //     rec_addr = false;
+
+    // }
+
+    if (hitOnPrefetch) {
+          rec_addr = true;
+        }
+
+    // Only record instructions
+    if (!inst) rec_addr = false;
+
+    DPRINTF(HWPrefetch, "Notify: A: %#x [%s|%s|%s| %s,%s,%s,%s,%s] > %s\n",
+            addr,
+            miss ? "miss" : "hit",
+            inst ? "inst" : "data",
+            read ? "rd" : "wr",
+            prefetch ? "pf " : "",
+            hitOnPrefetch ? "hitpf " : "",
+            cached_target ? "cached " : "",
+            inMissq_target ? "hitMq " : " ",
+            rec_addr ? "rec" : "skip");
+
+    // Update the access statistics
+    recordStats.notifies++;
+    if (!miss) recordStats.cacheHit++;
+    if (prefetch) recordStats.pfRequest++;
+    if (inst) recordStats.demandRequest++;
+    if (hitOnPrefetch) recordStats.cacheHitBecausePrefetch++;
+    if (cached_target||cached_listener) recordStats.inCache++;
+    if (inMissq_target||inMissq_listener) recordStats.hitInMissQueue++;
+
+
+    if (!rec_addr) {
+        recordStats.accessDrops++;
+        return false;
+    }
+
+
+
+    return true;
+
+
+
+
+
+}
+
+
+
+void
+IStream::record(const Addr addr)
+{
+        Addr blkAddr = blockAddress(addr);
+    auto region = regionAddrIdx(blkAddr);
+    DPRINTF(HWPrefetch, "Record blk access [%#x] -> Region (%#x:%u)\n",
+    blkAddr, region.first, region.second);
+    recordBuffer->access(addr);
+    recordBuffer->flush();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     void
       IStream::calculatePrefetch(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses)
     {
-      if (enable_record) {
-        record(pfi);
-      }
+    //   if (enable_record) {
+    //     record(pfi);
+    //   }
 
 
       Addr blkAddr = blockAddress(pfi.getAddr());
@@ -197,28 +480,13 @@ IStream::drain()
       }
     }
 
-    void IStream::squashPrefetches(Addr addr, bool is_secure)
-    {
-      // Squash queued prefetches if demand miss to same line
-      if (queueSquash) {
-        auto itr = pfq.begin();
-        while (itr != pfq.end()) {
-          if (itr->pfInfo.getAddr() == addr &&
-            itr->pfInfo.isSecure() == is_secure) {
-            DPRINTF(HWPrefetch, "Removing pf candidate addr: %#x "
-              "(cl: %#x), demand request going to the same addr\n",
-              itr->pfInfo.getAddr(),
-              blockAddress(itr->pfInfo.getAddr()));
-            delete itr->pkt;
-            itr = pfq.erase(itr);
-            statsQueued.pfRemovedDemand++;
-          }
-          else {
-            ++itr;
-          }
-        }
-      }
-    }
+
+/*
+ * REPLAY ----------------------------------------------
+ */
+
+
+
 
     void
       IStream::notify(const PacketPtr& pkt, const PrefetchInfo& pfi)
@@ -228,20 +496,14 @@ IStream::drain()
           " requires to register a TLB.\n");
         return;
       }
-      if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
-        pfUsed++;
-        replayStats.pfUseful++;
-        if (!inCache(pkt->getAddr(), pkt->isSecure()))
-            // This case happens when a demand hits on a prefetched line
-            // that's not in the requested coherency state.
-            replayStats.pfUsefulButMiss++;
-    }
-
-
-      Addr blk_addr = blockAddress(pfi.getAddr());
-      // Incase we see a request to the same address the prefetch
-      // would be to late.
-      squashPrefetches(blk_addr, pfi.isSecure());
+    //   if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
+    //     pfUsed++;
+    //     replayStats.pfUseful++;
+    //     if (!inCache(pkt->getAddr(), pkt->isSecure()))
+    //         // This case happens when a demand hits on a prefetched line
+    //         // that's not in the requested coherency state.
+    //         replayStats.pfUsefulButMiss++;
+    // }
 
       // Calculate prefetches given this access
       std::vector<AddrPriority> addresses;
@@ -426,55 +688,6 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
       return std::make_pair(regionAddress(addr), regionIndex(addr));
     }
 
-    void
-      IStream::record(const PrefetchInfo& pfi)
-    {
-      recordStats.notifies++;
-      Addr blkAddr = blockAddress(pfi.getAddr());
-      auto region = regionAddrIdx(blkAddr);
-      DPRINTF(HWPrefetch, "Record blk access [%#x] -> Region (%#x:%u)\n",
-        blkAddr, region.first, region.second);
-
-      // We will skip recording the address when the entry still
-      // remain in the cache.
-      //
-      bool skip(false);
-      // Only record cache misses
-      if (recordMissesOnly && !pfi.isCacheMiss()) {
-        // DPRINTF(HWPrefetch, "Skip recording address because "
-        //     "cache hit:%#x\n", blkAddr);
-        recordStats.cacheHit++;
-        skip = true;
-      }
-      Addr pBlkAddr = blockAddress(pfi.getPaddr());
-      if (cacheSnoop && (inCache(pBlkAddr, pfi.isSecure()))) {
-        // DPRINTF(HWPrefetch, "Skip recording address because "
-        //     "still in cache: %#x PA: %#x\n", blkAddr, pBlkAddr);
-        recordStats.inCache++;
-        if (skipInCache) {
-          skip = true;
-        }
-      }
-      if (cacheSnoop && (inMissQueue(pBlkAddr, pfi.isSecure()))) {
-        // DPRINTF(HWPrefetch, "Address is in miss queue. Record it "
-        //     "%#x PA: %#x\n", blkAddr, pBlkAddr);
-        recordStats.hitInMissQueue++;
-      }
-      if (cacheSnoop && (hasBeenPrefetched(pBlkAddr, pfi.isSecure()))) {
-      // DPRINTF(HWPrefetch, "Do not skip recording when this was a prefetch. "
-      //     "Record it %#x PA: %#x\n", blkAddr, pBlkAddr);
-        recordStats.cacheHitBecausePrefetch++;
-        skip = false;
-      }
-      if (skip) {
-        recordStats.accessDrops++;
-        return;
-      }
-
-      recordBuffer->access(blkAddr);
-      recordBuffer->flush();
-
-    }
 
     void
       IStream::replay(const PrefetchInfo& pfi,
@@ -1684,6 +1897,10 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     "Number of accesses we skipped for recording because addr in missqueue"),
   ADD_STAT(cacheHitBecausePrefetch, statistics::units::Count::get(),
     "Number of cache hits not skipped because they where useful cache hits."),
+  ADD_STAT(demandRequest, statistics::units::Count::get(),
+    "Number of notf. from a demand request."),
+  ADD_STAT(pfRequest, statistics::units::Count::get(),
+    "Number of notifications from a prefetch request"),
   ADD_STAT(accessDrops, statistics::units::Count::get(),
     "Number of accesses we actually dropped due to 'cacheHit',"
     " 'inCache' or 'hitInMissQueue'"),

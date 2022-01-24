@@ -959,6 +959,8 @@ namespace gem5
 
       /** Record only cache misses */
       const bool recordMissesOnly;
+      /** Record prefetch requests */
+      const bool recordPfRequests;
       /** Skip recording for entries found in cache (L2) */
       const bool skipInCache;
 
@@ -1015,10 +1017,11 @@ namespace gem5
         listenerCache = cache;
       }
 
+      bool observeAccess(const PacketPtr &pkt, Addr addr, bool miss);
 
+      void probeNotify(const PacketPtr &pkt, bool miss) override;
 
-
-      void notify(const PacketPtr &pkt, const PrefetchInfo &pfi) override;
+      void notify(const PacketPtr &pkt, const PrefetchInfo &pfi);
 
       void calculatePrefetch(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses);
@@ -1109,6 +1112,8 @@ namespace gem5
         statistics::Scalar inCache;
         statistics::Scalar hitInMissQueue;
         statistics::Scalar cacheHitBecausePrefetch;
+        statistics::Scalar demandRequest;
+        statistics::Scalar pfRequest;
         statistics::Scalar accessDrops;
 
         // /** The hitting entries average distance to the head of
