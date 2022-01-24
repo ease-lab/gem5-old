@@ -551,6 +551,7 @@ class IStreamPrefetcher(QueuedPrefetcher):
         PyBindMethod("initReplay"),
         PyBindMethod("addEventProbeCS"),
         PyBindMethod("startAtScheduling"),
+        PyBindMethod("addListenerCache"),
     ]
     use_virtual_addresses = True
 
@@ -607,8 +608,16 @@ class IStreamPrefetcher(QueuedPrefetcher):
         self.getCCObject().addEventProbeCS(
                     obj.getCCObject(), "SwitchActiveIdle")
 
+    def listenFromCache(self, listenerCache):
+        # if not isinstance(listenerCache, SimObject):
+        #     raise TypeError("argument must be of SimObjct type")
+        # self.addEvent(HWPProbeEvent(self, listenerCache, "All"))
+        self.getCCObject().addListenerCache(listenerCache.getCCObject())
 
-
+    # def registerTLB(self, simObj):
+    #     if not isinstance(simObj, SimObject):
+    #         raise TypeError("argument must be a SimObject type")
+    #     self._tlbs.append(simObj)
 # def listenFromProbeRetiredInstructions(self, simObj):
 #     if not isinstance(simObj, SimObject):
 #         raise TypeError("argument must be of SimObject type")

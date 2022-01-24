@@ -87,6 +87,7 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   pfRecorded(0), pfReplayed(0), totalPrefetches(0),
   pfIssued(0), pfUsed(0),pfUnused(0),
   replayDistance(p.replay_distance),
+  listenerCache(nullptr),
 
   recordStats(this, "recordStats"),
   replayStats(this, "replayStats"),

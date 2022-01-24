@@ -39,6 +39,7 @@
 
 #include "debug/HWPrefetch.hh"
 #include "dev/dma_device.hh"
+#include "mem/cache/base.hh"
 #include "mem/cache/prefetch/queued.hh"
 #include "mem/packet.hh"
 // #include "mem/port.hh"
@@ -927,7 +928,7 @@ namespace gem5
       std::pair<Addr, unsigned> regionAddrIdx(Addr addr);
 
 
-      void record(const PrefetchInfo& pfi);
+      void record(const Addr addr);
 
       void replay(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses);
@@ -990,6 +991,8 @@ namespace gem5
       /** Stack distance of meta data */
       StackDistCalc sdcalc;
 
+
+
       // /**
       //  * Callback to flush and close all open output streams on exit. If
       //  * we were calling the destructor it could be done there.
@@ -1003,7 +1006,14 @@ namespace gem5
       void calcStackDistance(Addr addr);
 
 
+
     public:
+/** Registered tlb for address translations */
+      BaseCache * listenerCache;
+/** Registered tlb for address translations */
+      void addListenerCache(BaseCache * cache) {
+        listenerCache = cache;
+      }
 
 
 
@@ -1199,48 +1209,6 @@ namespace gem5
         /** Write bandwidth in bytes/s  */
         statistics::Formula writeBW;
       } memIFStats;
-
-      // unsigned cumHitDistance
-
-
-
-
-
-    //   /**
-    //      * Probe Listener to handle probe events from the CPU
-    //      */
-    //   class PrefetchListenerPC : public ProbeListenerArgBase<Addr>
-    //   {
-    //   public:
-    //     PrefetchListenerPC(IStream& _parent, ProbeManager* pm,
-    //       const std::string& name)
-    //       : ProbeListenerArgBase(pm, name),
-    //       parent(_parent)
-    //     {
-    //     }
-    //     void notify(const Addr& pc) override;
-    //   protected:
-    //     IStream& parent;
-    //   };
-
-    //   /** Array of probe listeners */
-    //   std::vector<PrefetchListenerPC*> listenersPC;
-
-
-
-    //   /**
-    //          * Add a SimObject and a probe name to monitor the retired
-    //  instructions
-    //          * @param obj The SimObject pointer to listen from
-    //          * @param name The probe name
-    //          */
-    //   void addEventProbeRetiredInsts(SimObject* obj, const char* name);
-
-    //   /**
-    //        * Updates the prefetcher structures upon an instruction retired
-    //        * @param pc PC of the instruction being retired
-    //        */
-    //   void notifyRetiredInst(const Addr pc);
 
 
     };
