@@ -555,10 +555,15 @@ class IStreamPrefetcher(QueuedPrefetcher):
     ]
     use_virtual_addresses = True
 
-    degree = Param.Int(2, "Number of prefetches to generate")
 
-    record_misses_only = Param.Bool(False, "Only record cache misses.")
-    skip_in_cache = Param.Bool(False, "Skip recording accesses found in cache")
+    rec_hit_in_target_cache = Param.Bool(False, "Record accesses found in the"
+                " cache we want to prefetch in")
+    rec_hit_in_listener_cache = Param.Bool(False, "Record accesses found in "
+                " the cache we get notifications")
+    rec_hit_on_pf_target_cache = Param.Bool(True, "Record accesses that hit "
+                " on a prefetch in the cache we want to prefetch in")
+    rec_hit_on_pf_listener_cache = Param.Bool(False, "Record accesses that "
+                "hit on a prefetch in the cache we get notifications")
 
     region_size = Param.MemorySize("4kB","size of the region that is covered "
         "within one buffer entry. Usually one page.")
@@ -566,10 +571,6 @@ class IStreamPrefetcher(QueuedPrefetcher):
         "Number of entries in the FIFO buffer")
     replay_buffer_entries = Param.Unsigned("4",
         "Number of entries in the FIFO buffer")
-
-    usefullness_threshold = Param.Percent(50,
-        "Threashold to decide wheather a buffer entry will be written to the "
-        "file or discarded.")
 
     # Replaying always needs to runs ahead of the actual recording to be
     # effective. However if replaying is to fast we thrash the cache.

@@ -80,9 +80,10 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   enable_record(false), enable_replay(false),
   startOnCS(p.start_on_context_switch),stopOnCS(p.stop_on_context_switch),
   waitForCSActive(false),waitForCSIdle(false),
-  recordMissesOnly(p.record_misses_only),
-  skipInCache(p.skip_in_cache),
-  degree(p.degree),
+  recordHitInTargetCache(p.rec_hit_in_target_cache),
+  recordHitInListCache(p.rec_hit_in_listener_cache),
+  recordHitOnPfTargetCache(p.rec_hit_on_pf_target_cache),
+  recordHitOnPfListCache(p.rec_hit_on_pf_listener_cache),
   regionSize(p.region_size),
   pfRecorded(0), pfReplayed(0), totalPrefetches(0),
   pfIssued(0), pfUsed(0),pfUnused(0),
@@ -331,17 +332,19 @@ IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
     bool inst = pkt->req->isInstFetch();
     bool read = pkt->isRead();
     bool inv = pkt->isInvalidate();
-    bool prefetch = pkt->cmd.isPrefetch();
-    bool hitOnPrefetch = hasBeenPrefetched(pBlkAddr, pkt->isSecure());
+    bool prefetch = pkt->req->isPrefetch();
+    bool hitOnPrefetch_target = hasBeenPrefetched(pBlkAddr, pkt->isSecure());
     bool cached_target = inCache(pBlkAddr, pkt->isSecure());
     bool inMissq_target = inMissQueue(pBlkAddr, pkt->isSecure());
 
     // We can configure the prefetcher to get notifications from another
     // cache level. In this case we listen probe this cache as well.
+    bool hitOnPrefetch_listener = (listenerCache) ?
+          listenerCache->hasBeenPrefetched(pBlkAddr, pkt->isSecure()) : false;
     bool cached_listener = (listenerCache) ?
-            listenerCache->inCache(pBlkAddr, pkt->isSecure()) : false;
+          listenerCache->inCache(pBlkAddr, pkt->isSecure()) : false;
     bool inMissq_listener = (listenerCache) ?
-            listenerCache->inMissQueue(pBlkAddr, pkt->isSecure()) : false;
+          listenerCache->inMissQueue(pBlkAddr, pkt->isSecure()) : false;
 
     // if (pkt->req->isUncacheable()) return false;
     // if (fetch && !onInst) return false;
@@ -351,36 +354,38 @@ IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
     // if (!fetch && !read && inv) return false;
     // if (pkt->cmd == MemCmd::CleanEvict) return false;
 
-    // // Only record instructions
+    recordStats.notifies++;
+    if (prefetch) recordStats.pfRequest++;
+    if (inst) recordStats.instRequest++;
+    if (!inst) recordStats.dataRequest++;
+    // Only record instructions
     if (!inst) return false;
 
     bool rec_addr(miss);
+    if (recordHitInListCache && !miss) {
+      rec_addr = true;
+    }
+    // if (inMissq_listener) {
+    //   rec_addr = false;
+    // }
 
     // Accesses that are already cached in the target cache we do not need
     // to record. This probing is necessary because we can configure the
     // recording to sit in another cache level then the target cache. In this
     // case the misses we get are misses from the listening cache. But they
     // might hit in the target cache.
-    if (cacheSnoop && skipInCache) {
-        if (cached_target) rec_addr = false;
-        // if (inMissq_target) rec_addr = true;
+    if (cached_target && !recordHitInTargetCache) {
+      rec_addr = false;
     }
 
     // if (!miss) {
-    //     // if (prefetchOnPfHit) {
-    //     //     rec_addr = true;
-    //     // }
-    //     // if (!prefetchOnAccess) {
-    //     //     rec_addr = false;
-    //     // }
-    //     // if (recordMissesOnly)
-    //     //     rec_addr = false;
+    if (hitOnPrefetch_listener && recordHitOnPfListCache) {
+      rec_addr = true;
+    }
+    if (hitOnPrefetch_target && recordHitOnPfTargetCache) {
+      rec_addr = true;
+    }
 
-    // }
-
-    if (hitOnPrefetch) {
-          rec_addr = true;
-        }
 
     // Only record instructions
     if (!inst) rec_addr = false;
@@ -391,19 +396,21 @@ IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
             inst ? "inst" : "data",
             read ? "rd" : "wr",
             prefetch ? "pf " : "",
-            hitOnPrefetch ? "hitpf " : "",
+            hitOnPrefetch_target ? "hitpf " : "",
             cached_target ? "cached " : "",
             inMissq_target ? "hitMq " : " ",
             rec_addr ? "rec" : "skip");
 
     // Update the access statistics
-    recordStats.notifies++;
     if (!miss) recordStats.cacheHit++;
-    if (prefetch) recordStats.pfRequest++;
-    if (inst) recordStats.demandRequest++;
-    if (hitOnPrefetch) recordStats.cacheHitBecausePrefetch++;
-    if (cached_target||cached_listener) recordStats.inCache++;
-    if (inMissq_target||inMissq_listener) recordStats.hitInMissQueue++;
+    // if (prefetch) recordStats.pfRequest++;
+    // if (inst) recordStats.demandRequest++;
+    if (hitOnPrefetch_target) recordStats.hitOnPrefetchInTargetCache++;
+    if (cached_target) recordStats.inTargetCache++;
+    if (inMissq_target) recordStats.hitInTargetMissQueue++;
+    if (cached_listener) recordStats.inListCache++;
+    if (inMissq_listener) recordStats.hitInListMissQueue++;
+    if (hitOnPrefetch_listener) recordStats.hitOnPrefetchInListCache++;
 
 
     if (!rec_addr) {
@@ -1891,14 +1898,24 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     "Number of misses in the record buffer"),
   ADD_STAT(cacheHit, statistics::units::Count::get(),
     "Number of accesses we might skip recording because it is a cache hit"),
-  ADD_STAT(inCache, statistics::units::Count::get(),
+  ADD_STAT(inTargetCache, statistics::units::Count::get(),
     "Number of accesses we might skip recording because pAddr is in cache"),
-  ADD_STAT(hitInMissQueue, statistics::units::Count::get(),
-    "Number of accesses we skipped for recording because addr in missqueue"),
-  ADD_STAT(cacheHitBecausePrefetch, statistics::units::Count::get(),
+  ADD_STAT(inListCache, statistics::units::Count::get(),
+    "Number of accesses we might skip recording because pAddr is in cache"),
+  ADD_STAT(hitInTargetMissQueue, statistics::units::Count::get(),
+    "Number of accesses hitting in the miss queue of the cache we want to "
+    "prefetch from"),
+  ADD_STAT(hitInListMissQueue, statistics::units::Count::get(),
+    "Number of accesses hitting in the miss queue of the cache we get "
+    "notifications from"),
+  ADD_STAT(hitOnPrefetchInTargetCache, statistics::units::Count::get(),
     "Number of cache hits not skipped because they where useful cache hits."),
-  ADD_STAT(demandRequest, statistics::units::Count::get(),
-    "Number of notf. from a demand request."),
+  ADD_STAT(hitOnPrefetchInListCache, statistics::units::Count::get(),
+    "Number of cache hits not skipped because they where useful cache hits."),
+  ADD_STAT(instRequest, statistics::units::Count::get(),
+    "Number of notf. from instruction request"),
+  ADD_STAT(dataRequest, statistics::units::Count::get(),
+    "Number of notf. from data"),
   ADD_STAT(pfRequest, statistics::units::Count::get(),
     "Number of notifications from a prefetch request"),
   ADD_STAT(accessDrops, statistics::units::Count::get(),

@@ -957,14 +957,15 @@ namespace gem5
       bool waitForCSActive;
       bool waitForCSIdle;
 
-      /** Record only cache misses */
-      const bool recordMissesOnly;
-      /** Record prefetch requests */
-      const bool recordPfRequests;
-      /** Skip recording for entries found in cache (L2) */
-      const bool skipInCache;
+      /** Record Hits in the target cache */
+      const bool recordHitInTargetCache;
+      /** Record Hits in the listener cache */
+      const bool recordHitInListCache;
+      /** Record Hits of prefetches in the target cache */
+      const bool recordHitOnPfTargetCache;
+      /** Record Hits of prefetches in the listener cache */
+      const bool recordHitOnPfListCache;
 
-      const int degree;
       /** The size of one spatial region. */
       const unsigned regionSize;
       /** log_2(block size spatil region). */
@@ -1109,10 +1110,14 @@ namespace gem5
         statistics::Scalar misses;
 
         statistics::Scalar cacheHit;
-        statistics::Scalar inCache;
-        statistics::Scalar hitInMissQueue;
-        statistics::Scalar cacheHitBecausePrefetch;
-        statistics::Scalar demandRequest;
+        statistics::Scalar inTargetCache;
+        statistics::Scalar inListCache;
+        statistics::Scalar hitInTargetMissQueue;
+        statistics::Scalar hitInListMissQueue;
+        statistics::Scalar hitOnPrefetchInTargetCache;
+        statistics::Scalar hitOnPrefetchInListCache;
+        statistics::Scalar instRequest;
+        statistics::Scalar dataRequest;
         statistics::Scalar pfRequest;
         statistics::Scalar accessDrops;
 
