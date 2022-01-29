@@ -713,23 +713,23 @@ namespace gem5
         //  */
         // bool allocateWaitingRespSlot(PacketPtr pkt);
 
-        // /**
-        //  * Generate a new request and associated packet
-        //  *
-        //  * @param addr Physical address to use
-        //  * @param size Size of the request
-        //  * @param cmd Memory command to send
-        //  * @param flags Optional request flags
-        //  */
-        // PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
-        //                     Request::FlagsType flags = 0);
-        // /**
-        //  * Generate a new request and associated packet
-        //  *
-        //  * @param pkt The packet to be send.
-        //  * @param atomic The protocol used for sending. Default is timining.
-        //  */
-        // bool sendPacket(PacketPtr pkt, bool atomic=false);
+      // /**
+      //  * Generate a new request and associated packet
+      //  *
+      //  * @param addr Physical address to use
+      //  * @param size Size of the request
+      //  * @param cmd Memory command to send
+      //  * @param flags Optional request flags
+      //  */
+      // PacketPtr getPacket(Addr addr, unsigned size, const MemCmd& cmd,
+      //                     Request::FlagsType flags = 0);
+      // /**
+      //  * Generate a new request and associated packet
+      //  *
+      //  * @param pkt The packet to be send.
+      //  * @param atomic The protocol used for sending. Default is timining.
+      //  */
+      // bool sendPacket(PacketPtr pkt, bool atomic=false);
 
         // void readResp(BufferEntry);
         // // GenericCache::ExternalInterface
@@ -928,7 +928,6 @@ namespace gem5
       std::pair<Addr, unsigned> regionAddrIdx(Addr addr);
 
 
-      void record(const Addr addr);
 
       void replay(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses);
@@ -965,6 +964,8 @@ namespace gem5
       const bool recordHitOnPfTargetCache;
       /** Record Hits of prefetches in the listener cache */
       const bool recordHitOnPfListCache;
+      /** Record N for a miss */
+      const unsigned recNAtMiss;
 
       /** The size of one spatial region. */
       const unsigned regionSize;
@@ -1018,8 +1019,16 @@ namespace gem5
         listenerCache = cache;
       }
 
-      bool observeAccess(const PacketPtr &pkt, Addr addr, bool miss);
+      enum AccessType
+      {
+          INV,HIT_L1,HIT_L1_PF,
+          HIT_L2, HIT_L2_PF, MISS_L2
+      };
+      AccessType observeAccess(const PacketPtr &pkt, Addr addr, bool miss);
 
+      void record(const Addr addr, AccessType atype);
+
+      bool filterAccessTypes(AccessType accType);
       void probeNotify(const PacketPtr &pkt, bool miss) override;
 
       void notify(const PacketPtr &pkt, const PrefetchInfo &pfi);
@@ -1117,7 +1126,7 @@ namespace gem5
         statistics::Scalar hitOnPrefetchInTargetCache;
         statistics::Scalar hitOnPrefetchInListCache;
         statistics::Scalar instRequest;
-        statistics::Scalar dataRequest;
+        statistics::Scalar readCleanReq;
         statistics::Scalar pfRequest;
         statistics::Scalar accessDrops;
 

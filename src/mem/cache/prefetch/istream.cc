@@ -84,6 +84,7 @@ IStream::IStream(const IStreamPrefetcherParams& p)
   recordHitInListCache(p.rec_hit_in_listener_cache),
   recordHitOnPfTargetCache(p.rec_hit_on_pf_target_cache),
   recordHitOnPfListCache(p.rec_hit_on_pf_listener_cache),
+  recNAtMiss(p.rec_n_at_miss),
   regionSize(p.region_size),
   pfRecorded(0), pfReplayed(0), totalPrefetches(0),
   pfIssued(0), pfUsed(0),pfUnused(0),
@@ -244,7 +245,7 @@ IStream::probeNotify(const PacketPtr &pkt, bool miss)
     // Also do not notify clean evictions or invalidation requests
     if (pkt->req->isUncacheable()) return;
     if (pkt->cmd == MemCmd::CleanEvict) return;
-    if (pkt->isInvalidate() && !pkt->req->isInstFetch() && !pkt->isRead())
+    if (pkt->isInvalidate())
         return;
 
     // Update prefetch statistics
@@ -281,8 +282,9 @@ IStream::probeNotify(const PacketPtr &pkt, bool miss)
     // notify(pkt, pfi);
 
     // Check if this access should be recorded
-    if (observeAccess(pkt, blk_addr, miss)) {
-        record(blk_addr);
+    auto accessType = observeAccess(pkt, blk_addr, miss);
+    if (filterAccessTypes(accessType)) {
+      record(blk_addr, accessType);
     }
 
 
@@ -290,41 +292,43 @@ IStream::probeNotify(const PacketPtr &pkt, bool miss)
     notify(pkt,pfi);
 }
 
-
-
-
-    // void
-    //   IStream::notify(const PacketPtr& pkt, const PrefetchInfo& pfi)
-    // {
-    //   if (useVirtualAddresses && (tlb == nullptr)) {
-    //     DPRINTF(HWPrefetch, "Using virtual for Record and replay "
-    //       " requires to register a TLB.\n");
-    //     return;
-    //   }
-    // //   if (hasBeenPrefetched(pkt->getAddr(), pkt->isSecure())) {
-    // //     pfUsed++;
-    // //     replayStats.pfUseful++;
-    // //     if (!inCache(pkt->getAddr(), pkt->isSecure()))
-    // //         // This case happens when a demand hits on a prefetched line
-    // //         // that's not in the requested coherency state.
-    // //         replayStats.pfUsefulButMiss++;
-    // // }
-
-
-    //   Addr blk_addr = blockAddress(pfi.getAddr());
-    //   // Incase we see a request to the same address the prefetch
-    //   // would be to late.
-    //   squashPrefetches(blk_addr, pfi.isSecure());
-    // }
-
-
-
-
-
 bool
+IStream::filterAccessTypes(IStream::AccessType accType)
+{
+  switch (accType)
+  {
+    case AccessType::HIT_L1_PF:
+      if (recordHitOnPfListCache)
+        return true;
+      break;
+
+    case AccessType::HIT_L2_PF:
+      if (recordHitOnPfTargetCache)
+        return true;
+      break;
+
+    case AccessType::HIT_L2:
+      if (recordHitInTargetCache)
+        return true;
+      break;
+
+    case AccessType::MISS_L2:
+      return true;
+
+  default:
+    break;
+  }
+  return false;
+}
+
+
+
+
+
+IStream::AccessType
 IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
 {
-    if (!enable_record) return false;
+    if (!enable_record) return INV;
 
     // For checking the caches we need the physical address
     Addr pBlkAddr = blockAddress(pkt->req->getPaddr());
@@ -333,15 +337,16 @@ IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
     bool read = pkt->isRead();
     bool inv = pkt->isInvalidate();
     bool prefetch = pkt->req->isPrefetch();
+    bool rdClean = pkt->cmd == MemCmd::ReadCleanReq;
     bool hitOnPrefetch_target = hasBeenPrefetched(pBlkAddr, pkt->isSecure());
-    bool cached_target = inCache(pBlkAddr, pkt->isSecure());
+    bool hitTarget = inCache(pBlkAddr, pkt->isSecure());
     bool inMissq_target = inMissQueue(pBlkAddr, pkt->isSecure());
 
     // We can configure the prefetcher to get notifications from another
     // cache level. In this case we listen probe this cache as well.
     bool hitOnPrefetch_listener = (listenerCache) ?
           listenerCache->hasBeenPrefetched(pBlkAddr, pkt->isSecure()) : false;
-    bool cached_listener = (listenerCache) ?
+    bool hitListener = (listenerCache) ?
           listenerCache->inCache(pBlkAddr, pkt->isSecure()) : false;
     bool inMissq_listener = (listenerCache) ?
           listenerCache->inMissQueue(pBlkAddr, pkt->isSecure()) : false;
@@ -357,87 +362,90 @@ IStream::observeAccess(const PacketPtr &pkt, Addr addr, bool miss)
     recordStats.notifies++;
     if (prefetch) recordStats.pfRequest++;
     if (inst) recordStats.instRequest++;
-    if (!inst) recordStats.dataRequest++;
+    if (rdClean) recordStats.readCleanReq++;
     // Only record instructions
-    if (!inst) return false;
+    if (!inst && !rdClean) return INV;
+    // if (!inst) return INV;
 
-    bool rec_addr(miss);
-    if (recordHitInListCache && !miss) {
-      rec_addr = true;
+    AccessType access = INV;
+    if (!hitListener) {
+      // Misses in the listener cache need to be recorded
+      // Except:
+      // Accesses that are already cached in the target cache This probing is
+      // necessary because we can configure the
+      // recording to sit in another cache level then the target cache.
+      // In this case the misses we get are misses from the listening cache.
+      // But they might hit in the target cache.
+      // However, in case the
+
+      // A miss can furthermore hit in the target cache,
+      // hit on a pf in the target cache or miss
+      //
+      if (hitOnPrefetch_target) {
+        recordStats.hitOnPrefetchInTargetCache++;
+        recordStats.inTargetCache++;
+        access = HIT_L2_PF;
+      } else if (hitTarget) {
+        recordStats.inTargetCache++;
+        access = HIT_L2;
+      } else {
+        access = MISS_L2;
+      }
+    } else {
+      // Hit in listener cache or a prefetch in the listener
+      // cache.
+      if (hitOnPrefetch_listener) {
+        recordStats.hitOnPrefetchInListCache++;
+        recordStats.inListCache++;
+        access = HIT_L1_PF;
+      } else {
+        recordStats.inListCache++;
+        access = HIT_L1;
+      }
     }
-    // if (inMissq_listener) {
-    //   rec_addr = false;
-    // }
 
-    // Accesses that are already cached in the target cache we do not need
-    // to record. This probing is necessary because we can configure the
-    // recording to sit in another cache level then the target cache. In this
-    // case the misses we get are misses from the listening cache. But they
-    // might hit in the target cache.
-    if (cached_target && !recordHitInTargetCache) {
-      rec_addr = false;
-    }
+    // // Only record instructions
+    // if (!rdClean) rec_addr = false;
 
-    // if (!miss) {
-    if (hitOnPrefetch_listener && recordHitOnPfListCache) {
-      rec_addr = true;
-    }
-    if (hitOnPrefetch_target && recordHitOnPfTargetCache) {
-      rec_addr = true;
-    }
-
-
-    // Only record instructions
-    if (!inst) rec_addr = false;
-
-    DPRINTF(HWPrefetch, "Notify: A: %#x [%s|%s|%s| %s,%s,%s,%s,%s] > %s\n",
+    DPRINTF(HWPrefetch, "Notify: A: %#x [%s|%s|%s| %s,%s,%s,%s,%s]\n",
             addr,
             miss ? "miss" : "hit",
             inst ? "inst" : "data",
             read ? "rd" : "wr",
             prefetch ? "pf " : "",
             hitOnPrefetch_target ? "hitpf " : "",
-            cached_target ? "cached " : "",
-            inMissq_target ? "hitMq " : " ",
-            rec_addr ? "rec" : "skip");
+            hitTarget ? "cached " : "",
+            inMissq_target ? "hitMq " : " ");
 
     // Update the access statistics
-    if (!miss) recordStats.cacheHit++;
+    // if (!miss) recordStats.cacheHit++;
     // if (prefetch) recordStats.pfRequest++;
     // if (inst) recordStats.demandRequest++;
-    if (hitOnPrefetch_target) recordStats.hitOnPrefetchInTargetCache++;
-    if (cached_target) recordStats.inTargetCache++;
+    // if (hitOnPrefetch_target) recordStats.hitOnPrefetchInTargetCache++;
+    // if (cached_target) recordStats.inTargetCache++;
     if (inMissq_target) recordStats.hitInTargetMissQueue++;
-    if (cached_listener) recordStats.inListCache++;
+    // if (cached_listener) recordStats.inListCache++;
     if (inMissq_listener) recordStats.hitInListMissQueue++;
-    if (hitOnPrefetch_listener) recordStats.hitOnPrefetchInListCache++;
+    // if (hitOnPrefetch_listener) recordStats.hitOnPrefetchInListCache++;
 
-
-    if (!rec_addr) {
-        recordStats.accessDrops++;
-        return false;
-    }
-
-
-
-    return true;
-
-
-
+  return access;
 
 
 }
 
 
-
 void
-IStream::record(const Addr addr)
+IStream::record(const Addr addr, AccessType accType)
 {
-        Addr blkAddr = blockAddress(addr);
+    Addr blkAddr = blockAddress(addr);
     auto region = regionAddrIdx(blkAddr);
     DPRINTF(HWPrefetch, "Record blk access [%#x] -> Region (%#x:%u)\n",
     blkAddr, region.first, region.second);
     recordBuffer->access(addr);
+
+    if (recNAtMiss > 0) {
+      recordBuffer->access(addr + blkSize);
+    }
     recordBuffer->flush();
 }
 
@@ -696,68 +704,68 @@ IStream::translationComplete(DeferredPacket *dp, bool failed)
     }
 
 
-    void
-      IStream::replay(const PrefetchInfo& pfi,
-        std::vector<AddrPriority>& addresses)
-    {
+void
+  IStream::replay(const PrefetchInfo& pfi,
+    std::vector<AddrPriority>& addresses)
+{
 
-      // Pace down replay in case we are to far ahead.
-      // This will avoid thrashing the cache.
-      if (replayDistance >= 0) {
-        DPRINTF(HWPrefetch, "Steer replay distance: "
-                "Recorded/Replayed/Issued/Used/Unused prefetches: "
-                "%u/%u/%u/%u/%u\n",
-                  pfReplayed, pfRecorded, pfIssued, pfUsed, pfUnused);
-        if (pfIssued >= pfUsed + pfUnused + replayDistance) {
-          DPRINTF(HWPrefetch, "Slow down replaying.\n");
-          return;
-        }
-      }
-
-
-
-      if (!replayBuffer->refill()) {
-        DPRINTF(HWPrefetch, "Reached end of trace file. No more records "
-          "for prefetching \n");
-        if (pfReplayed >= totalPrefetches) {
-          DPRINTF(HWPrefetch, "All prefetches are issued. Replaying done!!\n");
-          enable_replay = false;
-          return;
-        }
-        DPRINTF(HWPrefetch, "Replay buffer still contains entries\n");
-      }
-
-      std::vector<Addr> _tmpAddresses;
-      Addr blkAddr = blockAddress(pfi.getAddr());
-      // In case there is an entry in the reply buffer for this address
-        // then we are already to late. We want to fetch the other addresses as
-        // soon as possible.
-
-      DPRINTF(HWPrefetch, "pfq size: %u, pfqMissingTr size: %u\n",
-                pfq.size(), pfqMissingTranslation.size());
-
-
-      // Test if there is an entry in the replay buffer that meats this
-      // address.
-      replayBuffer->probe(blkAddr);
-      DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
-      // Generate new prefetch addresses.
-      int max = queueSize - pfq.size() - pfqMissingTranslation.size();
-      if (max > 0) {
-        auto _addresses = replayBuffer->generateNAddresses(max);
-        pfReplayed += _addresses.size();
-        replayStats.pfGenerated += _addresses.size();
-        DPRINTF(HWPrefetch, "Generated %i new pref. cand. (max: %i) (%i/%i)\n",
-                      _addresses.size(), max, pfReplayed, totalPrefetches);
-        // Pass them to the prefetch queue.
-        // TODO: add priority
-        for (auto addr : _addresses) {
-          addresses.push_back(AddrPriority(addr, 0));
-        }
-      }
-
-      DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
+  // Pace down replay in case we are to far ahead.
+  // This will avoid thrashing the cache.
+  if (replayDistance >= 0) {
+    DPRINTF(HWPrefetch, "Steer replay distance: "
+            "Recorded/Replayed/Issued/Used/Unused prefetches: "
+            "%u/%u/%u/%u/%u\n",
+              pfReplayed, pfRecorded, pfIssued, pfUsed, pfUnused);
+    if (pfIssued >= pfUsed + pfUnused + replayDistance) {
+      DPRINTF(HWPrefetch, "Slow down replaying.\n");
+      return;
     }
+  }
+
+
+
+  if (!replayBuffer->refill()) {
+    DPRINTF(HWPrefetch, "Reached end of trace file. No more records "
+      "for prefetching \n");
+    if (pfReplayed >= totalPrefetches) {
+      DPRINTF(HWPrefetch, "All prefetches are issued. Replaying done!!\n");
+      enable_replay = false;
+      return;
+    }
+    DPRINTF(HWPrefetch, "Replay buffer still contains entries\n");
+  }
+
+  std::vector<Addr> _tmpAddresses;
+  Addr blkAddr = blockAddress(pfi.getAddr());
+  // In case there is an entry in the reply buffer for this address
+    // then we are already to late. We want to fetch the other addresses as
+    // soon as possible.
+
+  DPRINTF(HWPrefetch, "pfq size: %u, pfqMissingTr size: %u\n",
+            pfq.size(), pfqMissingTranslation.size());
+
+
+  // Test if there is an entry in the replay buffer that meats this
+  // address.
+  replayBuffer->probe(blkAddr);
+  DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
+  // Generate new prefetch addresses.
+  int max = queueSize - pfq.size() - pfqMissingTranslation.size();
+  if (max > 0) {
+    auto _addresses = replayBuffer->generateNAddresses(max);
+    pfReplayed += _addresses.size();
+    replayStats.pfGenerated += _addresses.size();
+    DPRINTF(HWPrefetch, "Generated %i new pref. cand. (max: %i) (%i/%i)\n",
+                  _addresses.size(), max, pfReplayed, totalPrefetches);
+    // Pass them to the prefetch queue.
+    // TODO: add priority
+    for (auto addr : _addresses) {
+      addresses.push_back(AddrPriority(addr, 0));
+    }
+  }
+
+  DPRINTF(HWPrefetch, "Repl. Buff: %s\n", replayBuffer->print());
+}
 
 
 void
@@ -1914,7 +1922,7 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     "Number of cache hits not skipped because they where useful cache hits."),
   ADD_STAT(instRequest, statistics::units::Count::get(),
     "Number of notf. from instruction request"),
-  ADD_STAT(dataRequest, statistics::units::Count::get(),
+  ADD_STAT(readCleanReq, statistics::units::Count::get(),
     "Number of notf. from data"),
   ADD_STAT(pfRequest, statistics::units::Count::get(),
     "Number of notifications from a prefetch request"),

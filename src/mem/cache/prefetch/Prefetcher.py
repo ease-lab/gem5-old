@@ -565,6 +565,11 @@ class IStreamPrefetcher(QueuedPrefetcher):
     rec_hit_on_pf_listener_cache = Param.Bool(False, "Record accesses that "
                 "hit on a prefetch in the cache we get notifications")
 
+    rec_n_at_miss= Param.Unsigned("0",
+        "In order to work in combination with NL prefetcher we can specify"
+        " and we do not record those prefetches we can specify the number of "
+        " prefetches that should be generated.")
+
     region_size = Param.MemorySize("4kB","size of the region that is covered "
         "within one buffer entry. Usually one page.")
     record_buffer_entries = Param.Unsigned("4",
