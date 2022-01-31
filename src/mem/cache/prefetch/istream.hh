@@ -86,6 +86,9 @@ namespace gem5
          * @param name The probe name
          */
         void addEventProbeCS(SimObject *obj, const char *name);
+        void addCSHook(SimObject * obj) {
+            contextSwitchHook = obj;
+        }
 
 
       public:
@@ -927,10 +930,7 @@ namespace gem5
       unsigned regionIndex(Addr addr);
       std::pair<Addr, unsigned> regionAddrIdx(Addr addr);
 
-
-
-      void replay(const PrefetchInfo& pfi,
-        std::vector<AddrPriority>& addresses);
+       void replay(std::vector<Addr> &addresses);
 
       std::vector<BufferEntry> buffer;
 
@@ -1011,27 +1011,80 @@ namespace gem5
 
 
 
+        class CacheListener : public ProbeListenerArgBase<PacketPtr>
+        {
+        public:
+            CacheListener(IStream &_parent, ProbeManager *pm,
+                            const std::string &name, bool _l1cache = false,
+                            bool _miss = false)
+                : ProbeListenerArgBase(pm, name),
+                parent(_parent), isLevel1(_l1cache), miss(_miss) {}
+            void notify(const PacketPtr &pkt) override;
+        protected:
+            IStream &parent;
+            const bool isLevel1;
+            const bool miss;
+        };
+
+        std::vector<CacheListener *> cacheListeners;
+
+        /** The two caches for the I-Stream prefetcher */
+        BaseCache * l1Cache;
+        BaseCache * l2Cache;
+
+
+        SimObject * contextSwitchHook;
+
+
+
     public:
 /** Registered tlb for address translations */
       BaseCache * listenerCache;
+
 /** Registered tlb for address translations */
       void addListenerCache(BaseCache * cache) {
         listenerCache = cache;
       }
+
+
+
+      /** Handler to register the caches. */
+      void addCaches(BaseCache * _l1cache, BaseCache * _l2cache) {
+        l1Cache = _l1cache;
+        l2Cache = _l2cache;
+      }
+
+
+
+
+    /**
+     * Register probe points for this object.
+     */
+    void regProbeListeners() override;
+        bool checkPacket(const PacketPtr &pkt);
 
       enum AccessType
       {
           INV,HIT_L1,HIT_L1_PF,
           HIT_L2, HIT_L2_PF, MISS_L2
       };
-      AccessType observeAccess(const PacketPtr &pkt, Addr addr, bool miss);
+      AccessType observeAccess(const PacketPtr &pkt, bool miss);
 
       void record(const Addr addr, AccessType atype);
 
       bool filterAccessTypes(AccessType accType);
       void probeNotify(const PacketPtr &pkt, bool miss) override;
+      void notifyRecord(const PacketPtr &pkt, bool miss);
+      void notifyReplay(const PacketPtr &pkt, bool miss);
+
+        /**
+         * Methods when the cache notifies the prefetcher.
+         */
+        void notifyFromLevel1(const PacketPtr &pkt, bool miss);
+        void notifyFromLevel2(const PacketPtr &pkt, bool miss);
 
       void notify(const PacketPtr &pkt, const PrefetchInfo &pfi);
+
 
       void calculatePrefetch(const PrefetchInfo& pfi,
         std::vector<AddrPriority>& addresses);
@@ -1119,12 +1172,12 @@ namespace gem5
         statistics::Scalar misses;
 
         statistics::Scalar cacheHit;
-        statistics::Scalar inTargetCache;
-        statistics::Scalar inListCache;
-        statistics::Scalar hitInTargetMissQueue;
-        statistics::Scalar hitInListMissQueue;
+        statistics::Scalar inL2Cache;
+        statistics::Scalar inL1Cache;
+        statistics::Scalar hitInL2MissQueue;
+        statistics::Scalar hitInL1MissQueue;
         statistics::Scalar hitOnPrefetchInTargetCache;
-        statistics::Scalar hitOnPrefetchInListCache;
+        statistics::Scalar hitOnPrefetchInL1;
         statistics::Scalar instRequest;
         statistics::Scalar readCleanReq;
         statistics::Scalar pfRequest;

@@ -552,7 +552,38 @@ class IStreamPrefetcher(QueuedPrefetcher):
         PyBindMethod("addEventProbeCS"),
         PyBindMethod("startAtScheduling"),
         PyBindMethod("addListenerCache"),
+        PyBindMethod("addCaches"),
+        PyBindMethod("addCSHook"),
     ]
+
+    def __init__(self, **kwargs):
+        super(IStreamPrefetcher, self).__init__(**kwargs)
+        self._l1cache = None
+        self._l2cache = None
+        self._cs_hook = None
+
+    def addEvent(self, newObject):
+        print("Add event: ", )
+        self._events.append(newObject)
+
+    # Override the normal SimObject::regProbeListeners method and
+    # register deferred event handlers.
+    def regProbeListeners(self):
+        if self._cs_hook:
+            self.getCCObject().addCSHook(self._cs_hook.getCCObject())
+        self.getCCObject().addCaches(
+                self._l1cache.getCCObject(),
+                self._l2cache.getCCObject())
+        self.getCCObject().regProbeListeners()
+
+    def registerCaches(self, l1Cache, l2Cache):
+        self._l1cache = l1Cache
+        self._l2cache = l2Cache
+
+    def registerContextSwitchHook(self, cs_hook):
+        self._cs_hook = cs_hook
+
+
     use_virtual_addresses = True
 
 
