@@ -1172,12 +1172,14 @@ namespace gem5
         statistics::Scalar misses;
 
         statistics::Scalar cacheHit;
-        statistics::Scalar inL2Cache;
-        statistics::Scalar inL1Cache;
-        statistics::Scalar hitInL2MissQueue;
+        statistics::Scalar hitL1Cache;
+        statistics::Scalar hitL2Cache;
+        statistics::Scalar missL1Cache;
+        statistics::Scalar missL2Cache;
         statistics::Scalar hitInL1MissQueue;
-        statistics::Scalar hitOnPrefetchInTargetCache;
+        statistics::Scalar hitInL2MissQueue;
         statistics::Scalar hitOnPrefetchInL1;
+        statistics::Scalar hitOnPrefetchInL2;
         statistics::Scalar instRequest;
         statistics::Scalar readCleanReq;
         statistics::Scalar pfRequest;

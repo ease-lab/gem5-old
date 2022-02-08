@@ -384,6 +384,7 @@ IStream::observeAccess(const PacketPtr &pkt, bool miss)
 
     AccessType access = INV;
     if (!hit_l1) {
+      recordStats.missL1Cache++;
       // Misses in the listener cache need to be recorded
       // Except:
       // Accesses that are already cached in the target cache This probing is
@@ -397,13 +398,14 @@ IStream::observeAccess(const PacketPtr &pkt, bool miss)
       // hit on a pf in the target cache or miss
       //
       if (hitOnPrefetch_l2) {
-        recordStats.hitOnPrefetchInTargetCache++;
-        recordStats.inL2Cache++;
+        recordStats.hitOnPrefetchInL2++;
+        recordStats.hitL2Cache++;
         access = HIT_L2_PF;
       } else if (hit_l2) {
-        recordStats.inL2Cache++;
+        recordStats.hitL2Cache++;
         access = HIT_L2;
       } else {
+        recordStats.missL2Cache++;
         access = MISS_L2;
       }
     } else {
@@ -411,10 +413,10 @@ IStream::observeAccess(const PacketPtr &pkt, bool miss)
       // cache.
       if (hitOnPrefetch_l1) {
         recordStats.hitOnPrefetchInL1++;
-        recordStats.inL1Cache++;
+        recordStats.hitL1Cache++;
         access = HIT_L1_PF;
       } else {
-        recordStats.inL1Cache++;
+        recordStats.hitL1Cache++;
         access = HIT_L1;
       }
     }
@@ -435,10 +437,10 @@ IStream::observeAccess(const PacketPtr &pkt, bool miss)
     // if (!miss) recordStats.cacheHit++;
     // if (prefetch) recordStats.pfRequest++;
     // if (inst) recordStats.demandRequest++;
-    // if (hitOnPrefetch_l2) recordStats.hitOnPrefetchInTargetCache++;
-    // if (cached_target) recordStats.inL2Cache++;
+    // if (hitOnPrefetch_l2) recordStats.hitOnPrefetchInL2++;
+    // if (cached_target) recordStats.hitL2Cache++;
     if (inMissq_l2) recordStats.hitInL2MissQueue++;
-    // if (cached_listener) recordStats.inL1Cache++;
+    // if (cached_listener) recordStats.hitL1Cache++;
     if (inMissq_l1) recordStats.hitInL1MissQueue++;
     // if (hitOnPrefetch_l1) recordStats.hitOnPrefetchInL1++;
 
@@ -1967,19 +1969,21 @@ IStream::IStreamRecStats::IStreamRecStats(IStream* parent,
     "Number of misses in the record buffer"),
   ADD_STAT(cacheHit, statistics::units::Count::get(),
     "Number of accesses we might skip recording because it is a cache hit"),
-  ADD_STAT(inL2Cache, statistics::units::Count::get(),
-    "Number of accesses we might skip recording because pAddr is in cache"),
-  ADD_STAT(inL1Cache, statistics::units::Count::get(),
-    "Number of accesses we might skip recording because pAddr is in cache"),
-  ADD_STAT(hitInL2MissQueue, statistics::units::Count::get(),
-    "Number of accesses hitting in the miss queue of the cache we want to "
-    "prefetch from"),
+  ADD_STAT(hitL1Cache, statistics::units::Count::get(),
+    "Number of accesses we hit in the L1"),
+  ADD_STAT(hitL2Cache, statistics::units::Count::get(),
+    "Number of accesses we also hit in the L2"),
+  ADD_STAT(missL1Cache, statistics::units::Count::get(),
+    "Number of accesses we miss in the L1"),
+  ADD_STAT(missL2Cache, statistics::units::Count::get(),
+    "Number of accesses we miss in the L2"),
   ADD_STAT(hitInL1MissQueue, statistics::units::Count::get(),
-    "Number of accesses hitting in the miss queue of the cache we get "
-    "notifications from"),
-  ADD_STAT(hitOnPrefetchInTargetCache, statistics::units::Count::get(),
-    "Number of cache hits not skipped because they where useful cache hits."),
+    "Number of accesses hitting in the L1 MSHR queue"),
+  ADD_STAT(hitInL2MissQueue, statistics::units::Count::get(),
+    "Number of accesses hitting in the L2 MSHR queue"),
   ADD_STAT(hitOnPrefetchInL1, statistics::units::Count::get(),
+    "Number of cache hits not skipped because they where useful cache hits."),
+  ADD_STAT(hitOnPrefetchInL2, statistics::units::Count::get(),
     "Number of cache hits not skipped because they where useful cache hits."),
   ADD_STAT(instRequest, statistics::units::Count::get(),
     "Number of notf. from instruction request"),
