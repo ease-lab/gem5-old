@@ -182,6 +182,7 @@ class Queued : public Base
         statistics::Scalar pfIdentified;
         statistics::Scalar pfBufferHit;
         statistics::Scalar pfInCache;
+        statistics::Scalar pfInCachePrefetched;
         statistics::Scalar pfRemovedDemand;
         statistics::Scalar pfRemovedFull;
         statistics::Scalar pfSpanPage;
@@ -218,6 +219,9 @@ class Queued : public Base
      */
     void addToQueue(std::list<DeferredPacket> &queue, DeferredPacket &dpp,
             bool translation = false);
+
+    Addr translateFunctional(PacketPtr pkt, Addr vaddr);
+    void functionalTest(PacketPtr pkt, Addr vaddr, const PrefetchInfo &pfi);
 
     /**
      * Starts the translations of the queued prefetches with a

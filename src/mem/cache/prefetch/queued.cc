@@ -203,12 +203,27 @@ Queued::notify(const PacketPtr &pkt, const PrefetchInfo &pfi)
 
         // Block align prefetch address
         addr_prio.first = blockAddress(addr_prio.first);
+        bool test = true;
+        bool can_cross_page = (tlb != nullptr);
+
+        if (test && can_cross_page) {
+
+            functionalTest(pkt,addr_prio.first,pfi);
+            num_pfs += 1;
+            if (num_pfs == max_pfs) {
+                break;
+            }
+
+
+
+
+
+        } else {
 
         if (!samePage(addr_prio.first, pfi.getAddr())) {
             statsQueued.pfSpanPage += 1;
         }
 
-        bool can_cross_page = (tlb != nullptr);
         if (can_cross_page || samePage(addr_prio.first, pfi.getAddr())) {
             PrefetchInfo new_pfi(pfi,addr_prio.first);
             statsQueued.pfIdentified++;
@@ -223,7 +238,93 @@ Queued::notify(const PacketPtr &pkt, const PrefetchInfo &pfi)
         } else {
             DPRINTF(HWPrefetch, "Ignoring page crossing prefetch.\n");
         }
+
+        }
     }
+
+}
+
+void
+Queued::functionalTest(PacketPtr pkt, Addr vaddr, const PrefetchInfo &pfi)
+{
+    Addr target_addr = translateFunctional(pkt, vaddr);
+
+
+    if (target_addr == 0) {
+        DPRINTF(HWPrefetch, "Could not translate\n");
+        return;
+    }
+
+    PrefetchInfo new_pfi(pfi,target_addr);
+    statsQueued.pfIdentified++;
+    DPRINTF(HWPrefetch, "Found a pf candidate addr: %#x, "
+            "inserting into prefetch queue.\n", new_pfi.getAddr());
+
+
+    // Create and insert the request
+    if (queueFilter) {
+        if (alreadyInQueue(pfq, new_pfi, 0)) {
+            return;
+        }
+        if (alreadyInQueue(pfqMissingTranslation, new_pfi, 0)) {
+            return;
+        }
+    }
+
+    if (cacheSnoop && (inCache(target_addr, new_pfi.isSecure()) ||
+                    inMissQueue(target_addr, new_pfi.isSecure()))) {
+            statsQueued.pfInCache++;
+            DPRINTF(HWPrefetch, "Dropping redundant in "
+                    "cache/MSHR prefetch addr:%#x\n", target_addr);
+        if (hasBeenPrefetched(target_addr, new_pfi.isSecure())) {
+            statsQueued.pfInCachePrefetched++;
+            DPRINTF(HWPrefetch, "Dropping redundant in "
+                    "because already prefetched:%#x\n", target_addr);
+        }
+        return;
+    }
+
+    /* Create the packet and find the spot to insert it */
+    DeferredPacket dpp(this, new_pfi, 0, 0);
+    Tick pf_time = curTick() + clockPeriod() * latency;
+
+    dpp.createPkt(target_addr, blkSize, requestorId, tagPrefetch,
+                    pf_time);
+    DPRINTF(HWPrefetch, "Prefetch queued. "
+            "addr:%#x priority: %3d tick:%lld.\n",
+            new_pfi.getAddr(), 0, pf_time);
+    addToQueue(pfq, dpp);
+}
+
+Addr
+Queued::translateFunctional(PacketPtr pkt, Addr vaddr)
+{
+    bool can_cross_page = (tlb != nullptr);
+    Addr paddr = 0;
+
+    if (pkt->req->hasContextId() && can_cross_page) {
+
+        // RequestPtr tl_req = createPrefetchRequest(orig_addr, pfi, pkt);
+        RequestPtr tl_req = std::make_shared<Request>(
+            vaddr, blkSize, pkt->req->getFlags(), requestorId,
+            pkt->req->getPC(), pkt->req->contextId());
+    // translation_req->setFlags(Request::PREFETCH);
+
+        auto tc = cache->system->threads[pkt->req->contextId()];
+
+        DPRINTF(HWPrefetch, "%s Try trans of pc %#x  "
+            "\n", tlb->name(),
+            tl_req->getVaddr());
+        Fault fault = tlb->translateFunctional(tl_req,tc,BaseMMU::Read);
+        if (fault == NoFault) {
+                DPRINTF(HWPrefetch, "%s Translation of vaddr %#x succeeded: "
+            "paddr %#x \n", tlb->name(),
+            tl_req->getVaddr(),
+            tl_req->getPaddr());
+            paddr = tl_req->getPaddr();
+        }
+    }
+    return paddr;
 }
 
 PacketPtr
@@ -262,6 +363,8 @@ Queued::QueuedStats::QueuedStats(statistics::Group *parent)
              "number of redundant prefetches already in prefetch queue"),
     ADD_STAT(pfInCache, statistics::units::Count::get(),
              "number of redundant prefetches already in cache/mshr dropped"),
+    ADD_STAT(pfInCachePrefetched, statistics::units::Count::get(),
+            "number of redundant prefetches already prefetched."),
     ADD_STAT(pfRemovedDemand, statistics::units::Count::get(),
              "number of prefetches dropped due to a demand for the same "
              "address"),
