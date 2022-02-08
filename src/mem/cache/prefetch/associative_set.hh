@@ -121,6 +121,12 @@ class AssociativeSet
      */
     void invalidate(Entry* entry);
 
+    void invalidateAll()
+    {
+        for (Entry &entry : entries)
+            invalidate(&entry);
+    }
+
     /** Iterator types */
     using const_iterator = typename std::vector<Entry>::const_iterator;
     using iterator = typename std::vector<Entry>::iterator;

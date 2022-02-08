@@ -37,10 +37,13 @@
 #ifndef __MEM_CACHE_PREFETCH_PIF_HH__
 #define __MEM_CACHE_PREFETCH_PIF_HH__
 
+// #define ADDR_PRINT
+
 #include <deque>
 #include <vector>
 
 #include "base/circular_queue.hh"
+#include "base/output.hh"
 #include "mem/cache/prefetch/associative_set.hh"
 #include "mem/cache/prefetch/queued.hh"
 
@@ -81,7 +84,7 @@ class PIF : public Queued
             Addr trigger;
             std::vector<bool> prec;
             std::vector<bool> succ;
-            CompactorEntry() {}
+            CompactorEntry() { trigger = MaxAddr; }
             CompactorEntry(Addr, unsigned int, unsigned int);
 
             /**
@@ -103,6 +106,28 @@ class PIF : public Queued
              * @return TRUE if target has its bit set
              */
             bool hasAddress(Addr target, unsigned int log_blk_size) const;
+
+            /**
+             * Checks if the provided compact entry is a subset of
+             * of this
+             * @param other Other compactor entry.
+             * @return TRUE To be true the trigger address must be the same
+             *         as well as the bitvector of the other need to be a
+             *         subset of this one.
+             */
+            bool isSupersetOf(CompactorEntry& other) const;
+
+            std::string
+            print()
+            {
+              std::ostringstream oss;
+              oss << "x" << std::hex << trigger << " [";
+              for (auto b : prec) oss << (b) ? "1" : "0";
+              oss << "|";
+              for (auto b : succ) oss << (b) ? "1" : "0";
+              oss << "]";
+              return oss.str();
+            }
 
             /**
              * Fills the provided vector with the predicted addresses using the
@@ -177,6 +202,31 @@ class PIF : public Queued
         /** Array of probe listeners */
         std::vector<PrefetchListenerPC *> listenersPC;
 
+        struct PIFStats : public statistics::Group
+        {
+            PIFStats(statistics::Group *parent);
+            // STATS
+            // Query stats
+            statistics::Scalar pifQueries;
+            statistics::Scalar pifQHasBeenPref;
+            statistics::Scalar pifQSABHits;
+            statistics::Scalar pifQIndexReset;
+            statistics::Scalar pifQIndexResetMiss;
+            statistics::Scalar pifQIndexResetHit;
+
+            statistics::Scalar pifNRetInst;
+            statistics::Scalar pifNIndexInsert;
+            statistics::Scalar pifNHistWrites;
+            statistics::Scalar pifNHitSpatial;
+            statistics::Scalar pifNHitTemporal;
+        } statsPIF;
+
+#ifdef ADDR_PRINT
+        OutputStream *retInstFile = nullptr;
+        OutputStream *predInstFile = nullptr;
+        OutputStream *histFile = nullptr;
+        OutputStream *sabFile = nullptr;
+#endif
 
     public:
         PIF(const PIFPrefetcherParams &p);
@@ -191,6 +241,13 @@ class PIF : public Queued
          * @param name The probe name
          */
         void addEventProbeRetiredInsts(SimObject *obj, const char *name);
+
+        void memInvalidate() override
+        {
+          index.invalidateAll();
+          historyBuffer.flush();
+          temporalCompactor.clear();
+        }
 };
 
 } // namespace prefetch
