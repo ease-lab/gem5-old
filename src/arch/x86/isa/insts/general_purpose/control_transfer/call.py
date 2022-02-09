@@ -1,4 +1,4 @@
-# Copyright (c) 2007 The Hewlett-Packard Development Company
+# Copyright (c) 2009 The Hewlett-Packard Development Company
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -42,11 +42,12 @@ def macroop CALL_NEAR_I
     .control_direct
 
     limm t1, imm
-    rdip t7
+    #rdip t7
     # Check target of call
-    stis t7, ss, [0, t0, rsp], "-env.dataSize"
+    stcall t1, ss, [0, t0, rsp], "-env.dataSize"
     subi rsp, rsp, ssz
-    wrip t7, t1
+    #wripi t7, imm
+    wripcall t1, t1
 };
 
 def macroop CALL_NEAR_R
@@ -56,9 +57,9 @@ def macroop CALL_NEAR_R
     .function_call
     .control_indirect
 
-    rdip t1
+    #rdip t1
     # Check target of call
-    stis t1, ss, [0, t0, rsp], "-env.dataSize"
+    stcall t1, ss, [0, t0, rsp], "-env.dataSize"
     subi rsp, rsp, ssz
     wripi reg, 0
 };
@@ -70,10 +71,10 @@ def macroop CALL_NEAR_M
     .function_call
     .control_indirect
 
-    rdip t7
+    #rdip t7
     ld t1, seg, sib, disp
     # Check target of call
-    st t7, ss, [0, t0, rsp], "-env.dataSize"
+    stcall t1, ss, [0, t0, rsp], "-env.dataSize"
     subi rsp, rsp, ssz
     wripi t1, 0
 };
@@ -85,10 +86,10 @@ def macroop CALL_NEAR_P
     .function_call
     .control_indirect
 
-    rdip t7
-    ld t1, seg, riprel, disp
+    #rdip t7
+    ldpp t1, seg, riprel, disp
     # Check target of call
-    st t7, ss, [0, t0, rsp], "-env.dataSize"
+    stcall t1, ss, [0, t0, rsp], "-env.dataSize"
     subi rsp, rsp, ssz
     wripi t1, 0
 };

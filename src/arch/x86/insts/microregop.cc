@@ -68,7 +68,19 @@ RegOpBase::genFlags(uint64_t old_flags, uint64_t flag_mask,
             flags |= AFBit;
         if (subtract)
             flags ^= AFBit;
-    }
+
+    // std::string RegOpImm::generateDisassembly(Addr pc,
+    //         const SymbolTable *symtab) const
+    // {
+    //     std::stringstream response;
+
+    //     printMnemonic(response, instMnem, mnemonic);
+    //     printDestReg(response, 0, dataSize);
+    //     response << ", ";
+    //     printSrcReg(response, 0, dataSize);
+    //     ccprintf(response, ", %#lx", imm8);
+    //     return response.str();
+    // }
     if (flag_mask & (EZFBit | ZFBit) && findZero(dataSize * 8, _dest))
         flags |= (flag_mask & (EZFBit | ZFBit));
     if (flag_mask & SFBit && findNegative(dataSize * 8, _dest))

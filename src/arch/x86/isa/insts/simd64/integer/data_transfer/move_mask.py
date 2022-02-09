@@ -1,4 +1,4 @@
-# Copyright (c) 2007 The Hewlett-Packard Development Company
+# Copyright (c) 2008 The Hewlett-Packard Development Company
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -35,7 +35,7 @@
 
 microcode = '''
 def macroop PMOVMSKB_R_MMX {
-    limm reg, 0
+    #limm reg, 0
     movsign reg, mmxm, size=1, ext=0
 };
 '''

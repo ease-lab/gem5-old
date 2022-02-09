@@ -263,6 +263,18 @@ let {{
                                      ecfBit | ezfBit, src1)"
         op_class = 'IntAluOp'
 
+#<<<<<<< HEAD
+
+#=======
+    class Movfpzero(Fp2Op):
+        code = 'FpDestReg_uqw = 0.0;'
+        else_code = 'FpDestReg_uqw = FpDestReg_uqw;'
+        cond_check = "checkCondition(ccFlagBits | cfofBits | dfBit | \
+                                     ecfBit | ezfBit, src2)"
+        op_class = 'IntAluOp'
+
+#    class Xorfp(FpBinaryOp):
+# >>>>>>> 48af1f007... Update the implementation of x86 instructions
     class Xorfp(Fp3Op):
         code = 'FpDestReg_uqw = FpSrcReg1_uqw ^ FpSrcReg2_uqw;'
 

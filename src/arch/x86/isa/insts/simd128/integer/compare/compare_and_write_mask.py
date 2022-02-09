@@ -47,9 +47,9 @@ def macroop PCMPEQB_XMM_M {
 };
 
 def macroop PCMPEQB_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     mcmpi2r xmml, xmml, ufp1, size=1, ext=0
     mcmpi2r xmmh, xmmh, ufp2, size=1, ext=0
 };
@@ -67,9 +67,9 @@ def macroop PCMPEQW_XMM_M {
 };
 
 def macroop PCMPEQW_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     mcmpi2r xmml, xmml, ufp1, size=2, ext=0
     mcmpi2r xmmh, xmmh, ufp2, size=2, ext=0
 };
@@ -87,9 +87,9 @@ def macroop PCMPEQD_XMM_M {
 };
 
 def macroop PCMPEQD_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     mcmpi2r xmml, xmml, ufp1, size=4, ext=0
     mcmpi2r xmmh, xmmh, ufp2, size=4, ext=0
 };
@@ -107,9 +107,9 @@ def macroop PCMPGTB_XMM_M {
 };
 
 def macroop PCMPGTB_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     mcmpi2r xmml, xmml, ufp1, size=1, ext=2
     mcmpi2r xmmh, xmmh, ufp2, size=1, ext=2
 };
@@ -127,9 +127,9 @@ def macroop PCMPGTW_XMM_M {
 };
 
 def macroop PCMPGTW_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     mcmpi2r xmml, xmml, ufp1, size=2, ext=2
     mcmpi2r xmmh, xmmh, ufp2, size=2, ext=2
 };
@@ -147,9 +147,9 @@ def macroop PCMPGTD_XMM_M {
 };
 
 def macroop PCMPGTD_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     mcmpi2r xmml, xmml, ufp1, size=4, ext=2
     mcmpi2r xmmh, xmmh, ufp2, size=4, ext=2
 };

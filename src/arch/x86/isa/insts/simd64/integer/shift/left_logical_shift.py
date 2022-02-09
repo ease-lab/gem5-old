@@ -44,8 +44,8 @@ def macroop PSLLW_MMX_M {
 };
 
 def macroop PSLLW_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msll mmx, mmx, ufp1, size=2, ext=0
 };
 
@@ -63,8 +63,8 @@ def macroop PSLLD_MMX_M {
 };
 
 def macroop PSLLD_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msll mmx, mmx, ufp1, size=4, ext=0
 };
 
@@ -82,8 +82,8 @@ def macroop PSLLQ_MMX_M {
 };
 
 def macroop PSLLQ_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msll mmx, mmx, ufp1, size=8, ext=0
 };
 

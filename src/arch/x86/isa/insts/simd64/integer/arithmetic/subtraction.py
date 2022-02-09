@@ -44,8 +44,8 @@ def macroop PSUBB_MMX_M {
 };
 
 def macroop PSUBB_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=1, ext=0
 };
 
@@ -59,8 +59,8 @@ def macroop PSUBW_MMX_M {
 };
 
 def macroop PSUBW_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=2, ext=0
 };
 
@@ -74,8 +74,8 @@ def macroop PSUBD_MMX_M {
 };
 
 def macroop PSUBD_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=4, ext=0
 };
 
@@ -89,8 +89,8 @@ def macroop PSUBQ_MMX_M {
 };
 
 def macroop PSUBQ_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=8, ext=0
 };
 
@@ -104,8 +104,8 @@ def macroop PSUBSB_MMX_M {
 };
 
 def macroop PSUBSB_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=1, ext = "2 |" + Signed
 };
 
@@ -119,8 +119,8 @@ def macroop PSUBSW_MMX_M {
 };
 
 def macroop PSUBSW_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=2, ext = "2 |" + Signed
 };
 
@@ -134,8 +134,8 @@ def macroop PSUBUSB_MMX_M {
 };
 
 def macroop PSUBUSB_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=1, ext=2
 };
 
@@ -149,8 +149,8 @@ def macroop PSUBUSW_MMX_M {
 };
 
 def macroop PSUBUSW_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     msubi mmx, mmx, ufp1, size=2, ext=2
 };
 '''

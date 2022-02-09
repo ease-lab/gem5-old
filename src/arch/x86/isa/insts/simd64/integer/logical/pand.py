@@ -44,8 +44,8 @@ def macroop PAND_MMX_M {
 };
 
 def macroop PAND_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mand mmx, mmx, ufp1
 };
 
@@ -59,8 +59,8 @@ def macroop PANDN_MMX_M {
 };
 
 def macroop PANDN_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mandn mmx, mmx, ufp1
 };
 '''

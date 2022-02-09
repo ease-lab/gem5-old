@@ -72,6 +72,23 @@ class RegOpBase : public X86MicroopBase
 
 template <typename ...Operands>
 using RegOpT = InstOperands<RegOpBase, Operands...>;
+    // class RegOpImm : public RegOpBase
+    // {
+    //   protected:
+    //     const uint64_t imm8;
+
+    //     // Constructor
+    //     RegOpImm(ExtMachInst _machInst,
+    //             const char * mnem, const char *_instMnem, uint64_t setFlags,
+    //             InstRegIndex _src1, uint64_t _imm8, InstRegIndex _dest,
+    //             uint8_t _dataSize, uint16_t _ext,
+    //             OpClass __opClass) :
+    //         RegOpBase(_machInst, mnem, _instMnem, setFlags,
+    //                 _src1, _dest, _dataSize, _ext,
+    //                 __opClass),
+    //         imm8(_imm8)
+    //     {
+    //     }
 
 } // namespace X86ISA
 } // namespace gem5

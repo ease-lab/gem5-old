@@ -43,8 +43,8 @@ def macroop MOVD_MMX_M {
 };
 
 def macroop MOVD_MMX_P {
-    rdip t7
-    ldfp mmx, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp mmx, seg, riprel, disp, dataSize=8
 };
 
 def macroop MOVD_R_MMX {
@@ -56,8 +56,8 @@ def macroop MOVD_M_MMX {
 };
 
 def macroop MOVD_P_MMX {
-    rdip t7
-    stfp mmx, seg, riprel, disp, dataSize=8
+    #rdip t7
+    stfppp mmx, seg, riprel, disp, dataSize=8
 };
 
 def macroop MOVQ_MMX_MMX {
@@ -69,8 +69,8 @@ def macroop MOVQ_MMX_M {
 };
 
 def macroop MOVQ_MMX_P {
-    rdip t7
-    ldfp mmx, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp mmx, seg, riprel, disp, dataSize=8
 };
 
 def macroop MOVQ_M_MMX {
@@ -78,8 +78,8 @@ def macroop MOVQ_M_MMX {
 };
 
 def macroop MOVQ_P_MMX {
-    rdip t7
-    stfp mmx, seg, riprel, disp, dataSize=8
+    #rdip t7
+    stfppp mmx, seg, riprel, disp, dataSize=8
 };
 '''
 # MOVDQ2Q

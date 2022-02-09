@@ -41,9 +41,9 @@ def macroop JMP_I
     .adjust_env oszIn64Override
     .control_direct
 
-    rdip t1
-    limm t2, imm
-    wrip t1, t2
+    #rdip t1
+    #limm t2, imm
+    wripcall2i t2, imm
 };
 
 def macroop JMP_R
@@ -71,8 +71,8 @@ def macroop JMP_P
     .adjust_env oszIn64Override
     .control_indirect
 
-    rdip t7
-    ld t1, seg, riprel, disp
+    #rdip t7
+    ldpp t1, seg, riprel, disp
     wripi t1, 0
 };
 

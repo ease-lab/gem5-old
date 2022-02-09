@@ -47,9 +47,9 @@ def macroop PADDB_XMM_M {
 };
 
 def macroop PADDB_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=1, ext=0
     maddi xmmh, xmmh, ufp2, size=1, ext=0
 };
@@ -67,9 +67,9 @@ def macroop PADDW_XMM_M {
 };
 
 def macroop PADDW_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=2, ext=0
     maddi xmmh, xmmh, ufp2, size=2, ext=0
 };
@@ -87,9 +87,9 @@ def macroop PADDD_XMM_M {
 };
 
 def macroop PADDD_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=4, ext=0
     maddi xmmh, xmmh, ufp2, size=4, ext=0
 };
@@ -107,9 +107,9 @@ def macroop PADDQ_XMM_M {
 };
 
 def macroop PADDQ_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=8, ext=0
     maddi xmmh, xmmh, ufp2, size=8, ext=0
 };
@@ -127,9 +127,9 @@ def macroop PADDSB_XMM_M {
 };
 
 def macroop PADDSB_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=1, ext = "2 |" + Signed
     maddi xmmh, xmmh, ufp2, size=1, ext = "2 |" + Signed
 };
@@ -147,9 +147,9 @@ def macroop PADDSW_XMM_M {
 };
 
 def macroop PADDSW_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=2, ext = "2 |" + Signed
     maddi xmmh, xmmh, ufp2, size=2, ext = "2 |" + Signed
 };
@@ -167,9 +167,9 @@ def macroop PADDUSB_XMM_M {
 };
 
 def macroop PADDUSB_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=1, ext=2
     maddi xmmh, xmmh, ufp2, size=1, ext=2
 };
@@ -187,9 +187,9 @@ def macroop PADDUSW_XMM_M {
 };
 
 def macroop PADDUSW_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddi xmml, xmml, ufp1, size=2, ext=2
     maddi xmmh, xmmh, ufp2, size=2, ext=2
 };

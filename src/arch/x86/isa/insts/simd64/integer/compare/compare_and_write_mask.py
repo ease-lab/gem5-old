@@ -44,8 +44,8 @@ def macroop PCMPEQB_MMX_M {
 };
 
 def macroop PCMPEQB_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mcmpi2r mmx, mmx, ufp1, size=1, ext=0
 };
 
@@ -59,8 +59,8 @@ def macroop PCMPEQW_MMX_M {
 };
 
 def macroop PCMPEQW_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mcmpi2r mmx, mmx, ufp1, size=2, ext=0
 };
 
@@ -74,8 +74,8 @@ def macroop PCMPEQD_MMX_M {
 };
 
 def macroop PCMPEQD_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mcmpi2r mmx, mmx, ufp1, size=4, ext=0
 };
 
@@ -89,8 +89,8 @@ def macroop PCMPGTB_MMX_M {
 };
 
 def macroop PCMPGTB_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mcmpi2r mmx, mmx, ufp1, size=1, ext=2
 };
 
@@ -104,8 +104,8 @@ def macroop PCMPGTW_MMX_M {
 };
 
 def macroop PCMPGTW_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mcmpi2r mmx, mmx, ufp1, size=2, ext=2
 };
 
@@ -119,8 +119,8 @@ def macroop PCMPGTD_MMX_M {
 };
 
 def macroop PCMPGTD_MMX_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     mcmpi2r mmx, mmx, ufp1, size=4, ext=2
 };
 '''

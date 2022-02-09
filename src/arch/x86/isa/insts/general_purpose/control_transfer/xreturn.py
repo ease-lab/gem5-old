@@ -41,9 +41,10 @@ def macroop RET_NEAR
     .function_return
     .control_indirect
 
-    ld t1, ss, [1, t0, rsp]
+    #ld t1, ss, [1, t0, rsp]
+    ldpop t1, ss, [1, t0, rsp]
     # Check address of return
-    addi rsp, rsp, dsz
+    #addi rsp, rsp, dsz
     wripi t1, 0
 };
 
@@ -55,9 +56,10 @@ def macroop RET_NEAR_I
     .control_indirect
 
     limm t2, imm
-    ld t1, ss, [1, t0, rsp]
+    #ld t1, ss, [1, t0, rsp]
+    ldpop t1, ss, [1, t0, rsp]
     # Check address of return
-    addi rsp, rsp, dsz
+    #addi rsp, rsp, dsz
     add rsp, rsp, t2
     wripi t1, 0
 };

@@ -42,8 +42,8 @@ def macroop CMP_R_M
 
 def macroop CMP_R_P
 {
-    rdip t7
-    ld t1, seg, riprel, disp
+    #rdip t7
+    ldpp t1, seg, riprel, disp
     sub t0, reg, t1, flags=(OF, SF, ZF, AF, PF, CF)
 };
 
@@ -57,8 +57,8 @@ def macroop CMP_M_I
 def macroop CMP_P_I
 {
     limm t2, imm
-    rdip t7
-    ld t1, seg, riprel, disp
+    #rdip t7
+    ldpp t1, seg, riprel, disp
     sub t0, t1, t2, flags=(OF, SF, ZF, AF, PF, CF)
 };
 
@@ -70,8 +70,8 @@ def macroop CMP_M_R
 
 def macroop CMP_P_R
 {
-    rdip t7
-    ld t1, seg, riprel, disp
+    #rdip t7
+    ldpp t1, seg, riprel, disp
     sub t0, t1, reg, flags=(OF, SF, ZF, AF, PF, CF)
 };
 

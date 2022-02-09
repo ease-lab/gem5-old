@@ -44,8 +44,8 @@ def macroop ADDSS_XMM_M {
 };
 
 def macroop ADDSS_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     maddf xmml, xmml, ufp1, size=4, ext=Scalar
 };
 
@@ -59,8 +59,8 @@ def macroop ADDSD_XMM_M {
 };
 
 def macroop ADDSD_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, disp, dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, disp, dataSize=8
     maddf xmml, xmml, ufp1, size=8, ext=Scalar
 };
 
@@ -77,9 +77,10 @@ def macroop ADDPS_XMM_M {
 };
 
 def macroop ADDPS_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddf xmml, xmml, ufp1, size=4, ext=0
     maddf xmmh, xmmh, ufp2, size=4, ext=0
 };
@@ -97,9 +98,9 @@ def macroop ADDPD_XMM_M {
 };
 
 def macroop ADDPD_XMM_P {
-    rdip t7
-    ldfp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
-    ldfp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
+    #rdip t7
+    ldfppp ufp1, seg, riprel, "DISPLACEMENT", dataSize=8
+    ldfppp ufp2, seg, riprel, "DISPLACEMENT + 8", dataSize=8
     maddf xmml, xmml, ufp1, size=8, ext=0
     maddf xmmh, xmmh, ufp2, size=8, ext=0
 };
