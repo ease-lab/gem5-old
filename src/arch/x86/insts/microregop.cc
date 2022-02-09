@@ -68,7 +68,7 @@ RegOpBase::genFlags(uint64_t old_flags, uint64_t flag_mask,
             flags |= AFBit;
         if (subtract)
             flags ^= AFBit;
-
+    }
     // std::string RegOpImm::generateDisassembly(Addr pc,
     //         const SymbolTable *symtab) const
     // {

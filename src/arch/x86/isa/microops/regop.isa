@@ -119,20 +119,10 @@ def template MicroRegOpBranchDeclare {{
     };
 }};
 
-#<<<<<<< HEAD
+
 def template MicroRegOpBranchTarget {{
     X86ISA::PCState
     %(class_name)s::branchTarget(const X86ISA::PCState &branchPC) const
-#=======
-#def template MicroRegOpImmConstructor {{
-#    %(class_name)s::%(class_name)s(
-##            ExtMachInst machInst, const char * instMnem, uint64_t setFlags,
-#            InstRegIndex _src1, uint64_t _imm8, InstRegIndex _dest,
-#            uint8_t _dataSize, uint16_t _ext) :
-#        %(base_class)s(machInst, "%(mnemonic)s", instMnem, setFlags,
-#                _src1, _imm8, _dest, _dataSize, _ext,
-#                %(op_class)s)
-#>>>>>>> 48af1f007... Update the implementation of x86 instructions
     {
         X86ISA::PCState pcs = branchPC;
         DPRINTF(X86, "branchTarget PC info: %s, Immediate (imm8): %lx\n",
@@ -142,6 +132,24 @@ def template MicroRegOpBranchTarget {{
         return pcs;
     }
 }};
+
+//def template MicroRegOpImmConstructor {{
+//    %(class_name)s::%(class_name)s(
+//            ExtMachInst machInst, const char * instMnem, uint64_t setFlags,
+//            InstRegIndex _src1, uint64_t _imm8, InstRegIndex _dest,
+//            uint8_t _dataSize, uint16_t _ext) :
+//        %(base_class)s(machInst, "%(mnemonic)s", instMnem, setFlags,
+//                _src1, _imm8, _dest, _dataSize, _ext,
+//                %(op_class)s)
+//    {
+//        X86ISA::PCState pcs = branchPC;
+//        DPRINTF(X86, "branchTarget PC info: %s, Immediate (imm8): %lx\n",
+//                pcs, (int8_t)imm8);
+//        pcs.npc(pcs.npc() + (int8_t)imm8);
+//        pcs.uEnd();
+//        return pcs;
+//    }
+//}};
 
 output header {{
     enum SegmentSelectorCheck
