@@ -36,6 +36,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+from ast import Param
 from m5.SimObject import *
 from m5.params import *
 from m5.proxy import *
@@ -184,9 +185,13 @@ class TaggedPrefetcher(QueuedPrefetcher):
     type = 'TaggedPrefetcher'
     cxx_class = 'gem5::prefetch::Tagged'
     cxx_header = "mem/cache/prefetch/tagged.hh"
+    # cxx_exports = [
+    #     PyBindMethod("enable"),
+    # ]
 
     degree = Param.Int(2, "Number of prefetches to generate")
-
+    fake = Param.Bool(True, "This will generate fake prefetch to the "
+                            "notified address")
 
 
 class IndirectMemoryPrefetcher(QueuedPrefetcher):
@@ -537,6 +542,46 @@ class PIFPrefetcher(QueuedPrefetcher):
         self.getCCObject().addEventProbeRetiredInsts(
                     simObj.getCCObject(), "RetiredInstsPC")
 
+class PIF2Prefetcher(BasePrefetcher):
+    type = 'PIF2Prefetcher'
+    cxx_class = 'gem5::prefetch::PIF2'
+    cxx_header = "mem/cache/prefetch/pif2.hh"
+    cxx_exports = [
+        PyBindMethod("addEventProbeRetiredInsts"),
+    ]
+
+# prec_spatial_region_bits = Param.Unsigned(2,
+#     "Number of preceding addresses in the spatial region")
+# succ_spatial_region_bits = Param.Unsigned(8,
+#     "Number of subsequent addresses in the spatial region")
+# compactor_entries = Param.Unsigned(2, "Entries in the temp. compactor")
+# stream_address_buffer_entries = Param.Unsigned(7, "Entries in the SAB")
+# history_buffer_size = Param.Unsigned(16, "Entries in the history buffer")
+    latency = Param.Int(1, "Latency for generated prefetches")
+
+    infinite = Param.Bool(True, "Use infinite config instead of realistic")
+    cache_snoop = Param.Bool(False, "Snoop cache to eliminate redundant "
+                                            "request")
+
+    # index_entries = Param.MemorySize("64",
+    #     "Number of entries in the index")
+    # index_assoc = Param.Unsigned(64,
+    #     "Associativity of the index")
+    # index_indexing_policy = Param.BaseIndexingPolicy(
+    #     SetAssociative(entry_size = 1, assoc = Parent.index_assoc,
+    #     size = Parent.index_entries),
+    #     "Indexing policy of the index")
+    # index_replacement_policy = Param.BaseReplacementPolicy(LRURP(),
+    #     "Replacement policy of the index")
+
+    def listenFromProbeRetiredInstructions(self, simObj):
+        if not isinstance(simObj, SimObject):
+            raise TypeError("argument must be of SimObject type")
+    # self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))
+
+    # def registerEventlistenFromProbeRetiredInstructionsProbeCS(self, obj):
+        self.getCCObject().addEventProbeRetiredInsts(
+                    simObj.getCCObject(), "RetiredInstsPC")
 
 
 class IStreamPrefetcher(QueuedPrefetcher):
@@ -586,6 +631,11 @@ class IStreamPrefetcher(QueuedPrefetcher):
 
     use_virtual_addresses = True
 
+    # l1_cache = Param.SimObject(NULL,"The L1 cache to listen from")
+    # l2_cache = Param.SimObject(Parent,"The L2 cache to listen from")
+
+# context_switch_hook = Param.SimObject(NULL, "Workload hook to instrument "
+#                                 "context switches.")
 
     rec_hit_in_target_cache = Param.Bool(False, "Record accesses found in the"
                 " cache we want to prefetch in")
