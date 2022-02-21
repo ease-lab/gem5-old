@@ -43,7 +43,7 @@ namespace prefetch
 {
 
 Tagged::Tagged(const TaggedPrefetcherParams &p)
-    : Queued(p), degree(p.degree)
+    : Queued(p), degree(p.degree), fake(p.fake)
 {
 
 }
@@ -53,6 +53,10 @@ Tagged::calculatePrefetch(const PrefetchInfo &pfi,
     std::vector<AddrPriority> &addresses)
 {
     Addr blkAddr = blockAddress(pfi.getAddr());
+
+    if (fake) {
+        addresses.push_back(AddrPriority(blkAddr,1));
+    }
 
     for (int d = 1; d <= degree; d++) {
         Addr newAddr = blkAddr + d*(blkSize);

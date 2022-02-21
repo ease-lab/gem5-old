@@ -50,6 +50,7 @@ class Tagged : public Queued
 {
   protected:
       const int degree;
+      const bool fake;
 
   public:
     Tagged(const TaggedPrefetcherParams &p);
