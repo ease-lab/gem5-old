@@ -550,6 +550,68 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &next_pc)
     return predict_taken;
 }
 
+
+bool
+Fetch::updateNextPC(const DynInstPtr &inst, TheISA::PCState &pc)
+{
+    // Do branch prediction check here.
+    // PC is actually the current PC until
+    // this function updates it.
+    bool predict_taken = false;
+    TheISA::PCState target = pc;
+
+
+
+    // If the uop cache detects a branch then can check
+    // wheather the current fetch target was really predicted
+    // as a branch or not. If we detect that the BPU was wrong the
+    // decoupled BP can be resteared earlier. (Post fetch correction)
+
+    if (!inst->isControl()) {
+        inst->staticInst->advancePC(pc);
+        inst->setPredTarg(pc);
+        inst->setPredTaken(false);
+        return false;
+    }
+
+
+    ++fetchStats.branches;
+    // DPRINTF(Fetch, "Branch detected with PC = %s\n", thisPC);
+
+    ThreadID tid = inst->threadNumber;
+
+    FetchTargetPtr curFetchTarget = fetchTarget[tid];
+    if (!curFetchTarget->control) {
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+            "BPU did not detect the branch.\n",
+            tid, inst->seqNum, inst->pcState().instAddr());
+    }
+
+    predict_taken = curFetchTarget->taken;
+
+    if (predict_taken) {
+        ++fetchStats.predictedBranches;
+
+        pc = curFetchTarget->targetAddr;
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                "predicted to be taken to %s\n",
+                tid, inst->seqNum, inst->pcState().instAddr(), pc);
+
+        inst->setPredTarg(pc);
+        inst->setPredTaken(true);
+
+    } else {
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                "predicted to be not taken\n",
+                tid, inst->seqNum, inst->pcState().instAddr());
+
+        inst->staticInst->advancePC(pc);
+        inst->setPredTarg(pc);
+        inst->setPredTaken(false);
+    }
+    return predict_taken;
+}
+
 bool
 Fetch::fetchCacheLine(Addr vaddr, ThreadID tid, Addr pc)
 {
@@ -1092,6 +1154,395 @@ Fetch::buildInst(ThreadID tid, StaticInstPtr staticInst,
     return instruction;
 }
 
+
+void
+Fetch::produceFetchTargets(bool &status_change)
+{
+    //////////////////////////////////////////
+    // Create fetch targets to feed the FTQ
+    //////////////////////////////////////////
+    ThreadID tid = getFetchingThread();
+
+    assert(!cpu->switchedOut());
+
+    if (tid == InvalidThreadID) {
+        // Breaks looping condition in tick()
+        threadFetched = numFetchingThreads;
+
+        if (numThreads == 1) {  // @todo Per-thread stats
+            profileStall(0);
+        }
+
+        return;
+    }
+
+    DPRINTF(Fetch,
+        "Attempting to create new fetch targets for [tid:%i]\n", tid);
+
+    // The decoupled PC
+    TheISA::PCState pc = decoupledPC[tid];
+    Addr fetchAddr = pc.instAddr() & decoder[tid]->pcMask();
+
+
+// Addr pcOffset = fetchOffset[tid];
+// Addr fetchAddr = (thisPC.instAddr() + pcOffset) & decoder[tid]->pcMask();
+
+    // bool inRom = isRomMicroPC(thisPC.microPC());
+
+    // Create a new fetch target.
+    // For that we start from the current decoupled
+    // PC. For now we query the BTB for any instruction
+    TheISA::PCState targetPC = branchPred->BTBLookup(fetchAddr);
+
+    if (targetPC != 0) {
+
+    }
+
+    // Create new fetch address
+    //
+
+    fetchAddr += instSize;
+
+    // Probe BTB to check wheather this address is a branch or not.
+
+
+
+// Do branch prediction check here.
+    // A bit of a misnomer...next_PC is actually the current PC until
+    // this function updates it.
+    bool predict_taken;
+
+    if (!inst->isControl()) {
+        inst->staticInst->advancePC(nextPC);
+        inst->setPredTarg(nextPC);
+        inst->setPredTaken(false);
+        return false;
+    }
+
+    ThreadID tid = inst->threadNumber;
+    predict_taken = branchPred->predict(inst->staticInst, inst->seqNum,
+                                        nextPC, tid);
+
+    if (predict_taken) {
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                "predicted to be taken to %s\n",
+                tid, inst->seqNum, inst->pcState().instAddr(), nextPC);
+    } else {
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                "predicted to be not taken\n",
+                tid, inst->seqNum, inst->pcState().instAddr());
+    }
+
+    DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+            "predicted to go to %s\n",
+            tid, inst->seqNum, inst->pcState().instAddr(), nextPC);
+    inst->setPredTarg(nextPC);
+    inst->setPredTaken(predict_taken);
+
+    ++fetchStats.branches;
+
+    if (predict_taken) {
+        ++fetchStats.predictedBranches;
+    }
+
+    return predict_taken;
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+void
+Fetch::consumeFetchTargets(bool &status_change)
+{
+    //////////////////////////////////////////
+    // Start actual fetch
+    //////////////////////////////////////////
+    ThreadID tid = getFetchingThread();
+
+    assert(!cpu->switchedOut());
+
+    if (tid == InvalidThreadID) {
+        // Breaks looping condition in tick()
+        threadFetched = numFetchingThreads;
+
+        if (numThreads == 1) {  // @todo Per-thread stats
+            profileStall(0);
+        }
+
+        return;
+    }
+
+    DPRINTF(Fetch, "Attempting to fetch from [tid:%i]\n", tid);
+
+    // The current PC.
+    TheISA::PCState thisPC = pc[tid];
+    FetchTargetPtr curFetchTarget = fetchTarget[tid];
+
+// Addr pcOffset = fetchOffset[tid];
+// Addr fetchAddr = (thisPC.instAddr() + pcOffset) & decoder[tid]->pcMask();
+    Addr fetchAddr = curFetchTarget->addr;
+
+    bool inRom = isRomMicroPC(thisPC.microPC());
+
+    // If returning from the delay of a cache miss, then update the status
+    // to running, otherwise do the cache access.  Possibly move this up
+    // to tick() function.
+    if (fetchStatus[tid] == IcacheAccessComplete) {
+        DPRINTF(Fetch, "[tid:%i] Icache miss is complete.\n", tid);
+
+        fetchStatus[tid] = Running;
+        status_change = true;
+    } else if (fetchStatus[tid] == Running) {
+        // Align the fetch PC so its at the start of a fetch buffer segment.
+        Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
+
+        // If buffer is no longer valid or fetchAddr has moved to point
+        // to the next cache block, AND we have no remaining ucode
+        // from a macro-op, then start fetch from icache.
+        if (!(fetchBufferValid[tid] &&
+                    fetchBufferBlockPC == fetchBufferPC[tid]) && !inRom &&
+                !macroop[tid]) {
+            DPRINTF(Fetch, "[tid:%i] Attempting to translate and read "
+                    "instruction, starting at PC %s.\n", tid, thisPC);
+
+            fetchCacheLine(fetchAddr, tid, thisPC.instAddr());
+
+            if (fetchStatus[tid] == IcacheWaitResponse)
+                ++fetchStats.icacheStallCycles;
+            else if (fetchStatus[tid] == ItlbWait)
+                ++fetchStats.tlbCycles;
+            else
+                ++fetchStats.miscStallCycles;
+            return;
+        } else if (checkInterrupt(thisPC.instAddr()) && !delayedCommit[tid]) {
+            // Stall CPU if an interrupt is posted and we're not issuing
+            // an delayed commit micro-op currently (delayed commit
+            // instructions are not interruptable by interrupts, only faults)
+            ++fetchStats.miscStallCycles;
+            DPRINTF(Fetch, "[tid:%i] Fetch is stalled!\n", tid);
+            return;
+        }
+    } else {
+        if (fetchStatus[tid] == Idle) {
+            ++fetchStats.idleCycles;
+            DPRINTF(Fetch, "[tid:%i] Fetch is idle!\n", tid);
+        }
+
+        // Status is Idle, so fetch should do nothing.
+        return;
+    }
+
+    ++fetchStats.cycles;
+
+    TheISA::PCState nextPC = thisPC;
+
+    StaticInstPtr staticInst = NULL;
+    StaticInstPtr curMacroop = macroop[tid];
+
+    // If the read of the first instruction was successful, then grab the
+    // instructions from the rest of the cache line and put them into the
+    // queue heading to decode.
+
+    DPRINTF(Fetch, "[tid:%i] Adding instructions to queue to "
+            "decode.\n", tid);
+
+    // Need to keep track of whether or not a predicted branch
+    // ended this fetch block.
+    bool predictedBranch = false;
+
+    // Need to halt fetch if quiesce instruction detected
+    bool quiesce = false;
+
+
+    const unsigned numInsts = fetchBufferSize / instSize;
+
+    // Calculate the offset for the current fetch target in the fetch buffer.
+    fetchAddr = curFetchTarget->addr;
+    unsigned blkOffset = (fetchAddr - fetchBufferPC[tid]) / instSize;
+
+    auto *dec_ptr = decoder[tid];
+    const Addr pc_mask = dec_ptr->pcMask();
+
+    // Consume fetch targets from FTQ and try to read them
+    // from the fetch buffer we got from the cache.
+    // Keep issuing while fetchWidth is available, FTQ is not empty
+    // and branch is not predicted taken
+    while (numInst < fetchWidth && fetchQueue[tid].size() < fetchQueueSize
+           && !predictedBranch && !quiesce) {
+        // We need to process more memory if we aren't going to get a
+        // StaticInst from the rom, the current macroop, or what's already
+        // in the decoder.
+        bool needMem = !inRom && !curMacroop && !dec_ptr->instReady();
+        // fetchAddr = (thisPC.instAddr() + pcOffset) & pc_mask;
+        Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
+
+        if (needMem) {
+            // If buffer is no longer valid or fetchAddr has moved to point
+            // to the next cache block then start fetch from icache.
+            if (!fetchBufferValid[tid] ||
+                fetchBufferBlockPC != fetchBufferPC[tid])
+                break;
+
+            if (blkOffset >= numInsts) {
+                // We need to process more memory, but we've run out of the
+                // current block.
+                break;
+            }
+
+            // Copy instructions into the decoder
+            memcpy(dec_ptr->moreBytesPtr(),
+                    fetchBuffer[tid] + blkOffset * instSize, instSize);
+            decoder[tid]->moreBytes(thisPC, fetchAddr);
+
+            // if (dec_ptr->needMoreBytes()) {
+            //     blkOffset++;
+            //     fetchAddr += instSize;
+            //     pcOffset += instSize;
+            // }
+        }
+
+        // Try to extract one instruction and or microop from the memory
+        // we have processed so far.
+
+        if (dec_ptr->instReady()) {
+            staticInst = dec_ptr->decode(thisPC);
+
+            // Increment stat of fetched instructions.
+            ++fetchStats.insts;
+
+            if (staticInst->isMacroop()) {
+                curMacroop = staticInst;
+            } else {
+                pcOffset = 0;
+            }
+        } else {
+            // We need more bytes for this instruction so blkOffset and
+            // pcOffset will be updated
+            // break;
+        }
+            // Whether we're moving to a new macroop because we're at the
+            // end of the current one, or the branch predictor incorrectly
+            // thinks we are...
+            bool newMacro = false;
+            if (curMacroop || inRom) {
+                if (inRom) {
+                    staticInst = dec_ptr->fetchRomMicroop(
+                            thisPC.microPC(), curMacroop);
+                } else {
+                    staticInst = curMacroop->fetchMicroop(thisPC.microPC());
+                }
+                newMacro |= staticInst->isLastMicroop();
+            }
+
+            DynInstPtr instruction =
+                buildInst(tid, staticInst, curMacroop, thisPC, nextPC, true);
+
+            ppFetch->notify(instruction);
+            numInst++;
+
+#if TRACING_ON
+            if (debug::O3PipeView) {
+                instruction->fetchTick = curTick();
+            }
+#endif
+
+            nextPC = thisPC;
+
+            // If the uop cache detects a branch then can check
+            // wheather the current fetch target was really predicted
+            // as a branch or not. If we detect that the BPU was wrong the
+            // decoupled BP can be resteared earlier. (Post fetch correction)
+
+            if (thisPC.branching()) {
+                DPRINTF(Fetch, "Branch detected with PC = %s\n", thisPC);
+                if (!curFetchTarget->control) {
+                    DPRINTF(Fetch,
+                        "BPU did not detect the branch.\n", thisPC);
+                }
+            } else {
+                if (curFetchTarget->control) {
+                    DPRINTF(Fetch,
+                        "BPU incorrectly detect a branch\n", thisPC);
+                }
+            }
+
+            // Get the nex
+
+            newMacro |= thisPC.instAddr() != nextPC.instAddr();
+
+            // Move to the next instruction, unless we have a branch.
+            thisPC = nextPC;
+            inRom = isRomMicroPC(thisPC.microPC());
+
+            if (newMacro) {
+                fetchAddr = thisPC.instAddr() & pc_mask;
+                blkOffset = (fetchAddr - fetchBufferPC[tid]) / instSize;
+                pcOffset = 0;
+                curMacroop = NULL;
+            }
+
+            if (instruction->isQuiesce()) {
+                DPRINTF(Fetch,
+                        "Quiesce instruction encountered, halting fetch!\n");
+                fetchStatus[tid] = QuiescePending;
+                status_change = true;
+                quiesce = true;
+                break;
+            }
+        } while ((curMacroop || dec_ptr->instReady()) &&
+                 numInst < fetchWidth &&
+                 fetchQueue[tid].size() < fetchQueueSize);
+
+        // Re-evaluate whether the next instruction to fetch is
+        // in micro-op ROM or not.
+        inRom = isRomMicroPC(thisPC.microPC());
+    }
+
+    if (predictedBranch) {
+        DPRINTF(Fetch, "[tid:%i] Done fetching, predicted branch "
+                "instruction encountered.\n", tid);
+    } else if (numInst >= fetchWidth) {
+        DPRINTF(Fetch, "[tid:%i] Done fetching, reached fetch bandwidth "
+                "for this cycle.\n", tid);
+    } else if (blkOffset >= fetchBufferSize) {
+        DPRINTF(Fetch, "[tid:%i] Done fetching, reached the end of the"
+                "fetch buffer.\n", tid);
+    }
+
+    macroop[tid] = curMacroop;
+    fetchOffset[tid] = pcOffset;
+
+    if (numInst > 0) {
+        wroteToTimeBuffer = true;
+    }
+
+    pc[tid] = thisPC;
+
+    // pipeline a fetch if we're crossing a fetch buffer boundary and not in
+    // a state that would preclude fetching
+    fetchAddr = (thisPC.instAddr() + pcOffset) & pc_mask;
+    Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
+    issuePipelinedIfetch[tid] = fetchBufferBlockPC != fetchBufferPC[tid] &&
+        fetchStatus[tid] != IcacheWaitResponse &&
+        fetchStatus[tid] != ItlbWait &&
+        fetchStatus[tid] != IcacheWaitRetry &&
+        fetchStatus[tid] != QuiescePending &&
+        !curMacroop;
+}
+
+
+
+
+
 void
 Fetch::fetch(bool &status_change)
 {
@@ -1117,9 +1568,11 @@ Fetch::fetch(bool &status_change)
 
     // The current PC.
     PCStateBase &this_pc = *pc[tid];
+    // FetchTargetPtr curFetchTarget = fetchTarget[tid];
 
     Addr pcOffset = fetchOffset[tid];
-    Addr fetchAddr = (this_pc.instAddr() + pcOffset) & decoder[tid]->pcMask();
+    Addr fetchAddr = (thisPC.instAddr() + pcOffset) & decoder[tid]->pcMask();
+    // Addr fetchAddr = curFetchTarget->addr;
 
     bool inRom = isRomMicroPC(this_pc.microPC());
 
@@ -1224,6 +1677,7 @@ Fetch::fetch(bool &status_change)
                 break;
             }
 
+            // Copy instructions into the decoder
             memcpy(dec_ptr->moreBytesPtr(),
                     fetchBuffer[tid] + blkOffset * instSize, instSize);
             decoder[tid]->moreBytes(this_pc, fetchAddr);
@@ -1251,8 +1705,9 @@ Fetch::fetch(bool &status_change)
                         pcOffset = 0;
                     }
                 } else {
-                    // We need more bytes for this instruction so blkOffset and
-                    // pcOffset will be updated
+                    // We need more bytes/new fetch target for this
+                    // instruction so blkOffset and pcOffset will be updated
+                    //
                     break;
                 }
             }

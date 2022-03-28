@@ -250,7 +250,7 @@ X86StaticInst::printReg(std::ostream &os, RegId reg, int size)
         }
         break;
       default:
-        panic("Unrecognized register class.");
+        warn("Unrecognized register class.");
     }
 }
 

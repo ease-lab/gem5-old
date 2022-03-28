@@ -41,6 +41,9 @@
 #ifndef __CPU_O3_FETCH_HH__
 #define __CPU_O3_FETCH_HH__
 
+#include <queue>
+#include <unique_ptr>
+
 #include "arch/generic/decoder.hh"
 #include "arch/generic/mmu.hh"
 #include "base/statistics.hh"
@@ -287,6 +290,20 @@ class Fetch
     bool lookupAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &pc);
 
     /**
+     * Looks the next fetch target from FTQ
+     * either next PC+=MachInst or a branch target.
+     * @param next_PC Next PC variable passed in by reference.  It is
+     * expected to be set to the current PC; it will be updated with what
+     * the next PC will be.
+     * @param next_NPC Used for ISAs which use delay slots.
+     * @return Whether or not a branch was predicted as taken.
+     */
+    bool updateNextPC(const DynInstPtr &inst, TheISA::PCState &pc);
+
+
+
+
+    /**
      * Fetches the cache line that contains the fetch PC.  Returns any
      * fault that happened.  Puts the data into the class variable
      * fetchBuffer, which may not hold the entire fetched cache line.
@@ -348,6 +365,67 @@ class Fetch
      * change (ie switching to IcacheMissStall).
      */
     void fetch(bool &status_change);
+
+    /** Feed the fetch target queue.
+     */
+    void produceFetchTargets(bool &status_change);
+    void consumeFetchTargets(bool &status_change);
+
+    TheISA::PCState decoupledPC;
+    // Addr decoupledOffset[MaxThreads];
+
+
+    class FetchTarget
+    {
+      public:
+        Addr addr;
+        bool control;
+        bool taken;
+        TheISA::PCState targetAddr;
+
+      FetchTarget(Addr _addr = 0, bool
+          _control = false, bool _taken = false)
+        : addr(_addr), control(_control), taken(_taken) {};
+      // FetchTarget(const FetchTarget &other)
+      //   : addr(other.addr), control(other.control), taken(other.taken) {};
+    };
+
+    typedef std::unique_ptr<FetchTarget> FetchTargetPtr;
+
+    class FetchTargetQueue
+    {
+      public:
+        // Push a fetch target onto the queue
+        bool push(FetchTargetPtr entry) {
+          if (_queue.size() == _size) {
+            return false;
+          }
+          _queue.push_back(entry);
+          return true;
+        }
+
+        // Pop the first fetch target from the queue.
+        FetchTargetPtr getNext() {
+          if (_queue.empty()) {
+            return nullptr;
+          }
+          auto entry = _queue.front();
+          _queue.pop_front();
+          return entry;
+        }
+
+        bool empty() {
+          return _queue.empty();
+        }
+
+      private:
+        std::list<FetchTargetPtr> _queue;
+        int _size;
+    };
+    FetchTargetQueue ftq;
+
+    /** Current fetch targets */
+    FetchTargetPtr fetchTarget[MaxThreads];
 
     /** Align a PC to the start of a fetch buffer block. */
     Addr fetchBufferAlignPC(Addr addr)
