@@ -1,5 +1,6 @@
 # Copyright (c) 2012 Mark D. Hill and David A. Wood
 # Copyright (c) 2015 The University of Wisconsin
+# Copyright (c) 2022 The University of Edinburgh
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -28,6 +29,25 @@
 from m5.SimObject import SimObject
 from m5.params import *
 from m5.proxy import *
+
+
+class BTB(SimObject):
+    type = 'BTB'
+    cxx_class = 'gem5::branch_prediction::BTB'
+    cxx_header = "cpu/pred/btb.hh"
+    abstract = True
+
+    numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+
+class SimpleBTB(BTB):
+    type = 'SimpleBTB'
+    cxx_class = 'gem5::branch_prediction::SimpleBTB'
+    cxx_header = "cpu/pred/simple_btb.hh"
+
+    numEntries = Param.Unsigned(4096, "Number of BTB entries")
+    tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
+    instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
+                        "Number of bits to shift instructions by")
 
 class IndirectPredictor(SimObject):
     type = 'IndirectPredictor'
@@ -64,6 +84,7 @@ class BranchPredictor(SimObject):
     RASSize = Param.Unsigned(16, "RAS size")
     instShiftAmt = Param.Unsigned(2, "Number of bits to shift instructions by")
 
+    BTB = Param.BTB(SimpleBTB(), "Branch target buffer (BTB)")
     indirectBranchPred = Param.IndirectPredictor(SimpleIndirectPredictor(),
       "Indirect branch predictor, set to NULL to disable indirect predictions")
 

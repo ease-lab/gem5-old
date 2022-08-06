@@ -33,6 +33,7 @@ if env['CONF']['TARGET_ISA'] == 'null':
 
 SimObject('BranchPredictor.py', sim_objects=[
     'IndirectPredictor', 'SimpleIndirectPredictor', 'BranchPredictor',
+    'BTB', 'SimpleBTB',
     'LocalBP', 'TournamentBP', 'BiModeBP', 'TAGEBase', 'TAGE', 'LoopPredictor',
     'TAGE_SC_L_TAGE', 'TAGE_SC_L_TAGE_64KB', 'TAGE_SC_L_TAGE_8KB',
     'LTAGE', 'TAGE_SC_L_LoopPredictor', 'StatisticalCorrector', 'TAGE_SC_L',
@@ -47,6 +48,7 @@ SimObject('BranchPredictor.py', sim_objects=[
     'MultiperspectivePerceptronTAGE8KB'])
 
 DebugFlag('Indirect')
+DebugFlag('BTB')
 Source('bpred_unit.cc')
 Source('2bit_local.cc')
 Source('btb.cc')
@@ -54,7 +56,7 @@ Source('simple_indirect.cc')
 Source('indirect.cc')
 Source('ras.cc')
 Source('tournament.cc')
-Source ('bi_mode.cc')
+Source('bi_mode.cc')
 Source('tage_base.cc')
 Source('tage.cc')
 Source('loop_predictor.cc')
@@ -69,6 +71,8 @@ Source('statistical_corrector.cc')
 Source('tage_sc_l.cc')
 Source('tage_sc_l_8KB.cc')
 Source('tage_sc_l_64KB.cc')
+Source('btb.cc')
+Source('simple_btb.cc')
 DebugFlag('FreeList')
 DebugFlag('Branch')
 DebugFlag('Tage')

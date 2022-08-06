@@ -1332,6 +1332,10 @@ class HPI_MMU(ArmMMU):
     itb = ArmTLB(entry_type="instruction", size=256)
     dtb = ArmTLB(entry_type="data", size=256)
 
+class HPI_BTB(SimpleBTB):
+    numEntries = 128
+    tagBits = 18
+
 class HPI_BP(TournamentBP):
     localPredictorSize = 64
     localCtrBits = 2
@@ -1340,8 +1344,7 @@ class HPI_BP(TournamentBP):
     globalCtrBits = 2
     choicePredictorSize = 1024
     choiceCtrBits = 2
-    BTBEntries = 128
-    BTBTagSize = 18
+    BTB = HPI_BTB()
     RASSize = 8
     instShiftAmt = 2
 

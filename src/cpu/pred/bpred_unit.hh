@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2012, 2014 ARM Limited
- * Copyright (c) 2010 The University of Edinburgh
+ * Copyright (c) 2010,2022 The University of Edinburgh
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -152,7 +152,7 @@ class BPredUnit : public SimObject
      * @param inst_PC The PC to look up.
      * @return Whether the BTB contains the given PC.
      */
-    bool BTBValid(Addr instPC) { return BTB.valid(instPC, 0); }
+    bool BTBValid(Addr instPC) { return btb->valid(instPC, 0); }
 
     /**
      * Looks up a given PC in the BTB to get the predicted target. The PC may
@@ -164,7 +164,7 @@ class BPredUnit : public SimObject
     const PCStateBase *
     BTBLookup(Addr inst_pc)
     {
-        return BTB.lookup(inst_pc, 0);
+        return btb->lookup(inst_pc, 0);
     }
 
     /**
@@ -191,7 +191,7 @@ class BPredUnit : public SimObject
     void
     BTBUpdate(Addr instPC, const PCStateBase &target)
     {
-        BTB.update(instPC, target, 0);
+        btb->update(instPC, target, 0);
     }
 
 
@@ -294,7 +294,7 @@ class BPredUnit : public SimObject
     std::vector<History> predHist;
 
     /** The BTB. */
-    DefaultBTB BTB;
+    BTB * btb;
 
     /** The per-thread return address stack. */
     std::vector<ReturnAddrStack> RAS;
