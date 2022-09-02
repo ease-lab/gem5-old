@@ -1,0 +1,133 @@
+/*
+ * Copyright (c) 2004-2005 The Regents of The University of Michigan
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met: redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer;
+ * redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution;
+ * neither the name of the copyright holders nor the names of its
+ * contributors may be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#ifndef __CPU_PRED_ASSOCIATIVE_BTB_HH__
+#define __CPU_PRED_ASSOCIATIVE_BTB_HH__
+
+#include "base/logging.hh"
+#include "base/types.hh"
+#include "config/the_isa.hh"
+#include "cpu/pred/btb.hh"
+#include "mem/cache/prefetch/associative_set.hh"
+#include "params/AssociativeBTB.hh"
+
+namespace gem5
+{
+
+namespace branch_prediction
+{
+
+class AssociativeBTB : public BTB
+{
+  public:
+    AssociativeBTB(const AssociativeBTBParams &params);
+
+    void reset() override;
+    const PCStateBase *lookup(Addr instPC, ThreadID tid) override;
+    bool valid(Addr instPC, ThreadID tid) override;
+    void update(Addr inst_pc, const PCStateBase &target_pc,
+                                ThreadID tid) override;
+
+
+  private:
+    struct BTBEntry
+    {
+        /** The entry's tag. */
+        Addr tag = 0;
+
+        /** The entry's target. */
+        std::unique_ptr<PCStateBase> target;
+
+        /** The entry's thread id. */
+        ThreadID tid;
+
+        /** Whether or not the entry is valid. */
+        bool valid = false;
+    };
+
+    struct BTBTaggedEntry : public TaggedEntry
+    {
+        /** The entry's tag. */
+        Addr tag = 0;
+
+        /** The entry's target. */
+        PCStateBase * target;
+
+        /** The entry's thread id. */
+        ThreadID tid;
+
+        /** Whether or not the entry is valid. */
+        bool valid = false;
+    };
+
+
+    /** Returns the index into the BTB, based on the branch's PC.
+     *  @param inst_PC The branch to look up.
+     *  @return Returns the index into the BTB.
+     */
+    inline unsigned getIndex(Addr instPC, ThreadID tid);
+
+    /** Returns the tag bits of a given address.
+     *  @param inst_PC The branch's address.
+     *  @return Returns the tag bits.
+     */
+    inline Addr getTag(Addr instPC);
+
+
+    std::vector<BTBEntry> btb;
+
+    /** The actual BTB. */
+    AssociativeSet<BTBTaggedEntry> btb2;
+
+
+    /** The number of entries in the BTB. */
+    unsigned numEntries;
+
+    /** The index mask. */
+    unsigned idxMask;
+
+    /** The number of tag bits per entry. */
+    unsigned tagBits;
+
+    /** The tag mask. */
+    unsigned tagMask;
+
+    /** Number of bits to shift PC when calculating index. */
+    unsigned instShiftAmt;
+
+    /** Number of bits to shift PC when calculating tag. */
+    unsigned tagShiftAmt;
+
+    /** Log2 NumThreads used for hashing threadid */
+    unsigned log2NumThreads;
+};
+
+} // namespace branch_prediction
+} // namespace gem5
+
+#endif // __CPU_PRED_ASSOCIATIVE_BTB_HH__

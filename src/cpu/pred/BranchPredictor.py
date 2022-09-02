@@ -29,6 +29,48 @@ from m5.SimObject import SimObject
 from m5.params import *
 from m5.proxy import *
 
+from m5.objects.IndexingPolicies import *
+from m5.objects.ReplacementPolicies import *
+
+
+class BTB(SimObject):
+    type = 'BTB'
+    cxx_class = 'gem5::branch_prediction::BTB'
+    cxx_header = "cpu/pred/btb.hh"
+    abstract = True
+
+    numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+
+class SimpleBTB(BTB):
+    type = 'SimpleBTB'
+    cxx_class = 'gem5::branch_prediction::SimpleBTB'
+    cxx_header = "cpu/pred/simple_btb.hh"
+
+    numEntries = Param.Unsigned(4096, "Number of BTB entries")
+    tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
+    instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
+                        "Number of bits to shift instructions by")
+
+class AssociativeBTB(BTB):
+    type = 'AssociativeBTB'
+    cxx_class = 'gem5::branch_prediction::AssociativeBTB'
+    cxx_header = "cpu/pred/associative_btb.hh"
+
+    num_entries = Param.MemorySize("4096",
+        "Number of entries of BTB entries")
+    assoc = Param.Unsigned(8,
+        "Associativity of the BTB")
+    indexing_policy = Param.BaseIndexingPolicy(
+        SetAssociative(entry_size = 1, assoc = Parent.assoc,
+        size = Parent.num_entries),
+        "Indexing policy of the BTB")
+    replacement_policy = Param.BaseReplacementPolicy(LRURP(),
+        "Replacement policy of the table")
+
+    numEntries = Param.Unsigned(4096, "Number of BTB entries ")
+    tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
+    instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
+                        "Number of bits to shift instructions by")
 
 class IndirectPredictor(SimObject):
     type = "IndirectPredictor"
