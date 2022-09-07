@@ -46,10 +46,10 @@
 
 #include "base/statistics.hh"
 #include "base/types.hh"
+#include "cpu/inst_seq.hh"
 #include "cpu/pred/btb.hh"
 #include "cpu/pred/indirect.hh"
 #include "cpu/pred/ras.hh"
-#include "cpu/inst_seq.hh"
 #include "cpu/static_inst.hh"
 #include "params/BranchPredictor.hh"
 #include "sim/probe/pmu.hh"
@@ -297,8 +297,8 @@ class BPredUnit : public SimObject
     /** The BTB. */
     DefaultBTB BTB;
 
-    /** The per-thread return address stack. */
-    std::vector<ReturnAddrStack> RAS;
+    /** The return address stack. */
+    ReturnAddrStack * ras;
 
     /** The indirect target predictor. */
     IndirectPredictor * iPred;

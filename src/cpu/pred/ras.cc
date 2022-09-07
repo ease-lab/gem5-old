@@ -28,59 +28,161 @@
 
 #include "cpu/pred/ras.hh"
 
+#include <iomanip>
+
+#include "debug/RAS.hh"
+
 namespace gem5
 {
 
 namespace branch_prediction
 {
 
+
+
 void
-ReturnAddrStack::init(unsigned _numEntries)
+ReturnAddrStack::AddrStack::init(unsigned _numEntries)
 {
     numEntries = _numEntries;
     addrStack.resize(numEntries);
+    for (unsigned i = 0; i < numEntries; ++i) {
+        addrStack[i] = nullptr;
+    }
     reset();
 }
 
 void
-ReturnAddrStack::reset()
+ReturnAddrStack::AddrStack::reset()
 {
     usedEntries = 0;
     tos = 0;
 }
 
-void
-ReturnAddrStack::push(const PCStateBase &return_addr)
+const PCStateBase *
+ReturnAddrStack::AddrStack::top()
 {
+    if (usedEntries > 0) {
+        return addrStack[tos].get();
+    }
+    return nullptr;
+}
+
+
+void
+ReturnAddrStack::AddrStack::push(const PCStateBase &return_addr)
+{
+
     incrTos();
 
     set(addrStack[tos], return_addr);
 
-    if (usedEntries != numEntries) {
+    // if (usedEntries != numEntries) {
         ++usedEntries;
-    }
+    // }
 }
 
 void
-ReturnAddrStack::pop()
+ReturnAddrStack::AddrStack::pop()
 {
     if (usedEntries > 0) {
         --usedEntries;
+        decrTos();
     }
-
-    decrTos();
 }
 
 void
-ReturnAddrStack::restore(unsigned top_entry_idx, const PCStateBase *restored)
+ReturnAddrStack::AddrStack::restore(unsigned top_entry_idx,
+                const PCStateBase *restored)
 {
-    tos = top_entry_idx;
-
-    set(addrStack[tos], restored);
-
     if (usedEntries != numEntries) {
         ++usedEntries;
     }
+    tos = top_entry_idx;
+    set(addrStack[tos], restored);
+}
+
+
+std::string
+ReturnAddrStack::AddrStack::print(int n)
+{
+    std::stringstream ss;
+    ss << "";
+    for (int i = 0; i<n; i++) {
+        int idx = int(tos)-i;
+        if (idx < 0 || addrStack[idx] == nullptr) {
+            break;
+        }
+        ss << std::dec << idx << ":0x" << std::setfill('0') << std::setw(8)
+           << std::hex << addrStack[idx]->instAddr() << ";";
+    }
+    return ss.str();
+}
+
+
+
+ReturnAddrStack::ReturnAddrStack(const Params &p)
+    : SimObject(p),
+      numEntries(p.numEntries),
+      numThreads(p.numThreads)
+{
+    DPRINTF(RAS, "Create RAS stacks.\n");
+
+    for (unsigned i = 0; i < numThreads; ++i) {
+        addrStacks.emplace_back(*this);
+        addrStacks[i].init(numEntries);
+    }
+}
+
+
+
+void
+ReturnAddrStack::reset()
+{
+    DPRINTF(RAS, "RAS Reset.\n");
+    for (auto& r : addrStacks)
+        r.reset();
+}
+
+void
+ReturnAddrStack::push(const PCStateBase &return_addr, ThreadID tid)
+{
+    addrStacks[tid].push(return_addr);
+
+    // DPRINTF(Branch, "RAS Push: RAS[%i] <= %llu. Entries used: %i\n",
+    //                 tos,return_addr,  usedEntries);
+    DPRINTF(RAS, "Push:  RAS[%i] <= 0x%08x. Entries used: %i, tid:%i\n",
+                    addrStacks[tid].tos,
+                    return_addr.instAddr(),
+                    addrStacks[tid].usedEntries,tid);
+    DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
+}
+
+void
+ReturnAddrStack::pop(ThreadID tid)
+{
+    addrStacks[tid].pop();
+
+    DPRINTF(RAS, "Pop:   RAS[%i] => x. "
+                "Entries used: %i, tid:%i\n",
+                addrStacks[tid].tos, addrStacks[tid].usedEntries, tid);
+    DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
+}
+
+void
+ReturnAddrStack::restore(unsigned top_entry_idx,
+                         const PCStateBase *restored,
+                         ThreadID tid)
+{
+    addrStacks[tid].restore(top_entry_idx, restored);
+    // if (usedEntries != numEntries) {
+    //     ++usedEntries;
+    // }
+    DPRINTF(RAS, "Rest.: RAS[%i] => RAS[%i]:0x%08x. "
+            "Entries used: %i, tid:%i\n",
+            addrStacks[tid].tos,
+            top_entry_idx, restored->instAddr(),
+            addrStacks[tid].usedEntries, tid);
+    DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
 }
 
 } // namespace branch_prediction
