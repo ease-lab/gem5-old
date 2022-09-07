@@ -220,6 +220,9 @@ class BPredUnit : public SimObject
             tid(other.tid), predTaken(other.predTaken), usedRAS(other.usedRAS),
             pushedRAS(other.pushedRAS), wasCall(other.wasCall),
             wasReturn(other.wasReturn), wasIndirect(other.wasIndirect),
+            wasPredTakenBTBHit(other.wasPredTakenBTBHit),
+            wasPredTakenBTBMiss(other.wasPredTakenBTBMiss),
+            wasUncond(other.wasUncond),
             target(other.target), inst(other.inst)
         {
             set(RASTarget, other.RASTarget);
@@ -272,6 +275,15 @@ class BPredUnit : public SimObject
         /** Wether this instruction was an indirect branch */
         bool wasIndirect = false;
 
+        /** Was predicted taken and hit in BTB */
+        bool wasPredTakenBTBHit = false;
+
+        /** Was predicted taken but miss in BTB */
+        bool wasPredTakenBTBMiss = false;
+
+        /** Was unconditional control */
+        bool wasUncond = false;
+
         /** Target of the branch. First it is predicted, and fixed later
          *  if necessary
          */
@@ -311,6 +323,8 @@ class BPredUnit : public SimObject
         statistics::Scalar lookups;
         /** Stat for number of conditional branches predicted. */
         statistics::Scalar condPredicted;
+        /** Stat for n of conditional branches predicted as taken. */
+        statistics::Scalar condPredictedTaken;
         /** Stat for number of conditional branches predicted incorrectly. */
         statistics::Scalar condIncorrect;
         /** Stat for number of BTB lookups. */
@@ -319,11 +333,13 @@ class BPredUnit : public SimObject
         statistics::Scalar BTBUpdates;
         /** Stat for number of BTB hits. */
         statistics::Scalar BTBHits;
-        /** Stat for the ratio between BTB hits and BTB lookups. */
+        /** Stat for number for the ratio between BTB hits and BTB lookups. */
         statistics::Formula BTBHitRatio;
-        /** Stat for number of times the RAS is used to get a target. */
+        /** Stat for number BTB misspredictions. No or wrong target found */
+        statistics::Scalar BTBMispredicted;
+        /** Stat for number for the ratio between BTB hits and BTB lookups. */
         statistics::Scalar RASUsed;
-        /** Stat for number of times the RAS is incorrect. */
+        /** Stat for number for number of times the RAS is incorrect. */
         statistics::Scalar RASIncorrect;
 
         /** Stat for the number of indirect target lookups.*/
@@ -334,6 +350,31 @@ class BPredUnit : public SimObject
         statistics::Scalar indirectMisses;
         /** Stat for the number of indirect target mispredictions.*/
         statistics::Scalar indirectMispredicted;
+
+        /** Stat for the number of conditional calls*/
+        statistics::Scalar indirectCall;
+        /** Stat for the number of unconditional calls*/
+        statistics::Scalar directCall;
+        /** Stat for the number of mispredicted calls*/
+        statistics::Scalar mispredictCall;
+
+        /** Stat for the number of conditional branches mispredicted*/
+        statistics::Scalar mispredictCond;
+        /** Stat for the number of unconditional branches mispredicted*/
+        statistics::Scalar mispredictUncond;
+        /** Stat for the number of branches predicted taken but miss in BTB*/
+        statistics::Scalar predTakenBTBMiss;
+        /** Stat for the number of unconditional branches miss in BTB*/
+        statistics::Scalar uncondBTBMiss;
+
+        /** Stat for the number of branches predicted not taken but
+         * turn out to be taken*/
+        statistics::Scalar NotTakenMispredicted;
+        /** Stat for the number of branches predicted taken but turn
+         * out to be not taken*/
+        statistics::Scalar TakenMispredicted;
+
+
     } stats;
 
   protected:

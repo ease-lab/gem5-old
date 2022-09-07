@@ -320,10 +320,13 @@ LoopPredictor::squashLoop(BranchInfo* bi)
 void
 LoopPredictor::updateStats(bool taken, BranchInfo* bi)
 {
-    if (taken == bi->loopPred) {
-        stats.correct++;
-    } else {
-        stats.wrong++;
+    if (bi->loopPredUsed) {
+        stats.used++;
+        if (taken == bi->loopPred) {
+            stats.correct++;
+        } else {
+            stats.wrong++;
+        }
     }
 }
 
@@ -354,6 +357,8 @@ LoopPredictor::condBranchUpdate(ThreadID tid, Addr branch_pc, bool taken,
 LoopPredictor::LoopPredictorStats::LoopPredictorStats(
     statistics::Group *parent)
     : statistics::Group(parent),
+      ADD_STAT(used, statistics::units::Count::get(),
+               "Number of times the loop predictor is the provider."),
       ADD_STAT(correct, statistics::units::Count::get(),
                "Number of times the loop predictor is the provider and the "
                "prediction is correct"),

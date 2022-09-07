@@ -92,6 +92,7 @@ class LoopPredictor : public SimObject
     struct LoopPredictorStats : public statistics::Group
     {
         LoopPredictorStats(statistics::Group *parent);
+        statistics::Scalar used;
         statistics::Scalar correct;
         statistics::Scalar wrong;
     } stats;
