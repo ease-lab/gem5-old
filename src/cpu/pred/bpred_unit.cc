@@ -61,13 +61,11 @@ BPredUnit::BPredUnit(const Params &params)
       numThreads(params.numThreads),
       predHist(numThreads),
       btb(params.BTB),
-      RAS(numThreads),
+      ras(params.RAS),
       iPred(params.indirectBranchPred),
       stats(this),
       instShiftAmt(params.instShiftAmt)
 {
-    for (auto& r : RAS)
-        r.init(params.RASSize);
 }
 
 BPredUnit::BPredUnitStats::BPredUnitStats(statistics::Group *parent)
@@ -171,21 +169,22 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
 
     // Now lookup in the BTB or RAS.
     if (pred_taken) {
-        if (inst->isReturn()) {
+        // Use RAS for returns if available
+        if (ras && inst->isReturn()) {
             ++stats.RASUsed;
             predict_record.wasReturn = true;
             // If it's a function return call, then look up the address
             // in the RAS.
-            const PCStateBase *ras_top = RAS[tid].top();
+            const PCStateBase *ras_top = ras->top(tid);
             if (ras_top)
                 set(target, inst->buildRetPC(pc, *ras_top));
 
             // Record the top entry of the RAS, and its index.
             predict_record.usedRAS = true;
-            predict_record.RASIndex = RAS[tid].topIdx();
+            predict_record.RASIndex = ras->topIdx(tid);
             set(predict_record.RASTarget, ras_top);
 
-            RAS[tid].pop();
+            ras->pop(tid);
 
             DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a return, "
                     "RAS predicted target: %s, RAS index: %i\n",
@@ -193,7 +192,9 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
         } else {
 
             if (inst->isCall()) {
-                RAS[tid].push(pc);
+
+                if (ras) {
+                    ras->push(pc, tid);
                 predict_record.pushedRAS = true;
 
                 // Record that it was a call so that the top RAS entry can
@@ -231,35 +232,10 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                                 "[tid:%i] [sn:%llu] btbUpdate "
                                 "called for %s\n",
                                 tid, seqNum, pc);
-                    } else if (inst->isCall() && !inst->isUncondCtrl()) {
-                        RAS[tid].pop();
-                        predict_record.pushedRAS = false;
-                    }
-                    inst->advancePC(*target);
-                }
-            } else {
-                predict_record.wasIndirect = true;
-                ++stats.indirectLookups;
-                //Consult indirect predictor on indirect control
-                if (iPred->lookup(pc.instAddr(), *target, tid)) {
-                    // Indirect predictor hit
-                    ++stats.indirectHits;
-                    DPRINTF(Branch,
-                            "[tid:%i] [sn:%llu] Instruction %s predicted "
-                            "indirect target is %s\n",
-                            tid, seqNum, pc, *target);
-                } else {
-                    ++stats.indirectMisses;
-                    pred_taken = false;
-                    predict_record.predTaken = pred_taken;
-                    DPRINTF(Branch,
-                            "[tid:%i] [sn:%llu] Instruction %s no indirect "
-                            "target\n",
-                            tid, seqNum, pc);
-                    if (!inst->isCall() && !inst->isReturn()) {
-
-                    } else if (inst->isCall() && !inst->isUncondCtrl()) {
-                        RAS[tid].pop();
+                    } else if (inst->isCall()
+                               && !inst->isUncondCtrl()
+                               && ras) {
+                        ras->pop(tid);
                         predict_record.pushedRAS = false;
                     }
                     inst->advancePC(*target);
@@ -332,12 +308,15 @@ BPredUnit::squash(const InstSeqNum &squashed_sn, ThreadID tid)
     while (!pred_hist.empty() &&
            pred_hist.front().seqNum > squashed_sn) {
         if (pred_hist.front().usedRAS) {
+            assert(ras);
             if (pred_hist.front().RASTarget != nullptr) {
                 DPRINTF(Branch, "[tid:%i] [squash sn:%llu]"
                         " Restoring top of RAS to: %i,"
                         " target: %s\n", tid, squashed_sn,
                         pred_hist.front().RASIndex,
                         *pred_hist.front().RASTarget);
+            ras->restore(pred_hist.front().RASIndex,
+                             pred_hist.front().RASTarget.get(), tid);
             }
             else {
                 DPRINTF(Branch, "[tid:%i] [squash sn:%llu]"
@@ -346,14 +325,14 @@ BPredUnit::squash(const InstSeqNum &squashed_sn, ThreadID tid)
                         pred_hist.front().RASIndex);
             }
 
-            RAS[tid].restore(pred_hist.front().RASIndex,
-                             pred_hist.front().RASTarget.get());
-        } else if (pred_hist.front().wasCall && pred_hist.front().pushedRAS) {
+
+        } else if (pred_hist.front().pushedRAS) {
+            assert(ras);
              // Was a call but predicated false. Pop RAS here
              DPRINTF(Branch, "[tid:%i] [squash sn:%llu] Squashing"
                      "  Call [sn:%llu] PC: %s Popping RAS\n", tid, squashed_sn,
                      pred_hist.front().seqNum, pred_hist.front().pc);
-             RAS[tid].pop();
+            ras->pop(tid);
         }
 
         // This call should delete the bpHistory.
@@ -419,7 +398,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
         }
 
 
-        if ((*hist_it).usedRAS) {
+        if (hist_it->usedRAS) {
             ++stats.RASIncorrect;
             DPRINTF(Branch,
                     "[tid:%i] [squash sn:%llu] Incorrect RAS [sn:%llu]\n",
@@ -455,8 +434,10 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         "return [sn:%llu] PC: %#x\n", tid, squashed_sn,
                         hist_it->seqNum,
                         hist_it->pc);
-                 RAS[tid].pop();
+                if (ras) {
+                    ras->pop(tid);
                  hist_it->usedRAS = true;
+                }
             }
             if (hist_it->wasIndirect) {
                 ++stats.indirectMispredicted;
@@ -476,6 +457,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
         } else {
            //Actually not Taken
            if (hist_it->usedRAS) {
+                assert(ras);
                 DPRINTF(Branch,
                         "[tid:%i] [squash sn:%llu] Incorrectly predicted "
                         "return [sn:%llu] PC: %#x Restoring RAS\n", tid,
@@ -485,9 +467,11 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         "[tid:%i] [squash sn:%llu] Restoring top of RAS "
                         "to: %i, target: %s\n", tid, squashed_sn,
                         hist_it->RASIndex, *hist_it->RASTarget);
-                RAS[tid].restore(hist_it->RASIndex, hist_it->RASTarget.get());
+                ras->restore(hist_it->RASIndex,
+                             hist_it->RASTarget.get(), tid);
                 hist_it->usedRAS = false;
            } else if (hist_it->wasCall && hist_it->pushedRAS) {
+                assert(ras);
                  //Was a Call but predicated false. Pop RAS here
                  DPRINTF(Branch,
                         "[tid:%i] [squash sn:%llu] "
@@ -495,7 +479,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         "Call [sn:%llu] PC: %s Popping RAS\n",
                         tid, squashed_sn,
                         hist_it->seqNum, hist_it->pc);
-                 RAS[tid].pop();
+                ras->pop(tid);
                  hist_it->pushedRAS = false;
            }
         }
