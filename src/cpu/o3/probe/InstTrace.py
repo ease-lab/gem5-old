@@ -1,6 +1,4 @@
-# -*- mode:python -*-
-
-# Copyright (c) 2013 ARM Limited
+# Copyright (c) 2022 The University of Edinburgh
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -35,17 +33,31 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-Import('*')
+from m5.objects.Probe import *
 
-if env['CONF']['TARGET_ISA'] != 'null':
-    SimObject('SimpleTrace.py', sim_objects=['SimpleTrace'])
-    Source('simple_trace.cc')
-    DebugFlag('SimpleTrace')
+class InstTrace(ProbeListenerObject):
+    type = 'InstTrace'
+    cxx_class = 'gem5::o3::InstTrace'
+    cxx_header = 'cpu/o3/probe/inst_trace.hh'
 
-    SimObject('InstTrace.py', sim_objects=['InstTrace'])
-    Source('inst_trace.cc')
-    DebugFlag('InstTrace')
+# # Trace files for the following params are created in the output directory.
+# # User is forced to provide these when an instance of this class is created.
+# instFetchTraceFile = Param.String(desc="Protobuf trace file name for " \
+#                                     "instruction fetch tracing")
 
-    SimObject('ElasticTrace.py', sim_objects=['ElasticTrace'], tags='protobuf')
-    Source('elastic_trace.cc', tags='protobuf')
-    DebugFlag('ElasticTrace', tags='protobuf')
+# # The committed instruction count from which to start tracing
+# startTraceInst = Param.UInt64(0, "The number of committed instructions " \
+#                                 "after which to start tracing. Default " \
+#                                 "zero means start tracing from first " \
+#                                 "committed instruction.")
+# # Whether to trace virtual addresses for memory accesses
+# traceVirtAddr = Param.Bool(False, "Set to true if virtual addresses are " \
+#                             "to be traced.")
+    # Whether to trace fetch
+    trace_fetch = Param.Bool(False, "Set to true if fetch are to be "
+                                    "traced as well.")
+
+    # Whether to trace all commited instructions
+    trace_commit = Param.Bool(False, "Trace all commited instructions.")
+    trace_branches = Param.Bool(False, "Trace branches")
+    trace_memref = Param.Bool(False, "Trace memory references")
