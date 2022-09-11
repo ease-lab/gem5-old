@@ -207,25 +207,29 @@ class BPredUnit : public SimObject
          */
         PredictorHistory(const InstSeqNum &seq_num, Addr instPC,
                          bool pred_taken, void *bp_history,
-                         void *indirect_history, ThreadID _tid,
-                         const StaticInstPtr & inst)
+                         void *indirect_history, void *ras_history,
+                         ThreadID _tid, const StaticInstPtr & inst)
             : seqNum(seq_num), pc(instPC), bpHistory(bp_history),
-              indirectHistory(indirect_history), tid(_tid),
-              predTaken(pred_taken), inst(inst)
+              indirectHistory(indirect_history), rasHistory(ras_history),
+              tid(_tid), predTaken(pred_taken), inst(inst)
         {}
 
         PredictorHistory(const PredictorHistory &other) :
             seqNum(other.seqNum), pc(other.pc), bpHistory(other.bpHistory),
-            indirectHistory(other.indirectHistory), RASIndex(other.RASIndex),
-            tid(other.tid), predTaken(other.predTaken), usedRAS(other.usedRAS),
-            pushedRAS(other.pushedRAS), wasCall(other.wasCall),
-            wasReturn(other.wasReturn), wasIndirect(other.wasIndirect),
+            indirectHistory(other.indirectHistory),
+            rasHistory(other.rasHistory), tid(other.tid),
+            predTaken(other.predTaken), usedRAS(other.usedRAS),
+            wasCall(other.wasCall), wasReturn(other.wasReturn),
+            wasIndirect(other.wasIndirect),
             wasPredTakenBTBHit(other.wasPredTakenBTBHit),
             wasPredTakenBTBMiss(other.wasPredTakenBTBMiss),
             wasUncond(other.wasUncond),
-            target(other.target), inst(other.inst)
+            target(other.target),
+            // targetProvider(targetProvider),
+            inst(other.inst)
         {
-            set(RASTarget, other.RASTarget);
+        }
+
         }
 
         bool
@@ -248,11 +252,7 @@ class BPredUnit : public SimObject
 
         void *indirectHistory = nullptr;
 
-        /** The RAS target (only valid if a return). */
-        std::unique_ptr<PCStateBase> RASTarget;
-
-        /** The RAS index of the instruction (only valid if a call). */
-        unsigned RASIndex = 0;
+        void *rasHistory = nullptr;
 
         /** The thread id. */
         ThreadID tid;
@@ -262,9 +262,6 @@ class BPredUnit : public SimObject
 
         /** Whether or not the RAS was used. */
         bool usedRAS = false;
-
-        /* Whether or not the RAS was pushed */
-        bool pushedRAS = false;
 
         /** Whether or not the instruction was a call. */
         bool wasCall = false;
@@ -297,6 +294,8 @@ class BPredUnit : public SimObject
 
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
+    /** Fallback to the BTB prediction in case the RAS is corrupted. */
+    const unsigned fallbackBTB;
 
 
     /**
@@ -337,10 +336,6 @@ class BPredUnit : public SimObject
         statistics::Formula BTBHitRatio;
         /** Stat for number BTB misspredictions. No or wrong target found */
         statistics::Scalar BTBMispredicted;
-        /** Stat for number for the ratio between BTB hits and BTB lookups. */
-        statistics::Scalar RASUsed;
-        /** Stat for number for number of times the RAS is incorrect. */
-        statistics::Scalar RASIncorrect;
 
         /** Stat for the number of indirect target lookups.*/
         statistics::Scalar indirectLookups;

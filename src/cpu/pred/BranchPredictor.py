@@ -40,6 +40,9 @@ class ReturnAddrStack(SimObject):
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
     numEntries = Param.Unsigned(Parent.RASSize, "Number of RAS entries")
+    corruptionDetection = Param.Bool(False, "When corruption detection is "
+                                    "enabled no entry will returned when "
+                                    "the stack was corrupted.")
 
 class BTB(SimObject):
     type = 'BTB'
