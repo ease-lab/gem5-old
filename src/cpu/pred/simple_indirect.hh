@@ -47,6 +47,7 @@ class SimpleIndirectPredictor : public IndirectPredictor
   public:
     SimpleIndirectPredictor(const SimpleIndirectPredictorParams &params);
 
+    void reset() override;
     bool lookup(Addr br_addr, PCStateBase& br_target, ThreadID tid);
     void recordIndirect(Addr br_addr, Addr tgt_addr, InstSeqNum seq_num,
                         ThreadID tid);

@@ -80,6 +80,11 @@ class BPredUnit : public SimObject
     void drainSanityCheck() const;
 
     /**
+     * Invalidates the branch predictor state.
+     */
+    virtual void memInvalidate() override;
+
+    /**
      * Predicts whether or not the instruction is a taken branch, and the
      * target of the branch if it is taken.
      * @param inst The branch instruction.

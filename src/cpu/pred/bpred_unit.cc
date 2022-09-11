@@ -59,6 +59,7 @@ namespace branch_prediction
 BPredUnit::BPredUnit(const Params &params)
     : SimObject(params),
       numThreads(params.numThreads),
+      fallbackBTB(params.fallbackBTB),
       predHist(numThreads),
       btb(params.BTB),
       ras(params.RAS),
@@ -86,11 +87,6 @@ BPredUnit::BPredUnitStats::BPredUnitStats(statistics::Group *parent)
                BTBHits / BTBLookups),
       ADD_STAT(BTBMispredicted, statistics::units::Count::get(),
                "Number BTB misspredictions. No target found or target wrong"),
-      ADD_STAT(RASUsed, statistics::units::Count::get(),
-               "Number of times the RAS was used to get a target."),
-      ADD_STAT(RASIncorrect, statistics::units::Count::get(),
-               "Number of incorrect RAS predictions."),
-    //   ADD_STAT(RASFull)
       ADD_STAT(indirectLookups, statistics::units::Count::get(),
                "Number of indirect predictor lookups."),
       ADD_STAT(indirectHits, statistics::units::Count::get(),
@@ -148,6 +144,25 @@ BPredUnit::drainSanityCheck() const
     for ([[maybe_unused]] const auto& ph : predHist)
         assert(ph.empty());
 }
+
+void
+BPredUnit::memInvalidate()
+{
+    // Reset the BTB and RAS
+    btb->reset();
+    if (ras) {
+        ras->reset();
+    }
+
+    // Indirect predictor if used.
+    if (iPred) {
+        iPred->reset();
+    }
+    // // Clear all histories
+    // for (auto& ph : predHist)
+    //     ph.clear();
+}
+
 
 bool
 BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,

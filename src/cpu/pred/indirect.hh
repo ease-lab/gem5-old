@@ -52,6 +52,7 @@ class IndirectPredictor : public SimObject
     {
     }
 
+    virtual void reset() = 0;
     virtual bool lookup(Addr br_addr, PCStateBase& br_target,
                         ThreadID tid) = 0;
     virtual void recordIndirect(Addr br_addr, Addr tgt_addr,
