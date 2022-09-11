@@ -28,119 +28,30 @@
 
 #include "cpu/pred/btb.hh"
 
-#include "base/intmath.hh"
-#include "base/trace.hh"
-#include "debug/Fetch.hh"
-
 namespace gem5
 {
 
 namespace branch_prediction
 {
 
-DefaultBTB::DefaultBTB(unsigned _numEntries,
-                       unsigned _tagBits,
-                       unsigned _instShiftAmt,
-                       unsigned _num_threads)
-    : numEntries(_numEntries),
-      tagBits(_tagBits),
-      instShiftAmt(_instShiftAmt),
-      log2NumThreads(floorLog2(_num_threads))
+BranchTargetBuffer::BranchTargetBuffer(const Params &params)
+    : SimObject(params),
+      stats(this)
 {
-    DPRINTF(Fetch, "BTB: Creating BTB object.\n");
-
-    if (!isPowerOf2(numEntries)) {
-        fatal("BTB entries is not a power of 2!");
-    }
-
-    btb.resize(numEntries);
-
-    for (unsigned i = 0; i < numEntries; ++i) {
-        btb[i].valid = false;
-    }
-
-    idxMask = numEntries - 1;
-
-    tagMask = (1 << tagBits) - 1;
-
-    tagShiftAmt = instShiftAmt + floorLog2(numEntries);
 }
 
-void
-DefaultBTB::reset()
+BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
+                                                  statistics::Group *parent)
+    : statistics::Group(parent),
+      ADD_STAT(lookups, statistics::units::Count::get(),
+               "Number of BTB lookups"),
+      ADD_STAT(hits, statistics::units::Count::get(), "Number of BTB hits"),
+      ADD_STAT(hitRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
+               hits / lookups),
+      ADD_STAT(mispredicted, statistics::units::Count::get(),
+               "Number BTB misspredictions. No target found or target wrong")
 {
-    for (unsigned i = 0; i < numEntries; ++i) {
-        btb[i].valid = false;
-    }
-}
-
-inline
-unsigned
-DefaultBTB::getIndex(Addr instPC, ThreadID tid)
-{
-    // Need to shift PC over by the word offset.
-    return ((instPC >> instShiftAmt)
-            ^ (tid << (tagShiftAmt - instShiftAmt - log2NumThreads)))
-            & idxMask;
-}
-
-inline
-Addr
-DefaultBTB::getTag(Addr instPC)
-{
-    return (instPC >> tagShiftAmt) & tagMask;
-}
-
-bool
-DefaultBTB::valid(Addr instPC, ThreadID tid)
-{
-    unsigned btb_idx = getIndex(instPC, tid);
-
-    Addr inst_tag = getTag(instPC);
-
-    assert(btb_idx < numEntries);
-
-    if (btb[btb_idx].valid
-        && inst_tag == btb[btb_idx].tag
-        && btb[btb_idx].tid == tid) {
-        return true;
-    } else {
-        return false;
-    }
-}
-
-// @todo Create some sort of return struct that has both whether or not the
-// address is valid, and also the address.  For now will just use addr = 0 to
-// represent invalid entry.
-const PCStateBase *
-DefaultBTB::lookup(Addr inst_pc, ThreadID tid)
-{
-    unsigned btb_idx = getIndex(inst_pc, tid);
-
-    Addr inst_tag = getTag(inst_pc);
-
-    assert(btb_idx < numEntries);
-
-    if (btb[btb_idx].valid
-        && inst_tag == btb[btb_idx].tag
-        && btb[btb_idx].tid == tid) {
-        return btb[btb_idx].target.get();
-    } else {
-        return nullptr;
-    }
-}
-
-void
-DefaultBTB::update(Addr inst_pc, const PCStateBase &target, ThreadID tid)
-{
-    unsigned btb_idx = getIndex(inst_pc, tid);
-
-    assert(btb_idx < numEntries);
-
-    btb[btb_idx].tid = tid;
-    btb[btb_idx].valid = true;
-    set(btb[btb_idx].target, target);
-    btb[btb_idx].tag = getTag(inst_pc);
+    hitRatio.precision(6);
 }
 
 } // namespace branch_prediction

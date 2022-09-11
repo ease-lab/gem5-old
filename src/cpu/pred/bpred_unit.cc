@@ -154,6 +154,38 @@ bool
 BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                    PCStateBase &pc, ThreadID tid)
 {
+
+
+
+    // Check the BTB if an entry was found. The BP can only detect branches
+    // if they have an entry in the BTB
+    ++stats.BTBLookups;
+
+    bool btb_hit = false;
+    if (btb->valid(tid, pc.instAddr())) {
+        btb_hit = true;
+        ++stats.BTBHits;
+    }
+
+
+    auto conditional = inst->isCondCtrl();
+    auto direct = inst->isDirectCtrl();
+    std::string type = "";
+
+    if (inst->isCall()) {
+        type = "call";
+    } else if (inst->isReturn()) {
+        type = "return";
+    } else if (inst->isUncondCtrl() || inst->isCondCtrl()) {
+        type = "jump";
+    } else {
+        type = "other";
+    }
+    DPRINTF(Branch, "[tid:%i] [sn:%llu] BTB detect %s %s. PC: %s\n",
+            tid, seqNum, conditional ? "cond" : "uncond" ,type ,pc);
+
+
+
     // See if branch predictor predicts taken.
     // If so, get its target addr either from the BTB or the RAS.
     // Save off record of branch stuff so the RAS can be fixed
@@ -286,11 +318,11 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
 
                 ++stats.BTBLookups;
                 // Check BTB on direct branches
-                if (BTB.valid(pc.instAddr(), tid)) {
+                if (btb->valid(tid, pc.instAddr())) {
                     ++stats.BTBHits;
                     predict_record.wasPredTakenBTBHit = true;
                     // If it's not a return, use the BTB to get target addr.
-                    set(target, BTB.lookup(pc.instAddr(), tid));
+                    set(target, btb->lookup(tid, pc.instAddr()));
                     DPRINTF(Branch,
                             "[tid:%i] [sn:%llu] Instruction %s predicted "
                             "target is %s\n",
@@ -351,26 +383,13 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
 
 
     auto pc_addr = predict_record.pc;
-    auto t = predict_record.target->instAddr();
-    auto conditional = inst->isCondCtrl();
-    auto direct = inst->isDirectCtrl();
-    std::string type = "";
-    auto distance = pc_addr - t;
-
-    if (inst->isCall()) {
-        type = "call";
-    } else if (inst->isReturn()) {
-        type = "return";
-    } else if (inst->isUncondCtrl() || inst->isCondCtrl()) {
-        type = "jump";
-    } else {
-        type = "other";
-    }
+    auto distance = pc_addr - predict_record.target;
 
     DPRINTF(Branch, "Branch | 0x%08x, "
         "type:%s, cond:%i, direct:%i, taken:%i, dist:%i, target: 0x%08x "
         "| %s.\n",
-        pc_addr, type, conditional, direct, pred_taken, distance, t,
+        pc_addr, type, conditional, direct, pred_taken,
+        distance, predict_record.target,
         inst->disassemble(pc_addr));
 
 
@@ -494,7 +513,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
 
 
         if (hist_it->usedRAS) {
-            ++stats.RASIncorrect;
+            ras->incorrect(hist_it->rasHistory);
             DPRINTF(Branch,
                     "[tid:%i] [squash sn:%llu] Incorrect RAS [sn:%llu]\n",
                     tid, squashed_sn, hist_it->seqNum);
@@ -592,15 +611,32 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         corr_target, tid);
                 }
             } else {
+                btb->incorrectTarget();
                 ++stats.BTBMispredicted;
+            }
+
+
+
+
+
                 DPRINTF(Branch,"[tid:%i] [squash sn:%llu] "
                         "BTB Update called for [sn:%llu] "
                         "PC %#x\n", tid, squashed_sn,
                         hist_it->seqNum, hist_it->pc);
 
-                ++stats.BTBUpdates;
-                BTB.update(hist_it->pc, corr_target, tid);
-            }
+            btb->update(tid, hist_it->pc, corr_target);
+
+
+
+
+
+
+
+
+
+
+
+
         } else {
            //Actually not Taken
            ++stats.TakenMispredicted;

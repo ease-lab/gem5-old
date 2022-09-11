@@ -42,82 +42,71 @@ namespace branch_prediction
 {
 
 AssociativeBTB::AssociativeBTB(const AssociativeBTBParams &p)
-    : BTB(p),
-        btb2(p.assoc, p.num_entries, p.indexing_policy,
+    : BranchTargetBuffer(p),
+        btb(p.assoc, p.numEntries, p.indexing_policy,
             p.replacement_policy),
         numEntries(p.numEntries),
+        assoc(p.assoc),
         tagBits(p.tagBits),
-        instShiftAmt(p.instShiftAmt),
-        log2NumThreads(floorLog2(p.numThreads))
+        instShiftAmt(p.instShiftAmt)
 {
-    DPRINTF(BTB, "BTB: Creating BTB object.\n");
-
     if (!isPowerOf2(numEntries)) {
         fatal("BTB entries is not a power of 2!");
     }
-
-    btb.resize(numEntries);
-
-    for (unsigned i = 0; i < numEntries; ++i) {
-        btb[i].valid = false;
+    if (!isPowerOf2(assoc)) {
+        fatal("BTB associativity is not a power of 2!");
     }
 
-    idxMask = numEntries - 1;
+    // The number of entries is divided into n ways.
+    uint64_t setBits = floorLog2(numEntries/assoc);
 
-    tagMask = (1 << tagBits) - 1;
+    idxBits = tagBits + setBits;
+    idxMask = (1ULL << idxBits) - 1;
 
-    tagShiftAmt = instShiftAmt + floorLog2(numEntries);
+    DPRINTF(BTB, "BTB: Creating BTB object. entries:%i, assoc:%i, "
+                 "tagBits:%i, idx mask:%x\n",
+                 numEntries, assoc, tagBits, idxMask);
 }
 
 void
 AssociativeBTB::reset()
 {
-    for (unsigned i = 0; i < numEntries; ++i) {
-        btb[i].valid = false;
-    }
     DPRINTF(BTB, "BTB: Invalidate all entries\n");
 
-    for (auto entry : btb2) {
+    for (auto entry : btb) {
         entry.invalidate();
     }
 }
 
 inline
-unsigned
-AssociativeBTB::getIndex(Addr instPC, ThreadID tid)
+uint64_t
+AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
 {
-    // Need to shift PC over by the word offset.
-    return ((instPC >> instShiftAmt)
-            ^ (tid << (tagShiftAmt - instShiftAmt - log2NumThreads)))
-            & idxMask;
-}
-
-inline
-Addr
-AssociativeBTB::getTag(Addr instPC)
-{
-    return (instPC >> tagShiftAmt) & tagMask;
+    /**
+     * Compute the index into the BTB.
+     * - Shift PC over by the word offset
+     * - Mask the address to use only the specified number of TAG bits
+     *   plus the bits to for the set index.
+     *
+     *  64                          0
+     *  | xxx |   TAG    |  Set  |bb|
+     *         \_____BTB idx____/
+     *
+     * The TID will be appended as MSB to the index
+     */
+    // ((instPC >> instShiftAmt) ^ (uint64_t(tid) << idxBits)) & idxMask;
+    return (instPC >> instShiftAmt) & idxMask;
 }
 
 bool
-AssociativeBTB::valid(Addr inst_pc, ThreadID tid)
+AssociativeBTB::valid(ThreadID tid, Addr instPC)
 {
-    // unsigned btb_idx = getIndex(instPC, tid);
+    uint64_t idx = getIndex(tid, instPC);
+    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
-    // Addr inst_tag = getTag(instPC);
-
-    // assert(btb_idx < numEntries);
-
-    // if (btb[btb_idx].valid
-    //     && inst_tag == btb[btb_idx].tag
-    //     && btb[btb_idx].tid == tid) {
-    //     return true;
-    // } else {
-    //     return false;
-    // }
-    BTBTaggedEntry * entry = btb2.findEntry(inst_pc, /* unused */ false);
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#llx\n", __func__, inst_pc);
+        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
+                     __func__, instPC, idx);
         return true;
     }
 
@@ -128,52 +117,43 @@ AssociativeBTB::valid(Addr inst_pc, ThreadID tid)
 // address is valid, and also the address.  For now will just use addr = 0 to
 // represent invalid entry.
 const PCStateBase *
-AssociativeBTB::lookup(Addr inst_pc, ThreadID tid)
+AssociativeBTB::lookup(ThreadID tid, Addr instPC)
 {
-    // unsigned btb_idx = getIndex(inst_pc, tid);
+    stats.lookups++;
 
-    // Addr inst_tag = getTag(inst_pc);
+    uint64_t idx = getIndex(tid, instPC);
+    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
-    // assert(btb_idx < numEntries);
-
-    // if (btb[btb_idx].valid
-    //     && inst_tag == btb[btb_idx].tag
-    //     && btb[btb_idx].tid == tid) {
-    //     return btb[btb_idx].target.get();
-    // } else {
-    //     return nullptr;
-    // }
-
-    BTBTaggedEntry * entry = btb2.findEntry(inst_pc, /* unused */ false);
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s hit PC: %#llx\n", __func__, inst_pc);
-        btb2.accessEntry(entry);
+        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
+                     __func__, instPC, idx);
+
+        btb.accessEntry(entry);
+        stats.hits++;
         return entry->target;
     }
     return nullptr;
 }
 
 void
-AssociativeBTB::update(Addr inst_pc, const PCStateBase &target, ThreadID tid)
+AssociativeBTB::update(ThreadID tid, Addr instPC, const PCStateBase &target)
 {
-    // unsigned btb_idx = getIndex(inst_pc, tid);
 
-    // assert(btb_idx < numEntries);
+    uint64_t idx = getIndex(tid, instPC);
+    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
-    // btb[btb_idx].tid = tid;
-    // btb[btb_idx].valid = true;
-    // set(btb[btb_idx].target, target);
-    // btb[btb_idx].tag = getTag(inst_pc);
-
-    BTBTaggedEntry * entry = btb2.findEntry(inst_pc, /* unused */ false);
     if (entry != nullptr && entry->tid == tid) {
-        btb2.accessEntry(entry);
+        DPRINTF(BTB, "BTB::%s: Updated existing entry. PC:%#x, idx:%#x \n",
+                     __func__, instPC, idx);
+        btb.accessEntry(entry);
     } else {
-        entry = btb2.findVictim(inst_pc);
+        DPRINTF(BTB, "BTB::%s: Replay entry. PC:%#x, idx:%#x \n",
+                     __func__, instPC, idx);
+        entry = btb.findVictim(idx);
         assert(entry != nullptr);
-        btb2.insertEntry(inst_pc, false, entry);
+        btb.insertEntry(idx, false, entry);
     }
-    DPRINTF(BTB, "BTB::%s Update entry of PC: %#llx\n", __func__, inst_pc);
+
     entry->tid = tid;
     set(entry->target, &target);
     // entry->target = &target;

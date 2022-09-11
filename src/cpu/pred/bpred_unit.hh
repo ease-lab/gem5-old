@@ -183,17 +183,16 @@ class BPredUnit : public SimObject
     virtual void update(ThreadID tid, Addr instPC, bool taken,
                    void *bp_history, bool squashed,
                    const StaticInstPtr &inst, Addr corrTarget) = 0;
-    /**
-     * Updates the BTB with the target of a branch.
-     * @param inst_PC The branch's PC that will be updated.
-     * @param target_PC The branch's target that will be added to the BTB.
-     */
-    void
-    BTBUpdate(Addr instPC, const PCStateBase &target)
-    {
-        ++stats.BTBUpdates;
-        BTB.update(instPC, target, 0);
-    }
+    // /**
+    //  * Updates the BTB with the target of a branch.
+    //  * @param inst_PC The branch's PC that will be updated.
+    //  * @param target_PC The branch's target that will be added to the BTB.
+    //  */
+    // void
+    // BTBUpdate(Addr instPC, const PCStateBase &target)
+    // {
+    //     btb->update(0, instPC, target);
+    // }
 
 
     void dump();
@@ -230,7 +229,7 @@ class BPredUnit : public SimObject
         {
         }
 
-        }
+
 
         bool
         operator==(const PredictorHistory &entry) const
@@ -306,7 +305,7 @@ class BPredUnit : public SimObject
     std::vector<History> predHist;
 
     /** The BTB. */
-    DefaultBTB BTB;
+    BranchTargetBuffer * btb;
 
     /** The return address stack. */
     ReturnAddrStack * ras;

@@ -44,15 +44,15 @@ class ReturnAddrStack(SimObject):
                                     "enabled no entry will returned when "
                                     "the stack was corrupted.")
 
-class BTB(SimObject):
-    type = 'BTB'
-    cxx_class = 'gem5::branch_prediction::BTB'
+class BranchTargetBuffer(SimObject):
+    type = 'BranchTargetBuffer'
+    cxx_class = 'gem5::branch_prediction::BranchTargetBuffer'
     cxx_header = "cpu/pred/btb.hh"
     abstract = True
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
 
-class SimpleBTB(BTB):
+class SimpleBTB(BranchTargetBuffer):
     type = 'SimpleBTB'
     cxx_class = 'gem5::branch_prediction::SimpleBTB'
     cxx_header = "cpu/pred/simple_btb.hh"
@@ -62,23 +62,20 @@ class SimpleBTB(BTB):
     instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
                         "Number of bits to shift instructions by")
 
-class AssociativeBTB(BTB):
+class AssociativeBTB(BranchTargetBuffer):
     type = 'AssociativeBTB'
     cxx_class = 'gem5::branch_prediction::AssociativeBTB'
     cxx_header = "cpu/pred/associative_btb.hh"
 
-    num_entries = Param.MemorySize("4096",
-        "Number of entries of BTB entries")
-    assoc = Param.Unsigned(8,
-        "Associativity of the BTB")
+    numEntries = Param.MemorySize("4096", "Number of entries of BTB entries")
+    assoc = Param.Unsigned(8, "Associativity of the BTB")
     indexing_policy = Param.BaseIndexingPolicy(
-        SetAssociative(entry_size = 1, assoc = Parent.assoc,
-        size = Parent.num_entries),
-        "Indexing policy of the BTB")
+            SetAssociative(entry_size = 1, assoc = Parent.assoc,
+                            size = Parent.numEntries),
+                            "Indexing policy of the BTB")
     replacement_policy = Param.BaseReplacementPolicy(LRURP(),
         "Replacement policy of the table")
 
-    numEntries = Param.Unsigned(4096, "Number of BTB entries ")
     tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
     instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
                         "Number of bits to shift instructions by")
@@ -116,11 +113,15 @@ class BranchPredictor(SimObject):
     abstract = True
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+    instShiftAmt = Param.Unsigned(2,"Number of bits to shift instructions by")
+    fallbackBTB = Param.Bool(False, "In case the BTB is corrupt use the BTB "
+                                "prediction")
     BTBEntries = Param.Unsigned(4096, "Number of BTB entries")
     BTBTagSize = Param.Unsigned(16, "Size of the BTB tags, in bits")
     RASSize = Param.Unsigned(16, "RAS size")
-    instShiftAmt = Param.Unsigned(2, "Number of bits to shift instructions by")
 
+
+    BTB = Param.BranchTargetBuffer(SimpleBTB(), "Branch target buffer (BTB)")
     RAS = Param.ReturnAddrStack(ReturnAddrStack(),
             "Return address stack, set to NULL to disable RAS.")
 

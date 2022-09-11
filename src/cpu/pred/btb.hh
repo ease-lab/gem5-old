@@ -29,9 +29,12 @@
 #ifndef __CPU_PRED_BTB_HH__
 #define __CPU_PRED_BTB_HH__
 
+
 #include "arch/generic/pcstate.hh"
-#include "base/logging.hh"
-#include "base/types.hh"
+#include "base/statistics.hh"
+#include "config/the_isa.hh"
+#include "params/BranchTargetBuffer.hh"
+#include "sim/sim_object.hh"
 
 namespace gem5
 {
@@ -39,7 +42,7 @@ namespace gem5
 namespace branch_prediction
 {
 
-class DefaultBTB
+class BranchTargetBuffer : public SimObject
 {
   private:
     struct BTBEntry
@@ -67,28 +70,51 @@ class DefaultBTB
     DefaultBTB(unsigned numEntries, unsigned tagBits,
                unsigned instShiftAmt, unsigned numThreads);
 
-    void reset();
+    typedef BranchTargetBufferParams Params;
+
+    BranchTargetBuffer(const Params &params);
+
+    virtual void reset() = 0;
 
     /** Looks up an address in the BTB. Must call valid() first on the address.
      *  @param inst_PC The address of the branch to look up.
-     *  @param tid The thread id.
      *  @return Returns the target of the branch.
      */
-    const PCStateBase *lookup(Addr instPC, ThreadID tid);
+    virtual const PCStateBase *lookup(ThreadID tid, Addr instPC) = 0;
 
     /** Checks if a branch is in the BTB.
      *  @param inst_PC The address of the branch to look up.
-     *  @param tid The thread id.
      *  @return Whether or not the branch exists in the BTB.
      */
-    bool valid(Addr instPC, ThreadID tid);
+    virtual bool valid(ThreadID tid, Addr instPC) = 0;
 
     /** Updates the BTB with the target of a branch.
      *  @param inst_pc The address of the branch being updated.
      *  @param target_pc The target address of the branch.
-     *  @param tid The thread id.
      */
-    void update(Addr inst_pc, const PCStateBase &target_pc, ThreadID tid);
+    virtual void update(ThreadID tid, Addr inst_pc,
+                          const PCStateBase &target_pc) = 0;
+
+    /** Update BTB statistics
+     */
+    virtual void incorrectTarget() { stats.mispredicted++; }
+
+
+    struct BranchTargetBufferStats : public statistics::Group
+    {
+        BranchTargetBufferStats(statistics::Group *parent);
+
+        /** Stat for number of BTB lookups. */
+        statistics::Scalar lookups;
+        /** Stat for number of BTB hits. */
+        statistics::Scalar hits;
+        /** Stat for number for the ratio between BTB hits and BTB lookups. */
+        statistics::Formula hitRatio;
+        /** Stat for number BTB mispredictions.
+         * No target found or target wrong */
+        statistics::Scalar mispredicted;
+
+    } stats;
 
   private:
     /** Returns the index into the BTB, based on the branch's PC.
