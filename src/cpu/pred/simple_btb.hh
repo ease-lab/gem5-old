@@ -42,16 +42,16 @@ namespace gem5
 namespace branch_prediction
 {
 
-class SimpleBTB : public BTB
+class SimpleBTB : public BranchTargetBuffer
 {
   public:
     SimpleBTB(const SimpleBTBParams &params);
 
     void reset() override;
-    const PCStateBase *lookup(Addr instPC, ThreadID tid) override;
-    bool valid(Addr instPC, ThreadID tid) override;
-    void update(Addr inst_pc, const PCStateBase &target_pc,
-                  ThreadID tid) override;
+    const PCStateBase *lookup(ThreadID tid, Addr instPC) override;
+    bool valid(ThreadID tid, Addr instPC) override;
+    void update(ThreadID tid, Addr instPC,
+                    const PCStateBase &target_pc) override;
 
 
   private:

@@ -40,7 +40,7 @@ namespace branch_prediction
 {
 
 SimpleBTB::SimpleBTB(const SimpleBTBParams &p)
-    : BTB(p),
+    : BranchTargetBuffer(p),
         numEntries(p.numEntries),
         tagBits(p.tagBits),
         instShiftAmt(p.instShiftAmt),
@@ -91,7 +91,7 @@ SimpleBTB::getTag(Addr instPC)
 }
 
 bool
-SimpleBTB::valid(Addr instPC, ThreadID tid)
+SimpleBTB::valid(ThreadID tid, Addr instPC)
 {
     unsigned btb_idx = getIndex(instPC, tid);
 
@@ -112,17 +112,20 @@ SimpleBTB::valid(Addr instPC, ThreadID tid)
 // address is valid, and also the address.  For now will just use addr = 0 to
 // represent invalid entry.
 const PCStateBase *
-SimpleBTB::lookup(Addr inst_pc, ThreadID tid)
+SimpleBTB::lookup(ThreadID tid, Addr instPC)
 {
-    unsigned btb_idx = getIndex(inst_pc, tid);
-
-    Addr inst_tag = getTag(inst_pc);
+    unsigned btb_idx = getIndex(instPC, tid);
+    Addr inst_tag = getTag(instPC);
 
     assert(btb_idx < numEntries);
+
+    stats.lookups++;
 
     if (btb[btb_idx].valid
         && inst_tag == btb[btb_idx].tag
         && btb[btb_idx].tid == tid) {
+
+        stats.hits++;
         return btb[btb_idx].target.get();
     } else {
         return nullptr;
@@ -130,16 +133,16 @@ SimpleBTB::lookup(Addr inst_pc, ThreadID tid)
 }
 
 void
-SimpleBTB::update(Addr inst_pc, const PCStateBase &target, ThreadID tid)
+SimpleBTB::update(ThreadID tid, Addr instPC, const PCStateBase &target)
 {
-    unsigned btb_idx = getIndex(inst_pc, tid);
+    unsigned btb_idx = getIndex(instPC, tid);
 
     assert(btb_idx < numEntries);
 
     btb[btb_idx].tid = tid;
     btb[btb_idx].valid = true;
     set(btb[btb_idx].target, target);
-    btb[btb_idx].tag = getTag(inst_pc);
+    btb[btb_idx].tag = getTag(instPC);
 }
 
 } // namespace branch_prediction

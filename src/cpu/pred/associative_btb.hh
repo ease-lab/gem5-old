@@ -42,35 +42,21 @@ namespace gem5
 namespace branch_prediction
 {
 
-class AssociativeBTB : public BTB
+class AssociativeBTB : public BranchTargetBuffer
 {
   public:
     AssociativeBTB(const AssociativeBTBParams &params);
 
     void reset() override;
-    const PCStateBase *lookup(Addr instPC, ThreadID tid) override;
-    bool valid(Addr instPC, ThreadID tid) override;
-    void update(Addr inst_pc, const PCStateBase &target_pc,
-                                ThreadID tid) override;
+    const PCStateBase *lookup(ThreadID tid, Addr instPC) override;
+    bool valid(ThreadID tid, Addr instPC) override;
+    void update(ThreadID tid, Addr instPC,
+                    const PCStateBase &target_pc) override;
 
 
   private:
-    struct BTBEntry
-    {
-        /** The entry's tag. */
-        Addr tag = 0;
 
-        /** The entry's target. */
-        std::unique_ptr<PCStateBase> target;
-
-        /** The entry's thread id. */
-        ThreadID tid;
-
-        /** Whether or not the entry is valid. */
-        bool valid = false;
-    };
-
-    struct BTBTaggedEntry : public TaggedEntry
+    struct BTBEntry : public TaggedEntry
     {
         /** The entry's tag. */
         Addr tag = 0;
@@ -90,41 +76,27 @@ class AssociativeBTB : public BTB
      *  @param inst_PC The branch to look up.
      *  @return Returns the index into the BTB.
      */
-    inline unsigned getIndex(Addr instPC, ThreadID tid);
+    inline uint64_t getIndex(ThreadID tid, Addr instPC);
 
-    /** Returns the tag bits of a given address.
-     *  @param inst_PC The branch's address.
-     *  @return Returns the tag bits.
-     */
-    inline Addr getTag(Addr instPC);
-
-
-    std::vector<BTBEntry> btb;
 
     /** The actual BTB. */
-    AssociativeSet<BTBTaggedEntry> btb2;
-
+    AssociativeSet<BTBEntry> btb;
 
     /** The number of entries in the BTB. */
-    unsigned numEntries;
+    const unsigned numEntries;
 
-    /** The index mask. */
-    unsigned idxMask;
+    /** The associativity of the BTB */
+    const unsigned assoc;
 
     /** The number of tag bits per entry. */
-    unsigned tagBits;
-
-    /** The tag mask. */
-    unsigned tagMask;
+    const unsigned tagBits;
 
     /** Number of bits to shift PC when calculating index. */
-    unsigned instShiftAmt;
+    uint64_t instShiftAmt;
 
-    /** Number of bits to shift PC when calculating tag. */
-    unsigned tagShiftAmt;
-
-    /** Log2 NumThreads used for hashing threadid */
-    unsigned log2NumThreads;
+    /** The number of BTB index bits and mask. */
+    uint64_t idxBits;
+    uint64_t idxMask;
 };
 
 } // namespace branch_prediction

@@ -27,3 +27,32 @@
  */
 
 #include "cpu/pred/btb.hh"
+
+namespace gem5
+{
+
+namespace branch_prediction
+{
+
+BranchTargetBuffer::BranchTargetBuffer(const Params &params)
+    : SimObject(params),
+      stats(this)
+{
+}
+
+BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
+                                                  statistics::Group *parent)
+    : statistics::Group(parent),
+      ADD_STAT(lookups, statistics::units::Count::get(),
+               "Number of BTB lookups"),
+      ADD_STAT(hits, statistics::units::Count::get(), "Number of BTB hits"),
+      ADD_STAT(hitRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
+               hits / lookups),
+      ADD_STAT(mispredicted, statistics::units::Count::get(),
+               "Number BTB misspredictions. No target found or target wrong")
+{
+    hitRatio.precision(6);
+}
+
+} // namespace branch_prediction
+} // namespace gem5

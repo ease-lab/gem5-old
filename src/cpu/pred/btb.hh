@@ -30,9 +30,11 @@
 #ifndef __CPU_PRED_BTB_HH__
 #define __CPU_PRED_BTB_HH__
 
+
 #include "arch/generic/pcstate.hh"
+#include "base/statistics.hh"
 #include "config/the_isa.hh"
-#include "params/BTB.hh"
+#include "params/BranchTargetBuffer.hh"
 #include "sim/sim_object.hh"
 
 namespace gem5
@@ -41,41 +43,56 @@ namespace gem5
 namespace branch_prediction
 {
 
-class BTB : public SimObject
+class BranchTargetBuffer : public SimObject
 {
 
   public:
 
-    typedef BTBParams Params;
+    typedef BranchTargetBufferParams Params;
 
-    BTB(const Params &params)
-          : SimObject(params)
-    {
-    }
+    BranchTargetBuffer(const Params &params);
 
     virtual void reset() = 0;
 
     /** Looks up an address in the BTB. Must call valid() first on the address.
      *  @param inst_PC The address of the branch to look up.
-     *  @param tid The thread id.
      *  @return Returns the target of the branch.
      */
-    virtual const PCStateBase *lookup(Addr instPC, ThreadID tid) = 0;
+    virtual const PCStateBase *lookup(ThreadID tid, Addr instPC) = 0;
 
     /** Checks if a branch is in the BTB.
      *  @param inst_PC The address of the branch to look up.
-     *  @param tid The thread id.
      *  @return Whether or not the branch exists in the BTB.
      */
-    virtual bool valid(Addr instPC, ThreadID tid) = 0;
+    virtual bool valid(ThreadID tid, Addr instPC) = 0;
 
     /** Updates the BTB with the target of a branch.
      *  @param inst_pc The address of the branch being updated.
      *  @param target_pc The target address of the branch.
-     *  @param tid The thread id.
      */
-    virtual void update(Addr inst_pc,
-                          const PCStateBase &target_pc, ThreadID tid) = 0;
+    virtual void update(ThreadID tid, Addr inst_pc,
+                          const PCStateBase &target_pc) = 0;
+
+    /** Update BTB statistics
+     */
+    virtual void incorrectTarget() { stats.mispredicted++; }
+
+
+    struct BranchTargetBufferStats : public statistics::Group
+    {
+        BranchTargetBufferStats(statistics::Group *parent);
+
+        /** Stat for number of BTB lookups. */
+        statistics::Scalar lookups;
+        /** Stat for number of BTB hits. */
+        statistics::Scalar hits;
+        /** Stat for number for the ratio between BTB hits and BTB lookups. */
+        statistics::Formula hitRatio;
+        /** Stat for number BTB mispredictions.
+         * No target found or target wrong */
+        statistics::Scalar mispredicted;
+
+    } stats;
 
 };
 
