@@ -122,7 +122,7 @@ struct TimeStruct
         uint64_t branchAddr;
         unsigned branchCount;
         bool squash;
-        bool predIncorrect;
+        bool controlMispredict;
         bool branchMispredict;
         bool branchTaken;
     };

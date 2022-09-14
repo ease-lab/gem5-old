@@ -143,6 +143,7 @@ class DynInst : public ExecContext, public RefCounted
   protected:
     enum Status
     {
+        FtqEntry,                /// Instruction is in the FTQ
         IqEntry,                 /// Instruction is in the IQ
         RobEntry,                /// Instruction is in the ROB
         LsqEntry,                /// Instruction is in the LSQ
@@ -155,6 +156,7 @@ class DynInst : public ExecContext, public RefCounted
         AtCommit,                /// Instruction has reached commit
         Committed,               /// Instruction has committed
         Squashed,                /// Instruction is squashed
+        SquashedInFTQ,           /// Instruction is squashed in the FTQ
         SquashedInIQ,            /// Instruction is squashed in the IQ
         SquashedInLSQ,           /// Instruction is squashed in the LSQ
         SquashedInROB,           /// Instruction is squashed in the ROB
@@ -182,6 +184,7 @@ class DynInst : public ExecContext, public RefCounted
         RecordResult,
         Predicate,
         MemAccPredicate,
+        PredControl,
         PredTaken,
         Resteered,
         ICacheMiss,
@@ -513,6 +516,15 @@ class DynInst : public ExecContext, public RefCounted
      */
     bool doneTargCalc() { return false; }
 
+    /** Returns whether the instruction was as control or not. */
+    bool readPredControl() { return instFlags[PredControl]; }
+
+    void
+    setPredControl(bool predicted_control)
+    {
+        instFlags[PredControl] = predicted_control;
+    }
+
     /** Set the predicted target of this current instruction. */
     void setPredTarg(const PCStateBase &pred_pc) { set(predPC, pred_pc); }
 
@@ -823,6 +835,25 @@ class DynInst : public ExecContext, public RefCounted
 
     /** Returns whether or not this instruction is squashed. */
     bool isSquashed() const { return status[Squashed]; }
+
+
+    //Fetch Target Queue Entry
+    //-----------------------
+    /** Sets this instruction as a entry the FTQ. */
+    void setInFTQ() { status.set(FtqEntry); }
+
+    /** Sets this instruction as a entry the FTQ. */
+    void clearInFTQ() { status.reset(FtqEntry); }
+
+    /** Returns whether or not this instruction has issued. */
+    bool isInFTQ() const { return status[FtqEntry]; }
+
+    /** Sets this instruction as squashed in the FTQ. */
+    void setSquashedInFTQ() { status.set(SquashedInFTQ);status.set(Squashed);}
+
+    /** Returns whether or not this instruction is squashed in the FTQ. */
+    bool isSquashedInFTQ() const { return status[SquashedInFTQ]; }
+
 
     //Instruction Queue Entry
     //-----------------------

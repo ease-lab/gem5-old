@@ -110,6 +110,23 @@ class BPredUnit : public SimObject
     virtual bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                  PCStateBase &pc, ThreadID tid);
 
+    // /**
+    //  * Lookup the BTB to check if the given PC is a branch instruction
+    //  * The BTB will also provide the static instruction information
+    //  * If so will it will predict the whether the branch was taken or not
+    //  * and finally set the target PC respectively.
+    //  * @param PC The PC of the instruction branch instruction.
+    //  * @param targetPC The predicted PC is passed back through this parameter.
+    //  * @param seqNum The sequence number of the dynamic instruction
+    //  * @param tid The thread id.
+    //  * @return Returns if the branch is taken or not.
+    //  */
+    // bool predict(PCStateBase &pc, PCStateBase &pc,
+    //              const InstSeqNum &seqNum, ThreadID tid);
+
+    // @todo: Rename this function.
+    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
+
     /**
      * Tells the branch predictor to commit any updates until the given
      * sequence number.
@@ -183,8 +200,16 @@ class BPredUnit : public SimObject
      * Looks up a given PC in the BTB to see if a matching entry exists.
      * @param inst_PC The PC to look up.
      * @return Whether the BTB contains the given PC.
+     * @param tid The thread id.
      */
-    bool BTBValid(Addr instPC) { return btb->valid(instPC, 0); }
+    bool BTBValid(Addr instPC, ThreadID tid)
+    {
+        return btb->valid(tid, instPC);
+    }
+    bool BTBValid(PCStateBase &instPC, ThreadID tid)
+    {
+        return BTBValid(instPC.instAddr(), tid);
+    }
 
     /**
      * Looks up a given PC in the BTB to get the predicted target. The PC may
@@ -194,10 +219,33 @@ class BPredUnit : public SimObject
      * @return The address of the target of the branch.
      */
     const PCStateBase *
-    BTBLookup(Addr inst_pc)
+    BTBLookup(PCStateBase &instPC, ThreadID tid)
     {
-        return btb->lookup(inst_pc, 0);
+        return btb->lookup(tid, instPC.instAddr());
     }
+
+    /**
+     * Looks up a given PC in the BTB to get current static instruction
+     * information. This is necessary in a decoupled frontend as
+     * the information does not usually exist at that this point.
+     * Only for instructions (branches) that hit in the BTB this information
+     * is available as the BTB stores them together with the target.
+     *
+     * @param inst_PC The PC to look up.
+     * @return The static instruction info of the given PC if existant.
+     */
+    const StaticInstPtr
+    BTBLookupInst(Addr instPC, ThreadID tid)
+    {
+        return btb->lookupInst(tid, instPC);
+    }
+    const StaticInstPtr
+    BTBLookupInst(PCStateBase &instPC, ThreadID tid)
+    {
+        return BTBLookupInst(instPC.instAddr(), tid);
+    }
+
+
 
     /**
      * Updates the BP with taken/not taken information.
@@ -237,6 +285,17 @@ class BPredUnit : public SimObject
 
 
   private:
+
+    // Target provider type
+    enum TARGET_PROVIDER
+    {
+        NO_TARGET = 0,
+        BTB,
+        RAS,
+        INDIRECT,
+        LAST_TARGET_PROVIDER_TYPE = INDIRECT
+    };
+
     struct PredictorHistory
     {
         /**
@@ -270,7 +329,13 @@ class BPredUnit : public SimObject
         {
         }
 
-
+        ~PredictorHistory()
+        {
+            // Verify that all histories where deleted
+            // assert(bpHistory == nullptr);
+            // assert(indirectHistory == nullptr);
+            // assert(rasHistory == nullptr);
+        }
 
         bool
         operator==(const PredictorHistory &entry) const
@@ -349,6 +414,7 @@ class BPredUnit : public SimObject
      * a squash.
      */
     std::vector<History> predHist;
+    // std::vecotr<PredictorHistory>
 
     /** The BTB. */
     BranchTargetBuffer * btb;

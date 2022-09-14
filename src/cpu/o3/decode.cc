@@ -285,14 +285,14 @@ Decode::unblock(ThreadID tid)
 }
 
 void
-Decode::squash(const DynInstPtr &inst, ThreadID tid)
+Decode::squash(const DynInstPtr &inst, bool control_miss, ThreadID tid)
 {
     DPRINTF(Decode, "[tid:%i] [sn:%llu] Squashing due to incorrect branch "
             "prediction detected at decode.\n", tid, inst->seqNum);
 
     // Send back mispredict information.
     toFetch->decodeInfo[tid].branchMispredict = true;
-    toFetch->decodeInfo[tid].predIncorrect = true;
+    toFetch->decodeInfo[tid].controlMispredict = control_miss;
     toFetch->decodeInfo[tid].mispredictInst = inst;
     toFetch->decodeInfo[tid].squash = true;
     toFetch->decodeInfo[tid].doneSeqNum = inst->seqNum;
@@ -702,20 +702,29 @@ Decode::decodeInsts(ThreadID tid)
         // }
 #endif
 
-        // Ensure that if it was predicted as a branch, it really is a
-        // branch.
-        if (inst->readPredTaken() && !inst->isControl()) {
-            panic("Instruction predicted as a branch!");
+        // Make sure that fetch predicted a control instruction correctly.
+        // It can happen that fetch predict an instruction as control but it
+        // was actually no control.
+        // Or fetch predict a instruction as no control it actually is
+        // a control instruction.
+        if (inst->readPredControl() != inst->isControl()) {
+            DPRINTF(Decode,
+                    "[tid:%i] [sn:%llu] "
+                    "Control mispredict: Pred:%s, actual:%s\n",
+                    tid, inst->seqNum,
+                    inst->readPredControl() ? "control" : "no control",
+                    inst->isControl() ? "control" : "no control");
 
             ++stats.controlMispred;
             inst->setResteered(true);
             // Might want to set some sort of boolean and just do
             // a check at the end
-            squash(inst, inst->threadNumber);
+            squash(inst, true, inst->threadNumber);
 
 
             break;
         }
+
 
         // Go ahead and compute any PC-relative branches.
         // This includes direct unconditional control and
@@ -735,7 +744,7 @@ Decode::decodeInsts(ThreadID tid)
 
                 // Might want to set some sort of boolean and just do
                 // a check at the end
-                squash(inst, inst->threadNumber);
+                squash(inst, false, inst->threadNumber);
 
                 DPRINTF(Decode,
                         "[tid:%i] [sn:%llu] "

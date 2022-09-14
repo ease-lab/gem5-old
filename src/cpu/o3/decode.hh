@@ -191,10 +191,14 @@ class Decode
      */
     bool unblock(ThreadID tid);
 
-    /** Squashes if there is a PC-relative branch that was predicted
+        /** Squashes if there is a PC-relative branch that was predicted
      * incorrectly. Sends squash information back to fetch.
+     * @param inst The instruction that was mispredicted.
+     * @param control_miss The instuction was either predicted as control
+     * but was actually no control instruction or was not predicted
+     * as control instruction but was control actually a instruction.
      */
-    void squash(const DynInstPtr &inst, ThreadID tid);
+    void squash(const DynInstPtr &inst, bool control_miss, ThreadID tid);
 
   public:
     /** Squashes due to commit signalling a squash. Changes status to

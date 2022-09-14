@@ -41,6 +41,13 @@ BranchTargetBuffer::BranchTargetBuffer(const Params &params)
 {
 }
 
+const StaticInstPtr
+BranchTargetBuffer::lookupInst(ThreadID tid, Addr instPC)
+{
+    panic("Not implemented for this BTB");
+    return nullptr;
+}
+
 BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
                                                 statistics::Group *parent)
     : statistics::Group(parent),

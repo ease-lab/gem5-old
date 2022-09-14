@@ -63,6 +63,13 @@ class BranchTargetBuffer : public SimObject
     virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
                             BranchClass type = BranchClass::NoBranch) = 0;
 
+    /** Looks up an address in the BTB and return the instruction
+     * information if existant. May not be supported in all BTBs.
+     *  @param inst_PC The address of the branch to look up.
+     *  @return Returns the target of the branch.
+     */
+    virtual const StaticInstPtr lookupInst(ThreadID tid, Addr instPC);
+
     /** Checks if a branch is in the BTB.
      *  @param inst_PC The address of the branch to look up.
      *  @param inst Optional passing in the branch type for better statistics.
