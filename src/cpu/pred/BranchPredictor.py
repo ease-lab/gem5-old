@@ -127,6 +127,10 @@ class BranchPredictor(SimObject):
             "Indirect branch predictor, set to NULL to disable "
             "indirect predictions")
 
+    resetBTB = Param.Bool(True,"When memInvalid is called reset also the BTB")
+    resetStart = Param.Int(0,"When reset start resetting at this table")
+    resetEnd = Param.Int(100,"When reset end resetting at this table")
+
 class LocalBP(BranchPredictor):
     type = 'LocalBP'
     cxx_class = 'gem5::branch_prediction::LocalBP'

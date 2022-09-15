@@ -61,6 +61,14 @@ LTAGE::init()
     TAGE::init();
 }
 
+void
+LTAGE::reset(unsigned start, unsigned end)
+{
+    TAGE::reset(start, end);
+    loopPredictor->reset();
+}
+
+
 //prediction
 bool
 LTAGE::predict(ThreadID tid, Addr branch_pc, bool cond_branch, void* &b)

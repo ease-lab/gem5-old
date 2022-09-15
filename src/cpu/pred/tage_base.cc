@@ -148,6 +148,30 @@ TAGEBase::init()
 }
 
 void
+TAGEBase::reset(unsigned start, unsigned end)
+{
+    DPRINTF(Tage, "Reset TAGE tables %i->%i\n", start, end);
+
+    if (start == 0 && end > 0) {
+        // Reset the base predictor
+        for (int i = 0; i < btablePrediction.size(); i++) {
+            btablePrediction[i] = false;
+        }
+        for (int i = 0; i < btableHysteresis.size(); i++) {
+            btableHysteresis[i] = false;
+        }
+    }
+
+    // TAGE tables
+    int i = (start == 0) ? 1 : start;
+    for (; i <= nHistoryTables && i < end; i++) {
+        for (int j = 0; j < (1<<(logTagTableSizes[i])); j++) {
+            gtable[i][j].tag = 0;
+        }
+    }
+}
+
+void
 TAGEBase::initFoldedHistories(ThreadHistory & history)
 {
     for (int i = 1; i <= nHistoryTables; i++) {

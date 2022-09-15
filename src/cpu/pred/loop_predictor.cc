@@ -82,6 +82,17 @@ LoopPredictor::init()
     ltable = new LoopEntry[1ULL << logSizeLoopPred];
 }
 
+void
+LoopPredictor::reset()
+{
+    DPRINTF(LTage, "Reset loop predictor tables\n");
+    // Reset all tags to invalidate the entries.
+    for (int i = 0; i < (1ULL << logSizeLoopPred); i++) {
+        ltable[i].tag = 0;
+    }
+}
+
+
 LoopPredictor::BranchInfo*
 LoopPredictor::makeBranchInfo()
 {

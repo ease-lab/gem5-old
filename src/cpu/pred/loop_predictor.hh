@@ -260,6 +260,11 @@ class LoopPredictor : public SimObject
      */
     void init() override;
 
+    /**
+     * Reset internal state.
+     */
+    void reset();
+
     LoopPredictor(const LoopPredictorParams &p);
 
     size_t getSizeInBits() const;

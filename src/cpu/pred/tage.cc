@@ -54,6 +54,12 @@ TAGE::TAGE(const TAGEParams &params) : BPredUnit(params), tage(params.tage)
 {
 }
 
+void
+TAGE::reset(unsigned start, unsigned end)
+{
+    tage->reset(start,end);
+}
+
 // PREDICTOR UPDATE
 void
 TAGE::update(ThreadID tid, Addr branch_pc, bool taken, void* bp_history,

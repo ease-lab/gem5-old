@@ -94,6 +94,7 @@ class TAGE: public BPredUnit
                 bool squashed, const StaticInstPtr & inst,
                 Addr corrTarget) override;
     virtual void squash(ThreadID tid, void *bp_history) override;
+    virtual void reset(unsigned start = 0, unsigned end = 100) override;
 };
 
 } // namespace branch_prediction

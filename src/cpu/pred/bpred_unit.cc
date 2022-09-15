@@ -65,7 +65,10 @@ BPredUnit::BPredUnit(const Params &params)
       ras(params.RAS),
       iPred(params.indirectBranchPred),
       stats(this),
-      instShiftAmt(params.instShiftAmt)
+      instShiftAmt(params.instShiftAmt),
+      resetBTB(params.resetBTB),
+      resetStart(params.resetStart),
+      resetEnd(params.resetEnd)
 {
 }
 
@@ -148,8 +151,14 @@ BPredUnit::drainSanityCheck() const
 void
 BPredUnit::memInvalidate()
 {
+    // Reset direction predictor
+    reset(resetStart,resetEnd);
+
     // Reset the BTB and RAS
-    btb->reset();
+    if (resetBTB) {
+        btb->reset();
+    }
+
     if (ras) {
         ras->reset();
     }

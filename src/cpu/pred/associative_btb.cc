@@ -73,7 +73,7 @@ AssociativeBTB::reset()
 {
     DPRINTF(BTB, "BTB: Invalidate all entries\n");
 
-    for (auto entry : btb) {
+    for (auto &entry : btb) {
         entry.invalidate();
     }
 }

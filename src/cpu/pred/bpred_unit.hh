@@ -153,6 +153,12 @@ class BPredUnit : public SimObject
     virtual void btbUpdate(ThreadID tid, Addr instPC, void * &bp_history) = 0;
 
     /**
+     * Reset function. Set back all internal state of the direction predictor
+     * Start and end can be used to define certain ranges to reset
+     */
+    virtual void reset(unsigned start = 0, unsigned end = 100) {}
+
+    /**
      * Looks up a given PC in the BTB to see if a matching entry exists.
      * @param inst_PC The PC to look up.
      * @return Whether the BTB contains the given PC.
@@ -377,6 +383,10 @@ class BPredUnit : public SimObject
   protected:
     /** Number of bits to shift instructions by for predictor addresses. */
     const unsigned instShiftAmt;
+    /** Reset functionality. */
+    const unsigned resetBTB;
+    const unsigned resetStart;
+    const unsigned resetEnd;
 
     /**
      * @{
