@@ -158,7 +158,7 @@ TAGEBase::reset(unsigned start, unsigned end)
             btablePrediction[i] = false;
         }
         for (int i = 0; i < btableHysteresis.size(); i++) {
-            btableHysteresis[i] = false;
+            btableHysteresis[i] = true;
         }
     }
 

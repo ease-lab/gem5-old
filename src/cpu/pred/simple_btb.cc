@@ -91,7 +91,7 @@ SimpleBTB::getTag(Addr instPC)
 }
 
 bool
-SimpleBTB::valid(ThreadID tid, Addr instPC)
+SimpleBTB::valid(ThreadID tid, Addr instPC, BranchClass type)
 {
     unsigned btb_idx = getIndex(instPC, tid);
 
@@ -112,7 +112,7 @@ SimpleBTB::valid(ThreadID tid, Addr instPC)
 // address is valid, and also the address.  For now will just use addr = 0 to
 // represent invalid entry.
 const PCStateBase *
-SimpleBTB::lookup(ThreadID tid, Addr instPC)
+SimpleBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
 {
     unsigned btb_idx = getIndex(instPC, tid);
     Addr inst_tag = getTag(instPC);
@@ -120,24 +120,35 @@ SimpleBTB::lookup(ThreadID tid, Addr instPC)
     assert(btb_idx < numEntries);
 
     stats.lookups++;
+    if (type != BranchClass::NoBranch) {
+        stats.lookupType[type]++;
+    }
 
     if (btb[btb_idx].valid
         && inst_tag == btb[btb_idx].tag
         && btb[btb_idx].tid == tid) {
-
-        stats.hits++;
         return btb[btb_idx].target.get();
     } else {
+        stats.misses++;
+        if (type != BranchClass::NoBranch) {
+            stats.missType[type]++;
+        }
         return nullptr;
     }
 }
 
 void
-SimpleBTB::update(ThreadID tid, Addr instPC, const PCStateBase &target)
+SimpleBTB::update(ThreadID tid, Addr instPC,
+                    const PCStateBase &target, BranchClass type)
 {
     unsigned btb_idx = getIndex(instPC, tid);
 
     assert(btb_idx < numEntries);
+
+    stats.updates++;
+    if (type != BranchClass::NoBranch) {
+        stats.updateType[type]++;
+    }
 
     btb[btb_idx].tid = tid;
     btb[btb_idx].valid = true;

@@ -36,22 +36,66 @@ namespace branch_prediction
 
 BranchTargetBuffer::BranchTargetBuffer(const Params &params)
     : SimObject(params),
+      numThreads(params.numThreads),
       stats(this)
 {
 }
 
 BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
-                                                  statistics::Group *parent)
+                                                statistics::Group *parent)
     : statistics::Group(parent),
       ADD_STAT(lookups, statistics::units::Count::get(),
                "Number of BTB lookups"),
-      ADD_STAT(hits, statistics::units::Count::get(), "Number of BTB hits"),
-      ADD_STAT(hitRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
-               hits / lookups),
-      ADD_STAT(mispredicted, statistics::units::Count::get(),
-               "Number BTB misspredictions. No target found or target wrong")
+      ADD_STAT(lookupType, statistics::units::Count::get(),
+               "Number of BTB lookups per branch type"),
+      ADD_STAT(misses, statistics::units::Count::get(),
+               "Number of BTB misses"),
+      ADD_STAT(missType, statistics::units::Count::get(),
+               "Number of BTB misses per branch type"),
+      ADD_STAT(missRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
+               misses / lookups),
+      ADD_STAT(updates, statistics::units::Count::get(),
+               "Number of BTB updates"),
+      ADD_STAT(updateType, statistics::units::Count::get(),
+               "Number of BTB updates per branch type"),
+      ADD_STAT(evictions, statistics::units::Count::get(),
+               "Number of BTB evictions"),
+      ADD_STAT(evictionType, statistics::units::Count::get(),
+               "Number of BTB evictions per branch type"),
+      ADD_STAT(mispredict, statistics::units::Count::get(),
+               "Number of BTB mispredicts"),
+      ADD_STAT(mispredictType, statistics::units::Count::get(),
+               "Number of BTB mispredicts per branch type")
 {
-    hitRatio.precision(6);
+    using namespace statistics;
+    missRatio.precision(6);
+    lookupType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    missType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    updateType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    evictionType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    mispredictType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    for (int i = 0; i < enums::Num_BranchClass; i++) {
+        lookupType.subname(i, enums::BranchClassStrings[i]);
+        missType.subname(i, enums::BranchClassStrings[i]);
+        updateType.subname(i, enums::BranchClassStrings[i]);
+        evictionType.subname(i, enums::BranchClassStrings[i]);
+        mispredictType.subname(i, enums::BranchClassStrings[i]);
+    }
 }
 
 } // namespace branch_prediction

@@ -61,7 +61,7 @@ AssociativeBTB::AssociativeBTB(const AssociativeBTBParams &p)
     uint64_t setBits = floorLog2(numEntries/assoc);
 
     idxBits = tagBits + setBits;
-    idxMask = (1ULL << idxBits) - 1;
+    idxMask = (idxBits < 64) ? (1ULL << idxBits) - 1 : (uint64_t)(-1);
 
     DPRINTF(BTB, "BTB: Creating BTB object. entries:%i, assoc:%i, "
                  "tagBits:%i, idx mask:%x\n",
@@ -99,7 +99,7 @@ AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
 }
 
 bool
-AssociativeBTB::valid(ThreadID tid, Addr instPC)
+AssociativeBTB::valid(ThreadID tid, Addr instPC, BranchClass type)
 {
     uint64_t idx = getIndex(tid, instPC);
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
@@ -117,9 +117,13 @@ AssociativeBTB::valid(ThreadID tid, Addr instPC)
 // address is valid, and also the address.  For now will just use addr = 0 to
 // represent invalid entry.
 const PCStateBase *
-AssociativeBTB::lookup(ThreadID tid, Addr instPC)
+AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
 {
     stats.lookups++;
+    if (type != BranchClass::NoBranch) {
+        stats.lookupType[type]++;
+    }
+
 
     uint64_t idx = getIndex(tid, instPC);
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
@@ -129,15 +133,23 @@ AssociativeBTB::lookup(ThreadID tid, Addr instPC)
                      __func__, instPC, idx);
 
         btb.accessEntry(entry);
-        stats.hits++;
         return entry->target;
+    }
+    stats.misses++;
+    if (type != BranchClass::NoBranch) {
+        stats.missType[type]++;
     }
     return nullptr;
 }
 
 void
-AssociativeBTB::update(ThreadID tid, Addr instPC, const PCStateBase &target)
+AssociativeBTB::update(ThreadID tid, Addr instPC,
+                    const PCStateBase &target, BranchClass type)
 {
+    stats.updates++;
+    if (type != BranchClass::NoBranch) {
+        stats.updateType[type]++;
+    }
 
     uint64_t idx = getIndex(tid, instPC);
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
@@ -149,6 +161,7 @@ AssociativeBTB::update(ThreadID tid, Addr instPC, const PCStateBase &target)
     } else {
         DPRINTF(BTB, "BTB::%s: Replay entry. PC:%#x, idx:%#x \n",
                      __func__, instPC, idx);
+        stats.evictions++;
         entry = btb.findVictim(idx);
         assert(entry != nullptr);
         btb.insertEntry(idx, false, entry);

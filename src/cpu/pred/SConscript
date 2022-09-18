@@ -31,7 +31,8 @@ Import('*')
 if env['CONF']['TARGET_ISA'] == 'null':
     Return()
 
-SimObject('BranchPredictor.py', sim_objects=[
+SimObject('BranchPredictor.py',
+    sim_objects=[
     'IndirectPredictor', 'SimpleIndirectPredictor', 'BranchPredictor',
     'ReturnAddrStack', 'BranchTargetBuffer', 'SimpleBTB', 'AssociativeBTB',
     'LocalBP', 'TournamentBP', 'BiModeBP', 'TAGEBase', 'TAGE', 'LoopPredictor',
@@ -45,7 +46,8 @@ SimObject('BranchPredictor.py', sim_objects=[
     'MultiperspectivePerceptronTAGE', 'MPP_StatisticalCorrector_64KB',
     'MultiperspectivePerceptronTAGE64KB', 'MPP_TAGE_8KB',
     'MPP_LoopPredictor_8KB', 'MPP_StatisticalCorrector_8KB',
-    'MultiperspectivePerceptronTAGE8KB'])
+    'MultiperspectivePerceptronTAGE8KB'],
+    enums=['BranchClass'])
 
 Source('bpred_unit.cc')
 Source('2bit_local.cc')

@@ -48,10 +48,12 @@ class SimpleBTB : public BranchTargetBuffer
     SimpleBTB(const SimpleBTBParams &params);
 
     void reset() override;
-    const PCStateBase *lookup(ThreadID tid, Addr instPC) override;
-    bool valid(ThreadID tid, Addr instPC) override;
-    void update(ThreadID tid, Addr instPC,
-                    const PCStateBase &target_pc) override;
+    const PCStateBase *lookup(ThreadID tid, Addr instPC,
+                           BranchClass type = BranchClass::NoBranch) override;
+    bool valid(ThreadID tid, Addr instPC,
+                           BranchClass type = BranchClass::NoBranch) override;
+    void update(ThreadID tid, Addr instPC, const PCStateBase &target_pc,
+                           BranchClass type = BranchClass::NoBranch) override;
 
 
   private:
