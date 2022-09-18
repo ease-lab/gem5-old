@@ -37,6 +37,7 @@
 
 #include "cpu/o3/probe/inst_trace.hh"
 
+#include "base/output.hh"
 #include "base/trace.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "debug/InstTrace.hh"
@@ -46,6 +47,28 @@ namespace gem5
 
 namespace o3
 {
+
+InstTrace::InstTrace(const InstTraceParams &params)
+    : ProbeListenerObject(params),
+      trace_fetch(params.trace_fetch),
+      trace_commit(params.trace_commit),
+      trace_branches(params.trace_branches),
+      trace_memref(params.trace_memref),
+      traceStream(nullptr)
+{
+    std::string filename = simout.resolve(params.instTraceFile);
+    traceStream = new ProtoOutputStream(filename);
+
+    ProtoMessage::InstTraceHeader inst_pkt_header;
+    inst_pkt_header.set_obj_id(name());
+    inst_pkt_header.set_tick_freq(sim_clock::Frequency);
+    inst_pkt_header.set_has_mem(trace_memref);
+    inst_pkt_header.set_has_fetch(trace_fetch);
+    traceStream->write(inst_pkt_header);
+
+    // Register a callback to flush trace records and close the output stream.
+    registerExitCallback([this]() {  flushTrace(); });
+}
 
 void
 InstTrace::traceCommit(const DynInstConstPtr& dynInst)
@@ -93,30 +116,34 @@ InstTrace::traceBranch(const DynInstConstPtr& dynInst)
     //       dynInst->pcState().instAddr(),
     //       dynInst->staticInst->disassemble(dynInst->pcState().instAddr()));
 
-    auto pc_addr = dynInst->pcState().instAddr();
-    auto target = dynInst->branchTarget()->instAddr();
-    auto conditional = dynInst->isCondCtrl();
-    auto direct = dynInst->isDirectCtrl();
-    std::string type = "";
+    uint64_t pc_addr = dynInst->pcState().instAddr();
+    uint64_t target = dynInst->branchTarget()->instAddr();
+    BranchClass type = getBranchClass(dynInst->staticInst);
+    // std::string type = "";
     int64_t distance = int64_t(pc_addr - target);
-    auto taken = (distance > 4) ? true : false;
-
-    if (dynInst->isCall()) {
-        type = "call";
-    } else if (dynInst->isReturn()) {
-        type = "return";
-    } else if (dynInst->isUncondCtrl() || dynInst->isCondCtrl()) {
-        type = "jump";
-    } else {
-        type = "other";
-    }
+    bool pred_taken = dynInst->readPredTaken();
+    // bool mispred = dynInst->mispredicted();
+    bool actually_taken = dynInst->pcState().branching();
 
     DPRINTFR(InstTrace, "[%s]: Branch | 0x%08x, "
-        "type:%s, cond:%i, direct:%i, taken:%i, dist:%i, target: 0x%08x "
+        "%s, pred:%i,mispred:%i, dist:%i, target: 0x%08x "
         "| %s.\n", name(),
-        pc_addr, type, conditional, direct, taken, distance, target,
+        pc_addr, toStr(type),
+        pred_taken, pred_taken != actually_taken,
+        distance, target,
         dynInst->staticInst->disassemble(pc_addr));
 
+    ProtoMessage::InstRecord pkt;
+    pkt.set_pc(pc_addr);
+    pkt.set_tick(curTick());
+    pkt.set_type(Inst::Control);
+    pkt.set_brtype((BranchType)type);
+    pkt.set_target(target);
+    pkt.set_taken(actually_taken);
+    pkt.set_pred_taken(pred_taken);
+
+    // Write the message to the protobuf output stream
+    traceStream->write(pkt);
 }
 
 void
@@ -136,6 +163,44 @@ InstTrace::traceMemRef(const DynInstConstPtr& dynInst)
         name(), pc_addr, type, addr, paddr,
         dynInst->staticInst->disassemble(pc_addr));
 
+}
+
+
+enums::BranchClass
+InstTrace::getBranchClass(StaticInstPtr inst)
+{
+    if (inst->isReturn()) {
+        return BranchClass::Return;
+    }
+
+    if (inst->isCall()) {
+        return inst->isDirectCtrl()
+                    ? BranchClass::CallDirect
+                    : BranchClass::CallIndirect;
+    }
+
+    if (inst->isDirectCtrl()) {
+        return inst->isCondCtrl()
+                    ? BranchClass::DirectCond
+                    : BranchClass::DirectUncond;
+    }
+
+    if (inst->isIndirectCtrl()) {
+        return inst->isCondCtrl()
+                    ? BranchClass::IndirectCond
+                    : BranchClass::IndirectUncond;
+    }
+    return BranchClass::NoBranch;
+}
+
+
+void
+InstTrace::flushTrace()
+{
+    // // Write to trace all records in the depTrace.
+    // writeDepTrace(depTrace.size());
+    // Delete the stream objects
+    delete traceStream;
 }
 
 

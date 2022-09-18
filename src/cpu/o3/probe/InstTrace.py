@@ -40,10 +40,9 @@ class InstTrace(ProbeListenerObject):
     cxx_class = 'gem5::o3::InstTrace'
     cxx_header = 'cpu/o3/probe/inst_trace.hh'
 
-# # Trace files for the following params are created in the output directory.
-# # User is forced to provide these when an instance of this class is created.
-# instFetchTraceFile = Param.String(desc="Protobuf trace file name for " \
-#                                     "instruction fetch tracing")
+    # Trace file for the following params are created in the output directory.
+    instTraceFile = Param.String("inst_trace.gz",
+                                    desc="Protobuf trace file name for")
 
 # # The committed instruction count from which to start tracing
 # startTraceInst = Param.UInt64(0, "The number of committed instructions " \
