@@ -28,7 +28,11 @@
 
 Import('*')
 
-SimObject('BranchPredictor.py', sim_objects=[
+if env['CONF']['TARGET_ISA'] == 'null':
+    Return()
+
+SimObject('BranchPredictor.py',
+    sim_objects=[
     'IndirectPredictor', 'SimpleIndirectPredictor', 'BranchPredictor',
     'ReturnAddrStack', 'BranchTargetBuffer', 'SimpleBTB', 'AssociativeBTB',
     'LocalBP', 'TournamentBP', 'BiModeBP', 'TAGEBase', 'TAGE', 'LoopPredictor',
@@ -42,7 +46,8 @@ SimObject('BranchPredictor.py', sim_objects=[
     'MultiperspectivePerceptronTAGE', 'MPP_StatisticalCorrector_64KB',
     'MultiperspectivePerceptronTAGE64KB', 'MPP_TAGE_8KB',
     'MPP_LoopPredictor_8KB', 'MPP_StatisticalCorrector_8KB',
-    'MultiperspectivePerceptronTAGE8KB'])
+    'MultiperspectivePerceptronTAGE8KB'],
+    enums=['BranchClass'])
 
 Source('bpred_unit.cc')
 Source('2bit_local.cc')
@@ -67,13 +72,10 @@ Source('tage_sc_l_8KB.cc')
 Source('tage_sc_l_64KB.cc')
 Source('btb.cc')
 Source('simple_btb.cc')
-<<<<<<< HEAD
-=======
 Source('associative_btb.cc')
 DebugFlag('Indirect')
 DebugFlag('BTB')
 DebugFlag('RAS')
->>>>>>> ee7bf10eca (cpu: Assoc BTB cleanup)
 DebugFlag('FreeList')
 DebugFlag('Branch')
 DebugFlag('Tage')

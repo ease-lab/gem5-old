@@ -62,68 +62,14 @@ BPredUnit::BPredUnit(const Params &params)
       btb(params.BTB),
       ras(params.RAS),
       iPred(params.indirectBranchPred),
-      stats(this),
-      instShiftAmt(params.instShiftAmt)
+      stats(this,this),
+      instShiftAmt(params.instShiftAmt),
+      resetBTB(params.resetBTB),
+      resetStart(params.resetStart),
+      resetEnd(params.resetEnd)
 {
 }
 
-BPredUnit::BPredUnitStats::BPredUnitStats(statistics::Group *parent)
-    : statistics::Group(parent),
-      ADD_STAT(lookups, statistics::units::Count::get(),
-              "Number of BP lookups"),
-      ADD_STAT(condPredicted, statistics::units::Count::get(),
-               "Number of conditional branches predicted"),
-      ADD_STAT(condPredictedTaken, statistics::units::Count::get(),
-               "Number of conditional branches predicted as taken"),
-      ADD_STAT(condIncorrect, statistics::units::Count::get(),
-               "Number of conditional branches incorrect"),
-      ADD_STAT(BTBLookups, statistics::units::Count::get(),
-               "Number of BTB lookups"),
-      ADD_STAT(BTBUpdates, statistics::units::Count::get(),
-               "Number of BTB updates"),
-      ADD_STAT(BTBHits, statistics::units::Count::get(),
-               "Number of BTB hits"),
-      ADD_STAT(BTBHitRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
-               BTBHits / BTBLookups),
-      ADD_STAT(BTBMispredicted, statistics::units::Count::get(),
-               "Number BTB misspredictions. No target found or target wrong"),
-      ADD_STAT(RASUsed, statistics::units::Count::get(),
-               "Number of times the RAS was used to get a target."),
-      ADD_STAT(RASIncorrect, statistics::units::Count::get(),
-               "Number of incorrect RAS predictions."),
-    //   ADD_STAT(RASFull)
-      ADD_STAT(indirectLookups, statistics::units::Count::get(),
-               "Number of indirect predictor lookups."),
-      ADD_STAT(indirectHits, statistics::units::Count::get(),
-               "Number of indirect target hits."),
-      ADD_STAT(indirectMisses, statistics::units::Count::get(),
-               "Number of indirect misses."),
-      ADD_STAT(indirectMispredicted, statistics::units::Count::get(),
-               "Number of mispredicted indirect branches."),
-      ADD_STAT(indirectCall, statistics::units::Count::get(),
-               "Number of conditional calls"),
-      ADD_STAT(directCall, statistics::units::Count::get(),
-               "Number of unconditional calls"),
-      ADD_STAT(mispredictCall, statistics::units::Count::get(),
-               "Number of calls mispredicted"),
-
-      ADD_STAT(mispredictCond, statistics::units::Count::get(),
-               "Number of conditional branches mispredicted"),
-      ADD_STAT(mispredictUncond, statistics::units::Count::get(),
-               "Number of unconditional branches mispredicted"),
-      ADD_STAT(predTakenBTBMiss, statistics::units::Count::get(),
-               "Number of branches predicted taken but miss in BTB"),
-      ADD_STAT(uncondBTBMiss, statistics::units::Count::get(),
-               "Number of unconditional branches miss in BTB"),
-
-      ADD_STAT(NotTakenMispredicted, statistics::units::Count::get(),
-               "Number branches predicted 'not taken' but turn out "
-               "to be taken"),
-      ADD_STAT(TakenMispredicted, statistics::units::Count::get(),
-               "Number branches predicted taken but turn out to be not taken")
-{
-    BTBHitRatio.precision(6);
-}
 
 probing::PMUUPtr
 BPredUnit::pmuProbePoint(const char *name)
@@ -155,34 +101,39 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                    PCStateBase &pc, ThreadID tid)
 {
 
-
+    BranchClass brType = getBranchClass(inst);
 
     // Check the BTB if an entry was found. The BP can only detect branches
     // if they have an entry in the BTB
-    ++stats.BTBLookups;
+    stats.BTBLookups++;
 
     bool btb_hit = false;
-    if (btb->valid(tid, pc.instAddr())) {
+    const PCStateBase * btb_target = btb->lookup(tid, pc.instAddr(), brType);
+    if (btb_target) {
         btb_hit = true;
         ++stats.BTBHits;
     }
 
 
-    auto conditional = inst->isCondCtrl();
-    auto direct = inst->isDirectCtrl();
-    std::string type = "";
+    // auto conditional = inst->isCondCtrl();
+    // auto direct = inst->isDirectCtrl();
+    // std::string type = "";
 
-    if (inst->isCall()) {
-        type = "call";
-    } else if (inst->isReturn()) {
-        type = "return";
-    } else if (inst->isUncondCtrl() || inst->isCondCtrl()) {
-        type = "jump";
-    } else {
-        type = "other";
-    }
-    DPRINTF(Branch, "[tid:%i] [sn:%llu] BTB detect %s %s. PC: %s\n",
-            tid, seqNum, conditional ? "cond" : "uncond" ,type ,pc);
+    // if (inst->isCall()) {
+    //     type = "call";
+    // } else if (inst->isReturn()) {
+    //     type = "return";
+    // } else if (inst->isUncondCtrl() || inst->isCondCtrl()) {
+    //     type = "jump";
+    // } else {
+    //     type = "other";
+    // }
+
+
+
+
+    DPRINTF(Branch, "[tid:%i] [sn:%llu] BTB detect %s PC: %s\n",
+            tid, seqNum, toStr(brType), pc);
 
 
 
@@ -194,7 +145,9 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     bool pred_taken = false;
     std::unique_ptr<PCStateBase> target(pc.clone());
 
-    ++stats.lookups;
+    stats.lookups[tid]++;
+    stats.lookupType[tid][brType]++;
+
     ppBranches->notify(1);
 
     void *bp_history = NULL;
@@ -231,10 +184,16 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
 
     PredictorHistory predict_record(seqNum, pc.instAddr(), pred_taken,
                                     bp_history, indirect_history,
-                                    nullptr, tid, inst);
+                                    nullptr, tid, brType, inst);
 
     if (inst->isUncondCtrl()) {
         predict_record.wasUncond = true;
+    }
+
+    if (pred_taken) {
+        stats.dirPredTakenType[tid][brType]++;
+    } else {
+        stats.dirPredNotTakenType[tid][brType]++;
     }
 
 
@@ -252,6 +211,7 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                                                   predict_record.rasHistory);
             if (ras_top) {
                 set(target, inst->buildRetPC(pc, *ras_top));
+                // inst->buildPC()
             predict_record.usedRAS = true;
 
                 DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
@@ -316,13 +276,13 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                         seqNum, tid);
             } else {
 
-                ++stats.BTBLookups;
+                // ++stats.BTBLookups;
                 // Check BTB on direct branches
-                if (btb->valid(tid, pc.instAddr())) {
-                    ++stats.BTBHits;
+                if (btb_target) {
+                    // ++stats.BTBHits;
                     predict_record.wasPredTakenBTBHit = true;
                     // If it's not a return, use the BTB to get target addr.
-                    set(target, btb->lookup(tid, pc.instAddr()));
+                    set(target, btb_target);
                     DPRINTF(Branch,
                             "[tid:%i] [sn:%llu] Instruction %s predicted "
                             "target is %s\n",
@@ -386,12 +346,18 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     auto distance = pc_addr - predict_record.target;
 
     DPRINTF(Branch, "Branch | 0x%08x, "
-        "type:%s, cond:%i, direct:%i, taken:%i, dist:%i, target: 0x%08x "
+        "%s, taken:%i, dist:%i, target: 0x%08x "
         "| %s.\n",
-        pc_addr, type, conditional, direct, pred_taken,
+        pc_addr, toStr(brType), pred_taken,
         distance, predict_record.target,
         inst->disassemble(pc_addr));
 
+
+    if (pred_taken) {
+        stats.predTakenType[tid][brType]++;
+    } else {
+        stats.predNotTakenType[tid][brType]++;
+    }
 
 
     return pred_taken;
@@ -405,23 +371,34 @@ BPredUnit::update(const InstSeqNum &done_sn, ThreadID tid)
 
     while (!predHist[tid].empty() &&
            predHist[tid].back().seqNum <= done_sn) {
+
+        auto hist_it = predHist[tid].rbegin();
+
+        stats.commitType[tid][hist_it->type]++;
+        DPRINTF(Branch, "[tid:%i] [sn:%llu] Commit: %s\n",
+                    tid, done_sn,
+                    toStr(hist_it->type));
+
         // Update the branch predictor with the correct results.
-        update(tid, predHist[tid].back().pc,
-                    predHist[tid].back().predTaken,
-                    predHist[tid].back().bpHistory, false,
-                    predHist[tid].back().inst,
-                    predHist[tid].back().target);
+        update(tid, hist_it->pc,
+                    hist_it->predTaken,
+                    hist_it->bpHistory, false,
+                    hist_it->inst,
+                    hist_it->target);
 
         if (iPred) {
-            iPred->commit(done_sn, tid, predHist[tid].back().indirectHistory);
+            iPred->commit(done_sn, tid, hist_it->indirectHistory);
         }
 
         if (ras) {
-            ras->commit(tid, predHist[tid].back().predTaken,
-                             predHist[tid].back().target,
-                             predHist[tid].back().inst,
-                             predHist[tid].back().rasHistory);
+            ras->commit(tid, hist_it->predTaken,
+                             hist_it->target,
+                             hist_it->inst,
+                             hist_it->rasHistory);
         }
+        // btb->update(tid, hist_it->pc,
+        //                  hist_it->target,
+        //                  hist_it->type);
 
         predHist[tid].pop_back();
     }
@@ -438,6 +415,13 @@ BPredUnit::squash(const InstSeqNum &squashed_sn, ThreadID tid)
 
     while (!pred_hist.empty() &&
            pred_hist.front().seqNum > squashed_sn) {
+
+        stats.squashType[tid][pred_hist.front().type]++;
+        DPRINTF(Branch, "[tid:%i] [squash sn:%llu] Incorrect: %s\n",
+                    tid, squashed_sn,
+                    toStr(pred_hist.front().type));
+
+
         if (pred_hist.front().rasHistory) {
             assert(ras);
 
@@ -488,6 +472,9 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
     ++stats.condIncorrect;
     ppMisses->notify(1);
 
+
+
+
     DPRINTF(Branch, "[tid:%i] Squashing from sequence number %i, "
             "setting target to %s\n", tid, squashed_sn, corr_target);
 
@@ -510,6 +497,10 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
 
             assert(pred_hist.front().seqNum == squashed_sn);
         }
+
+        stats.mispredictType[tid][hist_it->type]++;
+        DPRINTF(Branch, "[tid:%i] [squash sn:%llu] Incorrect: %s\n",
+                    tid, squashed_sn, toStr(hist_it->type));
 
 
         if (hist_it->usedRAS) {
@@ -611,7 +602,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         corr_target, tid);
                 }
             } else {
-                btb->incorrectTarget();
+                btb->incorrectTarget(hist_it->type);
                 ++stats.BTBMispredicted;
             }
 
@@ -624,7 +615,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         "PC %#x\n", tid, squashed_sn,
                         hist_it->seqNum, hist_it->pc);
 
-            btb->update(tid, hist_it->pc, corr_target);
+            btb->update(tid, hist_it->pc, corr_target, hist_it->type);
 
 
 
@@ -673,6 +664,34 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
     }
 }
 
+
+enums::BranchClass
+BPredUnit::getBranchClass(StaticInstPtr inst)
+{
+    if (inst->isReturn()) {
+        return BranchClass::Return;
+    }
+
+    if (inst->isCall()) {
+        return inst->isDirectCtrl()
+                    ? BranchClass::CallDirect
+                    : BranchClass::CallIndirect;
+    }
+
+    if (inst->isDirectCtrl()) {
+        return inst->isCondCtrl()
+                    ? BranchClass::DirectCond
+                    : BranchClass::DirectUncond;
+    }
+
+    if (inst->isIndirectCtrl()) {
+        return inst->isCondCtrl()
+                    ? BranchClass::IndirectCond
+                    : BranchClass::IndirectUncond;
+    }
+    return BranchClass::NoBranch;
+}
+
 void
 BPredUnit::dump()
 {
@@ -695,6 +714,122 @@ BPredUnit::dump()
             cprintf("\n");
         }
     }
+}
+
+
+BPredUnit::BPredUnitStats::BPredUnitStats(
+                                statistics::Group *parent, BPredUnit *bp)
+    : statistics::Group(parent),
+      ADD_STAT(lookups, statistics::units::Count::get(),
+              "Number of BP lookups"),
+      ADD_STAT(lookupType, statistics::units::Count::get(),
+              "Number of BP lookups per branch type"),
+      ADD_STAT(predTakenType, statistics::units::Count::get(),
+              "Number of final pred taken branches per branch type"),
+      ADD_STAT(predNotTakenType, statistics::units::Count::get(),
+              "Number of final pred not taken branches per branch type"),
+      ADD_STAT(dirPredTakenType, statistics::units::Count::get(),
+              "Number of direction pred as taken branches per br type"),
+      ADD_STAT(dirPredNotTakenType, statistics::units::Count::get(),
+              "Number of direction pred as not taken branches per br type"),
+
+      ADD_STAT(squashType, statistics::units::Count::get(),
+              "Number of branches squashed per branch type"),
+      ADD_STAT(mispredictType, statistics::units::Count::get(),
+              "Number of branches mispredicted per branch type"),
+      ADD_STAT(commitType, statistics::units::Count::get(),
+              "Number of branches commited per branch type"),
+
+      ADD_STAT(condPredicted, statistics::units::Count::get(),
+               "Number of conditional branches predicted"),
+      ADD_STAT(condPredictedTaken, statistics::units::Count::get(),
+               "Number of conditional branches predicted as taken"),
+      ADD_STAT(condIncorrect, statistics::units::Count::get(),
+               "Number of conditional branches incorrect"),
+      ADD_STAT(BTBLookups, statistics::units::Count::get(),
+               "Number of BTB lookups"),
+      ADD_STAT(BTBHits, statistics::units::Count::get(),
+               "Number of BTB hits"),
+      ADD_STAT(BTBHitRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
+               BTBHits / BTBLookups),
+      ADD_STAT(BTBMispredicted, statistics::units::Count::get(),
+               "Number BTB misspredictions. No target found or target wrong"),
+      ADD_STAT(indirectLookups, statistics::units::Count::get(),
+               "Number of indirect predictor lookups."),
+      ADD_STAT(indirectHits, statistics::units::Count::get(),
+               "Number of indirect target hits."),
+      ADD_STAT(indirectMisses, statistics::units::Count::get(),
+               "Number of indirect misses."),
+      ADD_STAT(indirectMispredicted, statistics::units::Count::get(),
+               "Number of mispredicted indirect branches."),
+      ADD_STAT(indirectCall, statistics::units::Count::get(),
+               "Number of conditional calls"),
+      ADD_STAT(directCall, statistics::units::Count::get(),
+               "Number of unconditional calls"),
+      ADD_STAT(mispredictCall, statistics::units::Count::get(),
+               "Number of calls mispredicted"),
+
+      ADD_STAT(mispredictCond, statistics::units::Count::get(),
+               "Number of conditional branches mispredicted"),
+      ADD_STAT(mispredictUncond, statistics::units::Count::get(),
+               "Number of unconditional branches mispredicted"),
+      ADD_STAT(predTakenBTBMiss, statistics::units::Count::get(),
+               "Number of branches predicted taken but miss in BTB"),
+      ADD_STAT(uncondBTBMiss, statistics::units::Count::get(),
+               "Number of unconditional branches miss in BTB"),
+
+      ADD_STAT(NotTakenMispredicted, statistics::units::Count::get(),
+               "Number branches predicted 'not taken' but turn out "
+               "to be taken"),
+      ADD_STAT(TakenMispredicted, statistics::units::Count::get(),
+               "Number branches predicted taken but turn out to be not taken")
+{
+    using namespace statistics;
+    BTBHitRatio.precision(6);
+
+    lookups
+        .init(bp->numThreads)
+        .flags(total);
+
+    lookupType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    lookupType.ysubnames(enums::BranchClassStrings);
+
+    predTakenType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    predTakenType.ysubnames(enums::BranchClassStrings);
+
+    predNotTakenType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    predNotTakenType.ysubnames(enums::BranchClassStrings);
+
+    dirPredTakenType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    dirPredTakenType.ysubnames(enums::BranchClassStrings);
+
+    dirPredNotTakenType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    dirPredNotTakenType.ysubnames(enums::BranchClassStrings);
+
+    squashType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    squashType.ysubnames(enums::BranchClassStrings);
+
+    mispredictType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    mispredictType.ysubnames(enums::BranchClassStrings);
+
+    commitType
+        .init(bp->numThreads, enums::Num_BranchClass)
+        .flags(total | pdf);
+    commitType.ysubnames(enums::BranchClassStrings);
 }
 
 } // namespace branch_prediction

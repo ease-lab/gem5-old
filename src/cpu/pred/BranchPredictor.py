@@ -32,6 +32,15 @@ from m5.proxy import *
 from m5.objects.IndexingPolicies import *
 from m5.objects.ReplacementPolicies import *
 
+class BranchClass(Enum):
+    vals = [
+            'NoBranch', 'Return',
+            'CallDirect', 'CallIndirect', # 'Call',
+            'DirectCond', 'DirectUncond', # 'Direct',
+            'IndirectCond', 'IndirectUncond', #'Indirect',
+            ]
+
+
 class ReturnAddrStack(SimObject):
     type = 'ReturnAddrStack'
     cxx_class = 'gem5::branch_prediction::ReturnAddrStack'

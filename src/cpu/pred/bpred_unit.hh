@@ -51,6 +51,7 @@
 #include "cpu/pred/indirect.hh"
 #include "cpu/pred/ras.hh"
 #include "cpu/static_inst.hh"
+#include "enums/BranchClass.hh"
 #include "params/BranchPredictor.hh"
 #include "sim/probe/pmu.hh"
 #include "sim/sim_object.hh"
@@ -61,14 +62,33 @@ namespace gem5
 namespace branch_prediction
 {
 
+  // enum BranchType {
+  //   NoBranch = 0,
+  //   Call,
+  //   CallCond,
+  //   CallUncond,
+  //   Return,
+  //   Direct,
+  //   DirectCond,
+  //   DirectUncond,
+  //   Indirect,
+  //   IndirectCond,
+  //   IndirectUncond,
+  //   NumBranchType
+  // };
+
+
 /**
  * Basically a wrapper class to hold both the branch predictor
  * and the BTB.
  */
 class BPredUnit : public SimObject
 {
+
   public:
-      typedef BranchPredictorParams Params;
+    typedef BranchPredictorParams Params;
+    typedef enums::BranchClass BranchClass;
+
     /**
      * @param params The params object, that has the size of the BP and BTB.
      */
@@ -193,9 +213,16 @@ class BPredUnit : public SimObject
     // {
     //     btb->update(0, instPC, target);
     // }
+    BranchClass getBranchClass(StaticInstPtr inst);
 
+    std::string toStr(BranchClass type) const
+    {
+        return std::string(enums::BranchClassStrings[type]);
+    }
 
     void dump();
+
+
 
   private:
     struct PredictorHistory
@@ -207,10 +234,11 @@ class BPredUnit : public SimObject
         PredictorHistory(const InstSeqNum &seq_num, Addr instPC,
                          bool pred_taken, void *bp_history,
                          void *indirect_history, void *ras_history,
-                         ThreadID _tid, const StaticInstPtr & inst)
+                         ThreadID _tid, BranchClass type,
+                         const StaticInstPtr & inst)
             : seqNum(seq_num), pc(instPC), bpHistory(bp_history),
               indirectHistory(indirect_history), rasHistory(ras_history),
-              tid(_tid), predTaken(pred_taken), inst(inst)
+              tid(_tid), predTaken(pred_taken), type(type), inst(inst)
         {}
 
         PredictorHistory(const PredictorHistory &other) :
@@ -225,6 +253,7 @@ class BPredUnit : public SimObject
             wasUncond(other.wasUncond),
             target(other.target),
             // targetProvider(targetProvider),
+            type(other.type),
             inst(other.inst)
         {
         }
@@ -285,14 +314,19 @@ class BPredUnit : public SimObject
          */
         Addr target = MaxAddr;
 
+        BranchClass type = BranchClass::NoBranch;
+
         /** The branch instrction */
         const StaticInstPtr inst;
     };
 
     typedef std::deque<PredictorHistory> History;
 
+  public:
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
+
+  private:
     /** Fallback to the BTB prediction in case the RAS is corrupted. */
     const unsigned fallbackBTB;
 
@@ -315,10 +349,29 @@ class BPredUnit : public SimObject
 
     struct BPredUnitStats : public statistics::Group
     {
-        BPredUnitStats(statistics::Group *parent);
+        BPredUnitStats(statistics::Group *parent, BPredUnit *bp);
 
         /** Stat for number of BP lookups. */
-        statistics::Scalar lookups;
+        statistics::Vector lookups;
+
+        /** Stat for BP lookup instructions by branch type (BranchType) */
+        statistics::Vector2d lookupType;
+
+        /** Stat for final prediction of the BPU by branch type (BranchType)*/
+        statistics::Vector2d predTakenType;
+        statistics::Vector2d predNotTakenType;
+
+        /** Stat for direction prediction by branch type (BranchType) */
+        statistics::Vector2d dirPredTakenType;
+        statistics::Vector2d dirPredNotTakenType;
+
+        /** Stat for branches squashed by branch type (BranchType) */
+        statistics::Vector2d squashType;
+        /** Stat for branches mispredicted by branch type (BranchType) */
+        statistics::Vector2d mispredictType;
+        /** Stat for branches commited by branch type (BranchType) */
+        statistics::Vector2d commitType;
+
         /** Stat for number of conditional branches predicted. */
         statistics::Scalar condPredicted;
         /** Stat for n of conditional branches predicted as taken. */
