@@ -1,0 +1,108 @@
+// Copyright (c) 2014,2017 ARM Limited
+// All rights reserved
+//
+// The license below extends only to copyright in the software and shall
+// not be construed as granting a license to any other intellectual
+// property including but not limited to intellectual property relating
+// to a hardware implementation of the functionality of the software
+// licensed hereunder.  You may use the software subject to the license
+// terms below provided that you ensure that this notice is replicated
+// unmodified and in its entirety in all distributions of the software,
+// modified or unmodified, in source code or in binary form.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met: redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer;
+// redistributions in binary form must reproduce the above copyright
+// notice, this list of conditions and the following disclaimer in the
+// documentation and/or other materials provided with the distribution;
+// neither the name of the copyright holders nor the names of its
+// contributors may be used to endorse or promote products derived from
+// this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+syntax = "proto2";
+
+// Put all the generated messages in a namespace
+package ProtoMessage;
+
+// Packet header with the identifier describing what object captured
+// the trace, the version of this file format, and the tick frequency
+// for all the packet time stamps.
+message InstTraceHeader {
+  required string obj_id = 1;
+  required uint32 ver = 2 [default = 0];
+  required uint64 tick_freq = 3;
+  required bool has_mem = 4;
+  required bool has_fetch = 5;
+}
+
+message InstRecord {
+
+  enum InstType
+  {
+    INVALID = 0;
+    Mem = 1;
+    Control = 2;
+    Other = 3;
+  }
+
+  enum MemType
+  {
+    NoMem = 0;
+    MemRead = 1;
+    MemWrite = 2;
+  }
+
+  enum BranchType
+  {
+    NoBranch = 0;
+    Return = 1;
+    CallDirect = 2;
+    CallIndirect = 3;
+    DirectCond = 4;
+    DirectUncond = 5;
+    IndirectCond = 6;
+    IndirectUncond = 7;
+    Num_BranchClass = 8;
+  }
+
+
+  required uint64 pc = 1;
+  required uint64 tick = 2;
+  required InstType type = 3 [default = INVALID];
+  optional uint64 mtype = 4;
+  optional uint64 p_addr = 5;
+  optional uint32 size = 6;
+  optional uint32 flags = 7;
+  optional uint64 v_addr = 8;
+  optional bool use_stack = 9;
+  optional uint64 value = 20;
+
+  // Whether the instruction is traced at fetch or commit
+  optional bool is_fetch = 10;
+
+  // Different time stamps
+  optional uint32 fe_tick = 11;
+  optional uint32 de_tick = 12;
+  optional uint32 is_tick = 13;
+  optional uint32 co_tick = 14;
+
+  // Branch data:
+  optional BranchType brtype = 15;
+  optional uint64 target = 16;
+  optional bool taken = 17;
+  optional bool pred_taken = 18;
+}

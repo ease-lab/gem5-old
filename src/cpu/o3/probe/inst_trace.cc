@@ -37,6 +37,9 @@
 
 #include "cpu/o3/probe/inst_trace.hh"
 
+#include "base/cprintf.hh"
+#include "base/loader/symtab.hh"
+#include "base/output.hh"
 #include "base/trace.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "debug/InstTrace.hh"
@@ -46,6 +49,34 @@ namespace gem5
 
 namespace o3
 {
+
+InstTrace::InstTrace(const InstTraceParams &params)
+    : ProbeListenerObject(params),
+      trace_fetch(params.trace_fetch),
+      trace_commit(params.trace_commit),
+      trace_branches(params.trace_branches),
+      trace_memref(params.trace_memref),
+      trace_func(params.trace_functions),
+      call_stack_idx(0),
+      traceStream(nullptr),
+      functionTraceStream(nullptr)
+{
+    std::string filename = simout.resolve(params.instTraceFile);
+    traceStream = new ProtoOutputStream(filename);
+
+    ProtoMessage::InstTraceHeader inst_pkt_header;
+    inst_pkt_header.set_obj_id(name());
+    inst_pkt_header.set_tick_freq(sim_clock::Frequency);
+    inst_pkt_header.set_has_mem(trace_memref);
+    inst_pkt_header.set_has_fetch(trace_fetch);
+    traceStream->write(inst_pkt_header);
+
+    const std::string fname = csprintf("ftrace.%s", name());
+    functionTraceStream = simout.findOrCreate(fname)->stream();
+
+    // Register a callback to flush trace records and close the output stream.
+    registerExitCallback([this]() {  flushTrace(); });
+}
 
 void
 InstTrace::traceCommit(const DynInstConstPtr& dynInst)
@@ -62,7 +93,9 @@ InstTrace::traceCommit(const DynInstConstPtr& dynInst)
     if (trace_memref && dynInst->isMemRef()) {
         traceMemRef(dynInst);
     }
-
+    if (trace_func && dynInst->isControl()) {
+        traceFunction(dynInst);
+    }
 }
 
 void
@@ -93,13 +126,15 @@ InstTrace::traceBranch(const DynInstConstPtr& dynInst)
     //       dynInst->pcState().instAddr(),
     //       dynInst->staticInst->disassemble(dynInst->pcState().instAddr()));
 
-    auto pc_addr = dynInst->pcState().instAddr();
-    auto target = dynInst->branchTarget()->instAddr();
+    uint64_t pc_addr = dynInst->pcState().instAddr();
+    uint64_t target = dynInst->branchTarget()->instAddr();
     auto conditional = dynInst->isCondCtrl();
     auto direct = dynInst->isDirectCtrl();
     std::string type = "";
     int64_t distance = int64_t(pc_addr - target);
-    auto taken = (distance > 4) ? true : false;
+    auto pred_taken = (distance > 4) ? true : false;
+    // bool mispred = dynInst->mispredicted();
+    bool actually_taken = dynInst->pcState().branching();
 
     if (dynInst->isCall()) {
         type = "call";
@@ -112,11 +147,29 @@ InstTrace::traceBranch(const DynInstConstPtr& dynInst)
     }
 
     DPRINTFR(InstTrace, "[%s]: Branch | 0x%08x, "
-        "type:%s, cond:%i, direct:%i, taken:%i, dist:%i, target: 0x%08x "
+        "%s, pred:%i,mispred:%i, dist:%i, target: 0x%08x "
         "| %s.\n", name(),
-        pc_addr, type, conditional, direct, taken, distance, target,
+        pc_addr, type,
+        pred_taken, pred_taken != actually_taken,
+        distance, target,
         dynInst->staticInst->disassemble(pc_addr));
 
+    ProtoMessage::InstRecord pkt;
+    pkt.set_pc(pc_addr);
+    pkt.set_tick(curTick());
+    pkt.set_type(Inst::Control);
+    pkt.set_brtype((BranchType)0);
+    pkt.set_target(target);
+    pkt.set_taken(actually_taken);
+    pkt.set_pred_taken(pred_taken);
+
+    // pkt.set_fe_tick(dynInst->fetchTick);
+    // pkt.set_de_tick(dynInst->decodeTick);
+    // pkt.set_is_tick(dynInst->issueTick);
+    // pkt.set_co_tick(dynInst->commitTick);
+
+    // Write the message to the protobuf output stream
+    traceStream->write(pkt);
 }
 
 void
@@ -126,16 +179,92 @@ InstTrace::traceMemRef(const DynInstConstPtr& dynInst)
     //       dynInst->pcState().instAddr(),
     //       dynInst->staticInst->disassemble(dynInst->pcState().instAddr()));
 
-    auto pc_addr = dynInst->pcState().instAddr();
-    auto addr = dynInst->effAddr;
-    auto paddr = dynInst->physEffAddr;
+    uint64_t pc_addr = dynInst->pcState().instAddr();
+    uint64_t addr = dynInst->effAddr;
+    uint64_t paddr = dynInst->physEffAddr;
     std::string type = dynInst->isLoad() ? "ld" : "st";
+    // assert(dyn)
+    uint64_t val = (dynInst->traceData) ?
+                            dynInst->traceData->getIntData() : MaxAddr;
+    MemType mtype = dynInst->isLoad() ? Inst::MemRead : Inst::MemWrite;
 
+    bool use_stack = false;
 
-    DPRINTFR(InstTrace, "[%s]: Mem | 0x%08x %s -> 0x%08x (0x%08x). | %s.\n",
-        name(), pc_addr, type, addr, paddr,
+    DPRINTFR(InstTrace, "[%s]: Mem | 0x%08x %s -> 0x%08x (0x%08x). "
+        "val: %#x| %s.\n", name(), pc_addr, type, addr, paddr, val,
         dynInst->staticInst->disassemble(pc_addr));
 
+    ProtoMessage::InstRecord pkt;
+    pkt.set_pc(pc_addr);
+    pkt.set_tick(curTick());
+    pkt.set_type(Inst::Mem);
+    pkt.set_mtype(mtype);
+    pkt.set_p_addr(paddr);
+    pkt.set_v_addr(addr);
+    pkt.set_value(val);
+    pkt.set_use_stack(use_stack);
+
+    // pkt.set_fe_tick(dynInst->fetchTick);
+    // pkt.set_de_tick(dynInst->decodeTick);
+    // pkt.set_is_tick(dynInst->issueTick);
+    // pkt.set_co_tick(dynInst->commitTick);
+
+
+    // Write the message to the protobuf output stream
+    traceStream->write(pkt);
+
+}
+
+
+void
+InstTrace::traceFunction(const DynInstConstPtr& dynInst)
+{
+    if (loader::debugSymbolTable.empty())
+        return;
+
+    uint64_t pc_addr = dynInst->pcState().instAddr();
+    uint64_t target = dynInst->branchTarget()->instAddr();
+
+    if (!(dynInst->staticInst->isCall() || dynInst->staticInst->isReturn())) {
+        return;
+    }
+
+    auto it = loader::debugSymbolTable.findNearest(target);
+
+    std::string sym_str;
+    if (it == loader::debugSymbolTable.end()) {
+        // no symbol found: use addr as label
+        sym_str = csprintf("%#x", target);
+    } else {
+        sym_str = it->name;
+    }
+
+    bool func_enter = false;
+    // Check if we enter a function
+    if (dynInst->staticInst->isCall()) {
+        call_stack_idx++;
+        func_enter = true;
+    } else {
+        call_stack_idx--;
+    }
+
+    ccprintf(*functionTraceStream, "%d: CSP[%d]: "
+                                   "%#x(%#x) %s %#x(%#x) : %s\n",
+                 curTick(), call_stack_idx,
+                 pc_addr, addrBlockAlign(pc_addr,64),
+                 func_enter ? "call ->" : "ret ->",
+                 target, addrBlockAlign(target,64),
+                 sym_str);
+}
+
+void
+InstTrace::flushTrace()
+{
+    // // Write to trace all records in the depTrace.
+    // writeDepTrace(depTrace.size());
+    // Delete the stream objects
+    delete traceStream;
+    delete functionTraceStream;
 }
 
 

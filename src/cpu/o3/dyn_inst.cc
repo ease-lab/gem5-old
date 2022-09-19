@@ -243,7 +243,10 @@ DynInst::~DynInst()
 #endif
 
     delete [] memData;
-    delete traceData;
+    if (traceData) {
+        delete traceData;
+        traceData = NULL;
+    }
     fault = NoFault;
 
 #ifndef NDEBUG

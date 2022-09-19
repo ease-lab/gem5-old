@@ -45,7 +45,10 @@
 #define __CPU_O3_PROBE_INST_TRACE_HH__
 
 #include "cpu/o3/dyn_inst_ptr.hh"
+#include "cpu/static_inst.hh"
 #include "params/InstTrace.hh"
+#include "proto/inst_trace.pb.h"
+#include "proto/protoio.hh"
 #include "sim/probe/probe.hh"
 
 namespace gem5
@@ -58,14 +61,14 @@ class InstTrace : public ProbeListenerObject
 {
 
   public:
-    InstTrace(const InstTraceParams &params) :
-        ProbeListenerObject(params),
-        trace_fetch(params.trace_fetch),
-        trace_commit(params.trace_commit),
-        trace_branches(params.trace_branches),
-        trace_memref(params.trace_memref)
-    {
-    }
+
+    /** Trace record types corresponding to instruction node types */
+    typedef ProtoMessage::InstRecord::InstType InstType;
+    typedef ProtoMessage::InstRecord::MemType MemType;
+    typedef ProtoMessage::InstRecord::BranchType BranchType;
+    typedef ProtoMessage::InstRecord Inst;
+
+    InstTrace(const InstTraceParams &params);
 
     /** Register the probe listeners. */
     void regProbeListeners() override;
@@ -86,13 +89,25 @@ class InstTrace : public ProbeListenerObject
     bool trace_branches = false;
     // Enable tracing of commited memory reference instructions.
     bool trace_memref = false;
+    // Enable function tracing
+    bool trace_func = false;
+    int call_stack_idx = 0;
+
+
+    /** One output stream for the entire simulation.
+     * We encode the CPU & system ID so all we need is a single file
+     */
+    ProtoOutputStream *traceStream;
+    std::ostream *functionTraceStream;
 
     void traceFetch(const DynInstConstPtr& dynInst);
     void traceCommit(const DynInstConstPtr& dynInst);
 
     void traceBranch(const DynInstConstPtr& dynInst);
     void traceMemRef(const DynInstConstPtr& dynInst);
+    void traceFunction(const DynInstConstPtr& dynInst);
 
+    void flushTrace();
 };
 
 } // namespace o3

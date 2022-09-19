@@ -1270,8 +1270,8 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
                 head_inst->traceData->setCPSeq(thread[tid]->numOp);
                 head_inst->traceData->dump();
             }
-            delete head_inst->traceData;
-            head_inst->traceData = NULL;
+            // delete head_inst->traceData;
+            // head_inst->traceData = NULL;
         }
 
         // Generate trap squash event.
@@ -1288,8 +1288,8 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
         head_inst->traceData->setFetchSeq(head_inst->seqNum);
         head_inst->traceData->setCPSeq(thread[tid]->numOp);
         head_inst->traceData->dump();
-        delete head_inst->traceData;
-        head_inst->traceData = NULL;
+        // delete head_inst->traceData;
+        // head_inst->traceData = NULL;
     }
     if (head_inst->isReturn()) {
         DPRINTF(Commit,

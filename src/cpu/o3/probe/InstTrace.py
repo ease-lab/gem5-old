@@ -35,29 +35,31 @@
 
 from m5.objects.Probe import *
 
+
 class InstTrace(ProbeListenerObject):
-    type = 'InstTrace'
-    cxx_class = 'gem5::o3::InstTrace'
-    cxx_header = 'cpu/o3/probe/inst_trace.hh'
+    type = "InstTrace"
+    cxx_class = "gem5::o3::InstTrace"
+    cxx_header = "cpu/o3/probe/inst_trace.hh"
 
-# # Trace files for the following params are created in the output directory.
-# # User is forced to provide these when an instance of this class is created.
-# instFetchTraceFile = Param.String(desc="Protobuf trace file name for " \
-#                                     "instruction fetch tracing")
+    # Trace file for the following params are created in the output directory.
+    instTraceFile = Param.String("inst_trace.gz", "Protobuf trace file name")
+    funcTraceFile = Param.String("func_trace.txt", "Protobuf trace file name")
 
-# # The committed instruction count from which to start tracing
-# startTraceInst = Param.UInt64(0, "The number of committed instructions " \
-#                                 "after which to start tracing. Default " \
-#                                 "zero means start tracing from first " \
-#                                 "committed instruction.")
-# # Whether to trace virtual addresses for memory accesses
-# traceVirtAddr = Param.Bool(False, "Set to true if virtual addresses are " \
-#                             "to be traced.")
+    # # The committed instruction count from which to start tracing
+    # startTraceInst = Param.UInt64(0, "The number of committed instructions " \
+    #                                 "after which to start tracing. Default " \
+    #                                 "zero means start tracing from first " \
+    #                                 "committed instruction.")
+    # # Whether to trace virtual addresses for memory accesses
+    # traceVirtAddr = Param.Bool(False, "Set to true if virtual addresses are " \
+    #                             "to be traced.")
     # Whether to trace fetch
-    trace_fetch = Param.Bool(False, "Set to true if fetch are to be "
-                                    "traced as well.")
+    trace_fetch = Param.Bool(
+        False, "Set to true if fetch are to be " "traced as well."
+    )
 
     # Whether to trace all commited instructions
     trace_commit = Param.Bool(False, "Trace all commited instructions.")
     trace_branches = Param.Bool(False, "Trace branches")
     trace_memref = Param.Bool(False, "Trace memory references")
+    trace_functions = Param.Bool(False, "Trace memory references")
