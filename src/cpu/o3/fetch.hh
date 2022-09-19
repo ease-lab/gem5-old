@@ -167,6 +167,14 @@ class Fetch
         Inactive
     };
 
+    enum FTQStatus
+    {
+        FTQActive,
+        FTQSquash,
+        FTQFull,
+        FTQInactive
+    };
+
     /** Individual thread status. */
     enum ThreadStatus
     {
@@ -191,6 +199,7 @@ class Fetch
 
     /** Per-thread status. */
     ThreadStatus fetchStatus[MaxThreads];
+    FTQStatus ftqStatus[MaxThreads];
 
     /** Fetch policy. */
     SMTFetchPolicy fetchPolicy;
@@ -300,37 +309,58 @@ class Fetch
      *******************************************************************/
     //
 
-    struct BasicBlock : public RefCounted
+    class BasicBlock : public RefCounted
     {
-
-        BasicBlock(ThreadID _tid, Addr _start, Addr _end=0);
+      public:
+        BasicBlock(ThreadID _tid, const PCStateBase &_start_pc);
         // ~BasicBlock();
-
-
+      private:
         /* Start address of the basic block */
-        Addr startAddress;
+        std::unique_ptr<PCStateBase> startPC;
 
         /* End address of the basic block */
-        Addr endAddress;
-
-        /* Basic Block size */
-        unsigned size() { return endAddress - startAddress; }
+        std::unique_ptr<PCStateBase> endPC;
 
         /** The thread id. */
-        ThreadID tid;
+        const ThreadID tid;
+
+      public:
+        /* Start address of the basic block */
+        Addr startAddress() { return startPC->instAddr(); }
+
+        /* End address of the basic block */
+        Addr endAddress() { return (endPC) ? endPC->instAddr() : MaxAddr; }
+
+        /* Basic Block size */
+        unsigned size() { return endAddress() - startAddress(); }
+
+
+
+        ThreadID getTid() { return tid; }
 
         /* List of sequence numbers created for the BB */
-        std::vector<InstSeqNum> seqNumbers;
+        std::list<InstSeqNum> seqNumbers;
 
-        /** The branch that terminate the BB */
-        DynInstPtr terminalBranch;
+        // /** The branch that terminate the BB */
+        // DynInstPtr terminalBranch;
+
+        // std::unique_ptr<PCStateBase> predPC;
+        std::unique_ptr<PCStateBase> predPC;
+        /** Set/Read the predicted target of the terminal branch. */
+        void setPredTarg(const PCStateBase &pred_pc) { set(predPC, pred_pc); }
+        const PCStateBase &readPredTarg() { return *predPC; }
+
+        const PCStateBase &readStartPC() { return *startPC; }
+        const PCStateBase &readEndPC() { return *endPC; }
 
         /* Whether the determining branch is taken or not.*/
         bool taken;
+        bool brSeqNum;
         // std::unique_ptr<PCStateBase> targetAddr;
 
         void addSeqNum(InstSeqNum seqNum) { seqNumbers.push_back(seqNum); }
-        void addTerminalBranch(const DynInstPtr &inst);
+        void addTerminalBranch(const PCStateBase &br_pc, InstSeqNum seq,
+                               bool pred_taken, const PCStateBase &pred_pc);
     };
 
     struct FetchTarget
@@ -366,6 +396,7 @@ class Fetch
    typedef std::deque<BasicBlockPtr> FetchTargetQueue;
 
    FetchTargetQueue ftq[MaxThreads];
+    const unsigned ftqSize = 8;
 
 
     BasicBlockPtr basicBlockProduce[MaxThreads];
@@ -375,7 +406,7 @@ class Fetch
     /** Feed the fetch target queue.
      */
     void produceFetchTargets(bool &status_change);
-    BasicBlockPtr getCurrentFetchTarget(ThreadID tid);
+    BasicBlockPtr getCurrentFetchTarget(ThreadID tid, bool &status_change);
 
     /** The decoupled PC used by the BPU to generate fetch targets
      *
@@ -392,10 +423,9 @@ class Fetch
         const PCStateBase &next_pc, bool trace);
 
 
-    DynInstPtr getInstrFromBB(ThreadID tid, StaticInstPtr staticInst,
+    DynInstPtr getInstrFromBB(BasicBlockPtr bb, StaticInstPtr staticInst,
             StaticInstPtr curMacroop, const PCStateBase &this_pc,
-            const PCStateBase &next_pc, InstSeqNum seq = 0,
-            bool insert_IQ = true, bool trace = false);
+            PCStateBase &next_pc);
 
 
 

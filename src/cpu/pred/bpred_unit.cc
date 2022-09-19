@@ -426,6 +426,30 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     return pred_taken;
 }
 
+
+
+bool
+BPredUnit::updateStaticInst(const InstSeqNum &seqNum,
+                            const StaticInstPtr &inst, ThreadID tid)
+{
+    DPRINTF(Branch, "[tid:%i] [sn:%llu] Update static instr from pre-decode\n"
+                    , tid, seqNum);
+
+    for (auto& hist : predHist[tid]) {
+        if (hist.seqNum == seqNum) {
+            if (getBranchClass(hist.inst) == getBranchClass(inst)) {
+                DPRINTF(Branch, "[tid:%i] [sn:%llu] Update static instr "
+                        "from pre-decode\n", tid, seqNum);
+                hist.inst = inst;
+            }
+            DPRINTF(Branch, "[tid:%i] [sn:%llu] Update static instr "
+                        "fail: types dont match!\n", tid, seqNum);
+        }
+    }
+    assert(false);
+    return false;
+}
+
 void
 BPredUnit::update(const InstSeqNum &done_sn, ThreadID tid)
 {

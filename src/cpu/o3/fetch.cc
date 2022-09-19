@@ -314,6 +314,7 @@ void
 Fetch::clearStates(ThreadID tid)
 {
     fetchStatus[tid] = Running;
+    ftqStatus[tid] = FTQActive;
     set(pc[tid], cpu->pcState(tid));
     set(bpuPC[tid], cpu->pcState(tid));
     basicBlockProduce[tid] = NULL;
@@ -346,6 +347,7 @@ Fetch::resetStage()
     // Setup PC and nextPC with initial state.
     for (ThreadID tid = 0; tid < numThreads; ++tid) {
         fetchStatus[tid] = Running;
+        ftqStatus[tid] = FTQActive;
         set(pc[tid], cpu->pcState(tid));
         set(bpuPC[tid], cpu->pcState(tid));
 
@@ -599,17 +601,28 @@ Fetch::deactivateThread(ThreadID tid)
 // }
 
 
-Fetch::BasicBlock::BasicBlock(ThreadID _tid, Addr _start, Addr _end)
-    : startAddress(_start), endAddress(_end),
-      tid(_tid), terminalBranch(nullptr), taken(false)
+Fetch::BasicBlock::BasicBlock(ThreadID _tid, const PCStateBase &_start_pc)
+    : tid(_tid), taken(false)
 {
+    set(startPC , _start_pc);
 };
 
+// void
+// Fetch::BasicBlock::addTerminalBranch(const DynInstPtr &inst)
+// {
+//     terminalBranch = inst;
+//     endAddress = inst->pcState().instAddr();
+// }
+
 void
-Fetch::BasicBlock::addTerminalBranch(const DynInstPtr &inst)
+Fetch::BasicBlock::addTerminalBranch(const PCStateBase &br_pc,
+                                     InstSeqNum seq, bool pred_taken,
+                                     const PCStateBase &pred_pc)
 {
-    terminalBranch = inst;
-    endAddress = inst->pcState().instAddr();
+    set(endPC, br_pc);
+    set(predPC, pred_pc);
+    taken = pred_taken;
+    brSeqNum = seq;
 }
 
 // Fetch::BasicBlock::~BasicBlock()
@@ -623,7 +636,10 @@ Fetch::produceFetchTargets(bool &status_change)
 {
     ThreadID tid = getFetchingThread();
     DPRINTF(Fetch, "%s:\n",__func__);
-    return;
+
+    if (ftqStatus[tid] != FTQActive) {
+        return;
+    }
 
     /**
      * This function implements the head of the decoupled frontend.
@@ -657,7 +673,8 @@ Fetch::produceFetchTargets(bool &status_change)
     // If there is no open BB create a new basic block starting from
     // the current PC and then search until the end is reached.
     if (curBB == NULL) {
-        curBB = new BasicBlock(tid, this_pc.instAddr());
+        curBB = new BasicBlock(tid, this_pc);
+        basicBlockProduce[tid] = curBB;
     }
 
 
@@ -707,14 +724,15 @@ Fetch::produceFetchTargets(bool &status_change)
         StaticInstPtr staticInst = branchPred->BTBLookupInst(this_pc,tid);
         assert(staticInst);
 
-        // Create dynamic instruction for branch here:
-        DynInstPtr inst = buildInst(tid, staticInst, nullptr, this_pc,
-                                    this_pc, seqNum, false, false);
+        // // Create dynamic instruction for branch here:
+        // DynInstPtr inst = buildInst(tid, staticInst, nullptr, this_pc,
+        //                             this_pc, seqNum, false, false);
+        std::unique_ptr<PCStateBase> next_pc(this_pc.clone());
 
         // Now predict the direction. Note the BP will advance
         // the PC to the next instruction.
-        predict_taken = branchPred->predict(inst->staticInst, inst->seqNum,
-                                            this_pc, tid);
+        predict_taken = branchPred->predict(staticInst, seqNum,
+                                            *next_pc, tid);
 
         // DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch found at PC %#x "
         //         "predicted: %s, target: %s\n",
@@ -722,19 +740,16 @@ Fetch::produceFetchTargets(bool &status_change)
         //         predict_taken ? "taken" : "not taken", this_pc);
 
         if (predict_taken) {
-            DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+            DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %s "
                     "predicted to be taken to %s\n",
-                    tid, inst->seqNum, inst->pcState().instAddr(), this_pc);
+                    tid, seqNum, this_pc, *next_pc);
         } else {
-            DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+            DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %s "
                     "predicted to be not taken\n",
-                    tid, inst->seqNum, inst->pcState().instAddr());
+                    tid, seqNum, this_pc);
         }
 
 
-        inst->setPredControl(true);
-        inst->setPredTarg(this_pc);
-        inst->setPredTaken(predict_taken);
 
         ++fetchStats.branches;
 
@@ -746,77 +761,72 @@ Fetch::produceFetchTargets(bool &status_change)
         DPRINTF(Fetch, "[tid:%i] [sn:%llu] BB:%#x end with PC:%#x. Size:%ib"
                 "Start next BB at addr:%#x in next cycle",
                 tid, seqNum, curBB, curAddr, curBB->size(),
-                this_pc.instAddr());
+                next_pc->instAddr());
 
         // Add the branch instruction to the BB and insert it in FTQ.
-        curBB->addTerminalBranch(inst);
+        // curBB->addTerminalBranch(inst);
+
+        // curBB->taken = predict_taken;
+        // curBB->setPredTarg(this_pc);
+        curBB->addTerminalBranch(this_pc, seqNum, predict_taken, *next_pc);
+
+        // inst->setPredControl(true);
+        // inst->setPredTarg(this_pc);
+        // inst->setPredTaken(predict_taken);
 
         ftq[tid].push_back(curBB);
         DPRINTF(Fetch, "Add BB:%#x to FTQ. FTQ size:%i\n",
                 curBB, ftq[tid].size());
+        basicBlockProduce[tid] = nullptr;
 
+        if (ftq[tid].size() >= ftqSize) {
+            ftqStatus[tid] = FTQFull;
+            status_change = true;
+        }
+
+        if (fetchStatus[tid] == FTQEmpty) {
+            fetchStatus[tid] == Running;
+            status_change = true;
+        }
 
     } else {
         DPRINTF(Fetch, "[tid:%i] [sn:%llu] %i addresses searched. "
-                "No branch found. Continue with BB:%#x at addr:%#x in next cycle",
+                "No branch found. Continue with BB:%#x at addr:%#x in next cycle\n",
                 tid, seqNum, numAddrSearched, curBB, this_pc.instAddr());
     }
-
-
-
-
 }
 
 Fetch::BasicBlockPtr
-Fetch::getCurrentFetchTarget(ThreadID tid)
+Fetch::getCurrentFetchTarget(ThreadID tid, bool &status_change)
 {
     DPRINTF(Fetch, "%s:\n",__func__);
 
     BasicBlockPtr curBB = basicBlockConsume[tid];
     if (!curBB) {
+        // We are not within processing a basic block
+        // Get the next one if available.
         if (ftq[tid].size() > 0) {
+
             curBB = ftq[tid].front();
             ftq[tid].pop_front();
 
-            DPRINTF(Fetch, "Pop BB:%#x from FTQ. FTQ size:%i\n",
-                curBB, ftq[tid].size());
+            // update the current PC to the new fetch target.
+            set(pc[tid], curBB->readStartPC());
+
+            DPRINTF(Fetch, "[tid:%i] Pop new BB:%#x from FTQ. New PC:%#x. FTQ size:%i\n",
+                    tid, curBB, *pc[tid], ftq[tid].size());
 
         } else {
-            DPRINTF(Fetch, "FTQ is empty and no BB to fetch from.\n");
+            DPRINTF(Fetch, "[tid:%i] FTQ is empty and no BB to fetch from.\n");
             fetchStatus[tid] = FTQEmpty;
-            return nullptr;
+            status_change = true;
         }
     } else {
-        DPRINTF(Fetch, "Continue fetching from BB:%#x\n", curBB);
+        DPRINTF(Fetch, "[tid:%i] Continue fetching from BB:%#x\n", curBB);
     }
-    return curBB;
+    return basicBlockConsume[tid];
 }
 
-
-Fetch::BasicBlockPtr
-Fetch::getInstrFromBB(ThreadID tid)
-{
-    DPRINTF(Fetch, "%s:\n",__func__);
-
-    BasicBlockPtr curBB = basicBlockConsume[tid];
-    if (!curBB) {
-        if (ftq[tid].size() > 0) {
-            curBB = ftq[tid].front();
-            ftq[tid].pop_front();
-
-            DPRINTF(Fetch, "Pop BB:%#x from FTQ. FTQ size:%i\n",
-                curBB, ftq[tid].size());
-
-        } else {
-            DPRINTF(Fetch, "FTQ is empty and no BB to fetch from.\n");
-            fetchStatus[tid] = FTQEmpty;
-            return nullptr;
-        }
-    } else {
-        DPRINTF(Fetch, "Continue fetching from BB:%#x\n", curBB);
-    }
-    return curBB;
-}
 
 
 
@@ -1548,7 +1558,128 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
 // }
 
 
+
+
 //////////////////
+
+DynInstPtr
+Fetch::getInstrFromBB(Fetch::BasicBlockPtr bb, StaticInstPtr staticInst,
+            StaticInstPtr curMacroop, const PCStateBase &this_pc,
+            PCStateBase &next_pc)
+{
+
+    /**
+     * In this function the predecoded static instruction is compared with
+     * the instruction the BP predicted.
+     * The BP only cares about branches. Hence, if its not a branch we
+     * will just build the instruction with the next available sequence number
+     * If this is the last instruction in the
+     *
+     */
+
+    DPRINTF(Fetch, "%s:\n",__func__);
+
+    assert(bb);
+
+    ThreadID tid = bb->getTid();
+    InstSeqNum seqNum = 0;
+
+    // bool predict_taken = false;
+    // bool pred_control = false;
+
+
+    // First check if is a regular instruction or a branch.
+    // Build the dynamic instruction respectively.
+    bool reached_end = false;
+    bool exceed = false;
+
+    if (this_pc.instAddr() < bb->endAddress()) {
+
+        DPRINTF(Fetch, "End of BB:%#x not reached PC:%#x", bb, this_pc.instAddr());
+
+        assert(!bb->seqNumbers.empty());
+        // Get the next sequence number.
+        seqNum = bb->seqNumbers.front();
+        bb->seqNumbers.pop_front();
+    } else if (this_pc.instAddr() == bb->endAddress()) {
+
+        reached_end = true;
+        DPRINTF(Fetch, "Reached the termial branch of BB:%#x, PC:%#x", bb, bb->endAddress());
+        seqNum = bb->brSeqNum;
+
+    } else {
+        exceed = true;
+        DPRINTF(Fetch, "Exceed BB:%#x PC:%#x. Reset FDIP.\n",
+                bb, this_pc.instAddr());
+    }
+
+
+    // Build instruction with the seq number and the pre decoded information
+    // Insert inst in the instruction queue.
+    DynInstPtr inst = buildInst(tid, staticInst, curMacroop,
+                        this_pc, next_pc, seqNum, true, true);
+
+
+    if (reached_end) {
+        // The end of the basic block is reached.
+        // Check if the static instruction match with what the BP predicted.
+        assert(branchPred->updateStaticInst(seqNum, staticInst, tid));
+
+        set(next_pc, bb->readPredTarg());
+
+        if (bb->taken) {
+            DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                    "predicted to be taken to %s\n",
+                    tid, inst->seqNum, inst->pcState().instAddr(), next_pc);
+        } else {
+            DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                    "predicted to be not taken\n",
+                    tid, inst->seqNum, inst->pcState().instAddr());
+        }
+
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
+                "predicted to go to %s\n",
+                tid, inst->seqNum, inst->pcState().instAddr(), next_pc);
+
+
+
+        ++fetchStats.branches;
+        if (bb->taken) {
+            ++fetchStats.predictedBranches;
+        }
+
+        inst->setPredTaken(bb->taken);
+        inst->setPredTarg(next_pc);
+        inst->setPredControl(true);
+
+    } else {
+
+        // The BP predict a regular instruction or
+        // a branch that was not taken in case taken only history is used.
+        // Set the prediction information in respect of that.
+        // Note: At this point we might have also already exceeded the
+        // basic block. However, we will not give the instruction a
+        // second chance for prediction.
+        inst->staticInst->advancePC(next_pc);
+        inst->setPredControl(false);
+        inst->setPredTarg(next_pc);
+        inst->setPredTaken(false);
+    }
+
+    // If done with BB remove it.
+    if (reached_end || exceed) {
+        DPRINTF(Fetch, "Done with BB:%#x\n", bb);
+        basicBlockConsume[tid] = nullptr;
+        bb = nullptr;
+    }
+
+    // If the BB was exceeded. Stall fetch and BP until resteered
+    if (exceed) {
+
+    }
+
+    return inst;
+}
 
 
 
@@ -1644,12 +1775,15 @@ Fetch::fetch(bool &status_change)
 
     DPRINTF(Fetch, "Attempting to fetch from [tid:%i]\n", tid);
 
+    BasicBlockPtr curBB = getCurrentFetchTarget(tid, status_change);
+    if (!curBB) {
+        // No fetch target. We don't know what to fetch.
+        ++fetchStats.ftqStallCycles;
+        return;
+    }
+
     // The current PC.
     PCStateBase &this_pc = *pc[tid];
-
-    // The current BB to fetch from
-    BasicBlockPtr curBB = getCurrentFetchTarget(tid);
-
     Addr pcOffset = fetchOffset[tid];
     Addr fetchAddr = (this_pc.instAddr() + pcOffset) & decoder[tid]->pcMask();
 
@@ -1749,6 +1883,12 @@ Fetch::fetch(bool &status_change)
         fetchAddr = (this_pc.instAddr() + pcOffset) & pc_mask;
         Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
 
+        if (!curBB) {
+            // We need to wait for the FTQ until the next fetch target is
+            // available.
+            break;
+        }
+
         if (needMem) {
             // If buffer is no longer valid or fetchAddr has moved to point
             // to the next cache block then start fetch from icache.
@@ -1809,30 +1949,30 @@ Fetch::fetch(bool &status_change)
             }
 
 
-// ///////////////////////////////
-//         Start here tomorrow:
-//             DynInstPtr instruction = getInstrFromBB(tid, staticInst, curMacroop,
+///////////////////////////////
+
+            DynInstPtr instruction = getInstrFromBB(curBB, staticInst, curMacroop,
+                                            this_pc, *next_pc);
+
+            if (!instruction) {
+                DPRINTF(Fetch, "No instruction from BB\n");
+            }
+            predictedBranch = instruction->readPredTaken();
+
+
+// ///////////////////////
+//             DynInstPtr instruction = buildInst(tid, staticInst, curMacroop,
 //                                             this_pc, *next_pc, 0, true, true);
 
-//             if (!instruction) {
-//                 DPRINTF(Fetch, "No instruction from BB\n");
-//             }
-//             predictedBranch = instruction->readPredTaken();
+//             set(next_pc, this_pc);
 
+//             // If we're branching after this instruction, quit fetching
+//             // from the same block.
+//             predictedBranch |= this_pc.branching();
+//             predictedBranch |= lookupAndUpdateNextPC(instruction, *next_pc);
+//             // predictedBranch |= searchBTBAndUpdateNextPC(instruction, *next_pc);
 
-///////////////////////
-            DynInstPtr instruction = buildInst(tid, staticInst, curMacroop,
-                                            this_pc, *next_pc, 0, true, true);
-
-            set(next_pc, this_pc);
-
-            // If we're branching after this instruction, quit fetching
-            // from the same block.
-            predictedBranch |= this_pc.branching();
-            predictedBranch |= lookupAndUpdateNextPC(instruction, *next_pc);
-            // predictedBranch |= searchBTBAndUpdateNextPC(instruction, *next_pc);
-
-/////////////////////
+// /////////////////////
 
             ppFetch->notify(instruction);
             numInst++;
@@ -1853,6 +1993,8 @@ Fetch::fetch(bool &status_change)
             // Move to the next instruction, unless we have a branch.
             set(this_pc, *next_pc);
             inRom = isRomMicroPC(this_pc.microPC());
+            // The current BB to fetch from
+            curBB = getCurrentFetchTarget(tid, status_change);
 
             if (newMacro) {
                 fetchAddr = this_pc.instAddr() & pc_mask;
@@ -1873,9 +2015,11 @@ Fetch::fetch(bool &status_change)
                  numInst < fetchWidth &&
                  fetchQueue[tid].size() < fetchQueueSize);
 
-        // Re-evaluate whether the next instruction to fetch is in micro-op ROM
-        // or not.
+        // Re-evaluate whether the next instruction to fetch is
+        // (1) in micro-op ROM or not and (2) in the
         inRom = isRomMicroPC(this_pc.microPC());
+        // The current BB to fetch from
+        curBB = getCurrentFetchTarget(tid, status_change);
     }
 
     if (predictedBranch) {

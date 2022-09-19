@@ -110,6 +110,20 @@ class BPredUnit : public SimObject
     virtual bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                  PCStateBase &pc, ThreadID tid);
 
+
+    /**
+     * Checks if the pre-decoded instruction matches the predicted
+     * instruction type. If so update the information with the new.
+     * In case the types dont match something is wrong and we need
+     * to squash. (should not be the case.)
+     * @param seq_num The branches sequence that we want to update.
+     * @param inst The new pre-decoded branch instruction.
+     * @param tid The thread id.
+     * @return Returns if the update was successful.
+     */
+    bool updateStaticInst(const InstSeqNum &seqNum,
+                          const StaticInstPtr &inst, ThreadID tid);
+
     // /**
     //  * Lookup the BTB to check if the given PC is a branch instruction
     //  * The BTB will also provide the static instruction information
@@ -394,7 +408,7 @@ class BPredUnit : public SimObject
         BranchClass type = BranchClass::NoBranch;
 
         /** The branch instrction */
-        const StaticInstPtr inst;
+        StaticInstPtr inst;
     };
 
     typedef std::deque<PredictorHistory> History;
