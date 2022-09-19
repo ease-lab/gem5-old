@@ -142,6 +142,11 @@ InstTrace::traceBranch(const DynInstConstPtr& dynInst)
     pkt.set_taken(actually_taken);
     pkt.set_pred_taken(pred_taken);
 
+    pkt.set_fe_tick(dynInst->fetchTick);
+    pkt.set_de_tick(dynInst->decodeTick);
+    pkt.set_is_tick(dynInst->issueTick);
+    pkt.set_co_tick(dynInst->commitTick);
+
     // Write the message to the protobuf output stream
     traceStream->write(pkt);
 }
@@ -153,15 +158,43 @@ InstTrace::traceMemRef(const DynInstConstPtr& dynInst)
     //       dynInst->pcState().instAddr(),
     //       dynInst->staticInst->disassemble(dynInst->pcState().instAddr()));
 
-    auto pc_addr = dynInst->pcState().instAddr();
-    auto addr = dynInst->effAddr;
-    auto paddr = dynInst->physEffAddr;
+    uint64_t pc_addr = dynInst->pcState().instAddr();
+    uint64_t addr = dynInst->effAddr;
+    uint64_t paddr = dynInst->physEffAddr;
     std::string type = dynInst->isLoad() ? "ld" : "st";
+    MemType mtype = dynInst->isLoad() ? Inst::MemRead : Inst::MemWrite;
+
+    bool use_stack = false;
+    for (int i = 0; i < dynInst->numSrcRegs(); i++) {
+        if (dynInst->srcRegIdx(i) == X86ISA::int_reg::Rsp) {
+            use_stack = true;
+            break;
+        }
+    }
+
 
 
     DPRINTFR(InstTrace, "[%s]: Mem | 0x%08x %s -> 0x%08x (0x%08x). | %s.\n",
         name(), pc_addr, type, addr, paddr,
         dynInst->staticInst->disassemble(pc_addr));
+
+    ProtoMessage::InstRecord pkt;
+    pkt.set_pc(pc_addr);
+    pkt.set_tick(curTick());
+    pkt.set_type(Inst::Mem);
+    pkt.set_mtype(mtype);
+    pkt.set_p_addr(paddr);
+    pkt.set_v_addr(addr);
+    pkt.set_use_stack(use_stack);
+
+    pkt.set_fe_tick(dynInst->fetchTick);
+    pkt.set_de_tick(dynInst->decodeTick);
+    pkt.set_is_tick(dynInst->issueTick);
+    pkt.set_co_tick(dynInst->commitTick);
+
+
+    // Write the message to the protobuf output stream
+    traceStream->write(pkt);
 
 }
 

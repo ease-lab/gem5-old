@@ -59,6 +59,13 @@ message InstRecord {
     Other = 3;
   }
 
+  enum MemType
+  {
+    NoMem = 0;
+    MemRead = 1;
+    MemWrite = 2;
+  }
+
   enum BranchType
   {
     NoBranch = 0;
@@ -76,19 +83,26 @@ message InstRecord {
   required uint64 pc = 1;
   required uint64 tick = 2;
   required InstType type = 3 [default = INVALID];
-  optional uint64 p_addr = 4;
-  optional uint32 size = 5;
-  optional uint32 flags = 6;
-  optional uint64 v_addr = 7;
+  optional uint64 mtype = 4;
+  optional uint64 p_addr = 5;
+  optional uint32 size = 6;
+  optional uint32 flags = 7;
+  optional uint64 v_addr = 8;
 
   // Whether the instruction is traced at fetch or commit
-  optional bool is_fetch = 8;
+  optional bool is_fetch = 9;
+
+  // Different time stamps
+  optional uint32 fe_tick = 10;
+  optional uint32 de_tick = 11;
+  optional uint32 is_tick = 12;
+  optional uint32 co_tick = 13;
 
   // Branch data:
-  optional BranchType brtype = 9;
-  optional uint64 target = 10;
-  optional bool taken = 11;
-  optional bool pred_taken = 12;
+  optional BranchType brtype = 14;
+  optional uint64 target = 15;
+  optional bool taken = 16;
+  optional bool pred_taken = 17;
 
 
   // optional InstType type = 6; // add, mul, fp add, load, store, simd add, …

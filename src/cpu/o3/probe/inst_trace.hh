@@ -65,6 +65,7 @@ class InstTrace : public ProbeListenerObject
 
     /** Trace record types corresponding to instruction node types */
     typedef ProtoMessage::InstRecord::InstType InstType;
+    typedef ProtoMessage::InstRecord::MemType MemType;
     typedef ProtoMessage::InstRecord::BranchType BranchType;
     typedef ProtoMessage::InstRecord Inst;
     typedef enums::BranchClass BranchClass;
