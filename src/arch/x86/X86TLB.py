@@ -46,6 +46,7 @@ class X86PagetableWalker(ClockedObject):
 
     port = RequestPort("Port for the hardware table walker")
     system = Param.System(Parent.any, "system object")
+    delay = Param.Cycles(1, "Delay of page walk step")
     num_squash_per_cycle = Param.Unsigned(4,
             "Number of outstanding walks that can be squashed per cycle")
 
