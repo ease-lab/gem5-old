@@ -282,7 +282,7 @@ class Commit
     void propagateInterrupt();
 
     /** Commits as many instructions as possible. */
-    void commitInsts();
+    unsigned commitInsts();
 
     /** Tries to commit the head ROB instruction passed in.
      * @param head_inst The instruction to be committed.
@@ -464,6 +464,11 @@ class Commit
     struct CommitStats : public statistics::Group
     {
         CommitStats(CPU *cpu, Commit *commit);
+
+        /** Stat for the total cycles instructions where commited. */
+        statistics::Scalar cyclesInstCommited;
+        /** Stat for the total cycles no instructions where commited. */
+        statistics::Scalar cyclesNoInstCommited;
         /** Stat for the total number of squashed instructions discarded by
          * commit.
          */

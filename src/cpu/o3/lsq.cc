@@ -83,7 +83,8 @@ LSQ::LSQ(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params)
       maxSQEntries(maxLSQAllocation(lsqPolicy, SQEntries, params.numThreads,
                   params.smtLSQThreshold)),
       dcachePort(this, cpu_ptr),
-      numThreads(params.numThreads)
+      numThreads(params.numThreads),
+      numTranslationInFlight(0)
 {
     assert(numThreads > 0 && numThreads <= MaxThreads);
 
@@ -710,6 +711,52 @@ LSQ::isStalled(ThreadID tid)
         return thread[tid].isStalled();
 }
 
+
+bool
+LSQ::hasL1Miss()
+{
+    std::list<ThreadID>::iterator threads = activeThreads->begin();
+    std::list<ThreadID>::iterator end = activeThreads->end();
+
+    while (threads != end) {
+        ThreadID tid = *threads++;
+
+        if (thread[tid].hasL1Miss())
+            return true;
+    }
+    return false;
+}
+
+bool
+LSQ::hasL1Miss(ThreadID tid)
+{
+    return thread[tid].hasL1Miss();
+}
+
+bool
+LSQ::hasTLBMiss()
+{
+    std::list<ThreadID>::iterator threads = activeThreads->begin();
+    std::list<ThreadID>::iterator end = activeThreads->end();
+
+    while (threads != end) {
+        ThreadID tid = *threads++;
+
+        if (thread[tid].hasTLBMiss())
+            return true;
+    }
+    return false;
+}
+
+bool
+LSQ::hasTLBMiss(ThreadID tid)
+{
+    return thread[tid].hasTLBMiss();
+}
+
+
+
+
 bool
 LSQ::hasStoresToWB()
 {
@@ -830,10 +877,12 @@ LSQ::pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
         inst->getFault() = NoFault;
 
         request->initiateTranslation();
+        numTranslationInFlight++;
     }
 
     /* This is the place were instructions get the effAddr. */
     if (request->isTranslationComplete()) {
+        numTranslationInFlight--;
         if (request->isMemAccessRequired()) {
             inst->effAddr = request->getVaddr();
             inst->effSize = size;

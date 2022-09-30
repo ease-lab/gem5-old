@@ -114,6 +114,7 @@ CPU::CPU(const BaseO3CPUParams &params)
       globalSeqNum(1),
       system(params.system),
       lastRunningCycle(curCycle()),
+      frontendStall(false), backendStall(false), commitStall(false),
       cpuStats(this)
 {
     fatal_if(FullSystem && params.numThreads > 1,
@@ -345,6 +346,10 @@ CPU::CPUStats::CPUStats(CPU *cpu)
       ADD_STAT(totalIpc, statistics::units::Rate<
                     statistics::units::Count, statistics::units::Cycle>::get(),
                "IPC: Total IPC of All Threads"),
+      ADD_STAT(backendStallCycles, statistics::units::Count::get(),
+               "Number cycles the backend cannot consume more instructions"),
+      ADD_STAT(frontendStallCycles, statistics::units::Count::get(),
+               "Number cycles the frontend does not have new instructions"),
       ADD_STAT(intRegfileReads, statistics::units::Count::get(),
                "Number of integer regfile reads"),
       ADD_STAT(intRegfileWrites, statistics::units::Count::get(),

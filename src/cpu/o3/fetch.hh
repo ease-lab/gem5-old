@@ -536,6 +536,9 @@ class Fetch
         // vectors and tracking on a per thread basis.
         /** Stat for total number of cycles stalled due to an icache miss. */
         statistics::Scalar icacheStallCycles;
+        /** Stat for total number of cycles stalled due to an icache miss.
+         * while the CPU is waiting for new instructions */
+        statistics::Scalar feIcacheStallCycles;
         /** Stat for total number of fetched instructions. */
         statistics::Scalar insts;
         /** Total number of fetched branches. */

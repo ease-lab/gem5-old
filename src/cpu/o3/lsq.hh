@@ -393,6 +393,17 @@ class LSQ
                  !flags.isSet(Flag::WritebackDone));
         }
 
+        bool
+        isAnyTranslationRequest() const
+        {
+            return numInTranslationFragments > 0;
+        }
+        bool
+        isAnyDataRequest() const
+        {
+            return _numOutstandingPackets > 0;
+        }
+
         /**
          * Test if the LSQRequest has been released, i.e. self-owned.
          * An LSQRequest manages itself when the resources on the LSQ are freed
@@ -815,6 +826,15 @@ class LSQ
      */
     bool isStalled(ThreadID tid);
 
+    /** Returns whether or not there is any out standing L1 demand miss. */
+    bool hasL1Miss();
+    bool hasL1Miss(ThreadID tid);
+
+    /** Returns whether or not there is any out standing translation */
+    bool hasTLBMiss();
+    bool hasTLBMiss(ThreadID tid);
+
+
     /** Returns whether or not there are any stores to write back to memory. */
     bool hasStoresToWB();
 
@@ -956,6 +976,9 @@ class LSQ
 
     /** Number of Threads. */
     ThreadID numThreads;
+
+    /** Number of outstanding translations in flight */
+    unsigned numTranslationInFlight;
 };
 
 } // namespace o3

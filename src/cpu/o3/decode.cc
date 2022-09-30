@@ -85,6 +85,7 @@ Decode::Decode(CPU *_cpu, const BaseO3CPUParams &params)
         bdelayDoneSeqNum[tid] = 0;
         squashInst[tid] = nullptr;
         squashAfterDelaySlot[tid] = 0;
+        waitForResteer[tid] = false;
     }
 }
 
@@ -142,7 +143,9 @@ Decode::DecodeStats::DecodeStats(CPU *cpu)
       ADD_STAT(decodedInsts, statistics::units::Count::get(),
                "Number of instructions handled by decode"),
       ADD_STAT(squashedInsts, statistics::units::Count::get(),
-               "Number of squashed instructions handled by decode")
+               "Number of squashed instructions handled by decode"),
+      ADD_STAT(resteerCycles, statistics::units::Count::get(),
+               "Number of cycles decode is idle after early resteer")
 {
     idleCycles.prereq(idleCycles);
     blockedCycles.prereq(blockedCycles);
@@ -154,6 +157,7 @@ Decode::DecodeStats::DecodeStats(CPU *cpu)
     controlMispred.prereq(controlMispred);
     decodedInsts.prereq(decodedInsts);
     squashedInsts.prereq(squashedInsts);
+    resteerCycles.prereq(resteerCycles);
 }
 
 void
@@ -293,6 +297,7 @@ Decode::squash(const DynInstPtr &inst, ThreadID tid)
     toFetch->decodeInfo[tid].squash = true;
     toFetch->decodeInfo[tid].doneSeqNum = inst->seqNum;
     set(toFetch->decodeInfo[tid].nextPC, *inst->branchTarget());
+    waitForResteer[tid] = true;
 
     // Looking at inst->pcState().branching()
     // may yield unexpected results if the branch
@@ -632,6 +637,9 @@ Decode::decodeInsts(ThreadID tid)
                 " early.\n",tid);
         // Should I change the status to idle?
         ++stats.idleCycles;
+        if (waitForResteer[tid]) {
+            ++stats.resteerCycles;
+        }
         return;
     } else if (decodeStatus[tid] == Unblocking) {
         DPRINTF(Decode, "[tid:%i] Unblocking, removing insts from skid "
@@ -639,6 +647,7 @@ Decode::decodeInsts(ThreadID tid)
         ++stats.unblockCycles;
     } else if (decodeStatus[tid] == Running) {
         ++stats.runCycles;
+        if (waitForResteer[tid]) { waitForResteer[tid] = false; }
     }
 
     std::queue<DynInstPtr>
@@ -688,9 +697,9 @@ Decode::decodeInsts(ThreadID tid)
         --insts_available;
 
 #if TRACING_ON
-        if (debug::O3PipeView) {
+        // if (debug::O3PipeView) {
             inst->decodeTick = curTick() - inst->fetchTick;
-        }
+        // }
 #endif
 
         // Ensure that if it was predicted as a branch, it really is a
@@ -712,6 +721,8 @@ Decode::decodeInsts(ThreadID tid)
         // direct conditional control that is predicted taken.
         if (inst->isDirectCtrl() &&
            (inst->isUncondCtrl() || inst->readPredTaken()))
+        // {
+        // if (inst->isDirectCtrl() && inst->isUncondCtrl())
         {
             ++stats.branchResolved;
 

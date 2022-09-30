@@ -545,6 +545,16 @@ class CPU : public BaseCPU
     /** Available thread ids in the cpu*/
     std::vector<ThreadID> tids;
 
+    bool frontendStall;
+    bool backendStall;
+    bool commitStall;
+
+    // /** CPU pushRequest function, forwards request to LSQ. */
+    // bool isMemAny() const
+    // {
+    //     return iew.ldstQueue.;
+    // }
+
     /** CPU pushRequest function, forwards request to LSQ. */
     Fault
     pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
@@ -595,6 +605,12 @@ class CPU : public BaseCPU
         statistics::Formula ipc;
         /** Stat for the total IPC. */
         statistics::Formula totalIpc;
+
+        /** Stats for cycles when allocation/rename stalls
+         * either due to the frontend has no more instructions or the
+         * backend cannot consume more. */
+        statistics::Scalar backendStallCycles;
+        statistics::Scalar frontendStallCycles;
 
         //number of integer register file accesses
         statistics::Scalar intRegfileReads;

@@ -1304,6 +1304,34 @@ LSQUnit::dumpInsts() const
     cprintf("\n");
 }
 
+bool
+LSQUnit::hasTLBMiss() const
+{
+    for (auto& e: loadQueue) {
+        if (e.hasRequest()) {
+            const LSQRequest* req = e.request();
+            if (req->isAnyTranslationRequest()) {
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool
+LSQUnit::hasL1Miss() const
+{
+    for (auto& e: loadQueue) {
+        if (e.hasRequest()) {
+            const LSQRequest* req = e.request();
+            if (req->isAnyDataRequest()) {
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
 void LSQUnit::schedule(Event& ev, Tick when) { cpu->schedule(ev, when); }
 
 BaseMMU *LSQUnit::getMMUPtr() { return cpu->mmu; }

@@ -161,6 +161,9 @@ Fetch::FetchStatGroup::FetchStatGroup(CPU *cpu, Fetch *fetch)
     : statistics::Group(cpu, "fetch"),
     ADD_STAT(icacheStallCycles, statistics::units::Cycle::get(),
              "Number of cycles fetch is stalled on an Icache miss"),
+    ADD_STAT(feIcacheStallCycles, statistics::units::Cycle::get(),
+             "Number of cycles fetch is stalled on Icache miss while BE has "
+             "no work to be done"),
     ADD_STAT(insts, statistics::units::Count::get(),
              "Number of instructions fetch has processed"),
     ADD_STAT(branches, statistics::units::Count::get(),
@@ -212,6 +215,8 @@ Fetch::FetchStatGroup::FetchStatGroup(CPU *cpu, Fetch *fetch)
 {
         icacheStallCycles
             .prereq(icacheStallCycles);
+        feIcacheStallCycles
+            .prereq(feIcacheStallCycles);
         insts
             .prereq(insts);
         branches
@@ -520,6 +525,9 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &next_pc)
         inst->setPredTaken(false);
         return false;
     }
+
+    // quick hack
+    // auto target = inst->branchTarget();
 
     ThreadID tid = inst->threadNumber;
     predict_taken = branchPred->predict(inst->staticInst, inst->seqNum,
@@ -1146,8 +1154,12 @@ Fetch::fetch(bool &status_change)
 
             fetchCacheLine(fetchAddr, tid, this_pc.instAddr());
 
-            if (fetchStatus[tid] == IcacheWaitResponse)
+            if (fetchStatus[tid] == IcacheWaitResponse) {
                 ++fetchStats.icacheStallCycles;
+                if (cpu->frontendStall) {
+                    ++fetchStats.feIcacheStallCycles;
+                }
+            }
             else if (fetchStatus[tid] == ItlbWait)
                 ++fetchStats.tlbCycles;
             else
@@ -1277,9 +1289,9 @@ Fetch::fetch(bool &status_change)
             numInst++;
 
 #if TRACING_ON
-            if (debug::O3PipeView) {
+            // if (debug::O3PipeView) {
                 instruction->fetchTick = curTick();
-            }
+            // }
 #endif
 
             set(next_pc, this_pc);
@@ -1574,8 +1586,10 @@ Fetch::profileStall(ThreadID tid)
         DPRINTF(Fetch, "[tid:%i] Fetch is squashing!\n", tid);
     } else if (fetchStatus[tid] == IcacheWaitResponse) {
         ++fetchStats.icacheStallCycles;
-        DPRINTF(Fetch, "[tid:%i] Fetch is waiting cache response!\n",
-                tid);
+        DPRINTF(Fetch, "[tid:%i] Fetch is waiting cache response!\n", tid);
+        if (cpu->frontendStall) {
+            ++fetchStats.feIcacheStallCycles;
+        }
     } else if (fetchStatus[tid] == ItlbWait) {
         ++fetchStats.tlbCycles;
         DPRINTF(Fetch, "[tid:%i] Fetch is waiting ITLB walk to "

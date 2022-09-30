@@ -459,6 +459,8 @@ class Rename
     /** The maximum skid buffer size. */
     unsigned skidBufferMax;
 
+    bool waitForResteer[MaxThreads];
+
     /** Enum to record the source of a structure full stall.  Can come from
      * either ROB, IQ, LSQ, and it is priortized in that order.
      */
@@ -493,6 +495,11 @@ class Rename
         statistics::Scalar runCycles;
         /** Stat for total number of cycles spent unblocking. */
         statistics::Scalar unblockCycles;
+        /** Stats for cycles when allocation/rename stalls
+         * either due to the frontend has no more instructions or the
+         * backend cannot consume more. */
+        statistics::Scalar backendStallCycles;
+        statistics::Scalar frontendStallCycles;
         /** Stat for total number of renamed instructions. */
         statistics::Scalar renamedInsts;
         /** Stat for total number of squashed instructions that rename
@@ -532,6 +539,9 @@ class Rename
         statistics::Scalar tempSerializing;
         /** Number of instructions inserted into skid buffers. */
         statistics::Scalar skidInsts;
+        /** Stat for total number cycles between detecting an incorrect
+         * branch and the next instruction is arriving from fetch. */
+        statistics::Scalar resteerCycles;
     } stats;
 };
 
