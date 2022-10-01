@@ -43,6 +43,7 @@
 
 #include "arch/generic/decoder.hh"
 #include "arch/generic/mmu.hh"
+#include "arch/generic/pcstate.hh"
 #include "base/statistics.hh"
 #include "base/refcnt.hh"
 #include "config/the_isa.hh"
@@ -309,10 +310,10 @@ class Fetch
      *******************************************************************/
     //
 
-    class BasicBlock : public RefCounted
+    class BasicBlock
     {
       public:
-        BasicBlock(ThreadID _tid, const PCStateBase &_start_pc);
+        BasicBlock(ThreadID _tid, const PCStateBase &_start_pc, InstSeqNum seqNum);
         // ~BasicBlock();
       private:
         /* Start address of the basic block */
@@ -334,12 +335,32 @@ class Fetch
         /* Basic Block size */
         unsigned size() { return endAddress() - startAddress(); }
 
+        bool isInBB(Addr addr) {
+            return addr >= startAddress() && addr < endAddress();
+        }
+
+        bool isTerminal(Addr addr) {
+            return addr == endAddress();
+        }
+
+        bool isTerminalBranch(Addr addr) {
+            return (addr == endAddress()) && is_branch;
+        }
+
+        bool hasExceeded(Addr addr) {
+            return addr > endAddress();
+        }
+
 
 
         ThreadID getTid() { return tid; }
 
         /* List of sequence numbers created for the BB */
         std::list<InstSeqNum> seqNumbers;
+        InstSeqNum startSeqNum;
+        unsigned seq_num_iter = 0;
+        InstSeqNum brSeqNum;
+
 
         // /** The branch that terminate the BB */
         // DynInstPtr terminalBranch;
@@ -353,13 +374,25 @@ class Fetch
         const PCStateBase &readStartPC() { return *startPC; }
         const PCStateBase &readEndPC() { return *endPC; }
 
-        /* Whether the determining branch is taken or not.*/
+        /** Whether the determining instruction is a branch
+         *  In case its a branch if it is taken or not.*/
+        bool is_branch;
         bool taken;
-        bool brSeqNum;
+
         // std::unique_ptr<PCStateBase> targetAddr;
 
         void addSeqNum(InstSeqNum seqNum) { seqNumbers.push_back(seqNum); }
-        void addTerminalBranch(const PCStateBase &br_pc, InstSeqNum seq,
+
+        InstSeqNum getNextSeqNum() {
+            seq_num_iter++;
+            assert((startSeqNum + seq_num_iter) < brSeqNum);
+            return startSeqNum + seq_num_iter;
+        }
+
+        void addTerminal(const PCStateBase &br_pc, InstSeqNum seq,
+                          bool _is_branch, bool pred_taken,
+                          const PCStateBase &pred_pc);
+        void addTerminalNoBranch(const PCStateBase &br_pc, InstSeqNum seq,
                                bool pred_taken, const PCStateBase &pred_pc);
     };
 
@@ -390,7 +423,7 @@ class Fetch
 
 
 
-    typedef RefCountingPtr<BasicBlock> BasicBlockPtr;
+    typedef std::shared_ptr<BasicBlock> BasicBlockPtr;
     // using BasicBlockPtr = BasicBlock*;
 
    typedef std::deque<BasicBlockPtr> FetchTargetQueue;
@@ -398,9 +431,24 @@ class Fetch
    FetchTargetQueue ftq[MaxThreads];
     const unsigned ftqSize = 8;
 
+    void dumpFTQ(ThreadID tid);
+    bool updateFTQStatus(ThreadID tid);
+
 
     BasicBlockPtr basicBlockProduce[MaxThreads];
     BasicBlockPtr basicBlockConsume[MaxThreads];
+
+
+    bool ftqValid(ThreadID tid, bool &status_change) {
+        // If the FTQ is empty wait unit its filled upis available.
+        if (ftq[tid].empty()){
+            // DPRINTF(Fetch, "[tid:%i] FTQ is empty\n", tid);
+            fetchStatus[tid] = FTQEmpty;
+            status_change = true;
+            return false;
+        }
+        return true;
+    }
 
 
     /** Feed the fetch target queue.
@@ -411,6 +459,33 @@ class Fetch
     /** The decoupled PC used by the BPU to generate fetch targets
      *
      */
+    class BpuPCState : public GenericISA::UPCState<1>
+    {
+      protected:
+        using Base = GenericISA::UPCState<1>;
+        // uint8_t _size;
+
+      public:
+        // BpuPCState(const BpuPCState &other) : Base(other), _size(other._size) {}
+        BpuPCState(const BpuPCState &other) : Base(other) {}
+
+        BpuPCState &operator=(const BpuPCState &other) = default;
+        BpuPCState() {}
+        explicit BpuPCState(Addr val) { set(val); }
+        void advance() override
+        {
+            Base::advance();
+        }
+        void
+        update(const PCStateBase &other) override
+        {
+            Base::update(other);
+        }
+    };
+
+    // using BpuPCState = GenericISA::UPCState<1>;
+    typedef std::unique_ptr<BpuPCState> BpuPCStatePtr;
+
     std::unique_ptr<PCStateBase> bpuPC[MaxThreads];
 
     // Addr decoupledOffset[MaxThreads];
@@ -423,7 +498,7 @@ class Fetch
         const PCStateBase &next_pc, bool trace);
 
 
-    DynInstPtr getInstrFromBB(BasicBlockPtr bb, StaticInstPtr staticInst,
+    DynInstPtr getInstrFromBB(ThreadID tid, StaticInstPtr staticInst,
             StaticInstPtr curMacroop, const PCStateBase &this_pc,
             PCStateBase &next_pc);
 
@@ -492,6 +567,9 @@ class Fetch
     /** Squashes a specific thread and resets the PC. */
     void doSquash(const PCStateBase &new_pc, const DynInstPtr squashInst,
             ThreadID tid);
+
+    /** Squashes the FTQ for a specific thread and resets the PC. */
+    void doFTQSquash(const PCStateBase &new_pc, ThreadID tid);
 
     /** Squashes a specific thread and resets the PC. Also tells the CPU to
      * remove any instructions between fetch and decode
@@ -694,6 +772,9 @@ class Fetch
 
     /** List of Active Threads */
     std::list<ThreadID> *activeThreads;
+
+    /** List of Active FTQ Threads */
+    std::list<ThreadID> *activeFTQThreads;
 
     /** Number of threads. */
     ThreadID numThreads;

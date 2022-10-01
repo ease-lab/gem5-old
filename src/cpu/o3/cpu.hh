@@ -280,6 +280,10 @@ class CPU : public BaseCPU
 
     /** Get the current instruction sequence number, and increment it. */
     InstSeqNum getAndIncrementInstSeq() { return globalSeqNum++; }
+    InstSeqNum getAndIncrementFTSeq() {
+      globalSeqNum += 256;
+      return globalSeqNum;
+    }
 
     /** Traps to handle given fault. */
     void trap(const Fault &fault, ThreadID tid, const StaticInstPtr &inst);
