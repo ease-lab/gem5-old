@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2022 The University of Edinburgh
  * Copyright (c) 2004-2005 The Regents of The University of Michigan
  * All rights reserved.
  *
@@ -26,17 +27,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __CPU_PRED_BTB_HH__
-#define __CPU_PRED_BTB_HH__
+#ifndef __CPU_PRED_SIMPLE_BTB_HH__
+#define __CPU_PRED_SIMPLE_BTB_HH__
 
-
-#include "arch/generic/pcstate.hh"
-#include "base/statistics.hh"
+#include "base/logging.hh"
+#include "base/types.hh"
 #include "config/the_isa.hh"
-#include "cpu/static_inst.hh"
-#include "enums/BranchClass.hh"
-#include "params/BranchTargetBuffer.hh"
-#include "sim/sim_object.hh"
+#include "cpu/pred/btb.hh"
+#include "params/SimpleBTB.hh"
 
 namespace gem5
 {
@@ -44,8 +42,21 @@ namespace gem5
 namespace branch_prediction
 {
 
-class BranchTargetBuffer : public SimObject
+class SimpleBTB : public BranchTargetBuffer
 {
+  public:
+    SimpleBTB(const SimpleBTBParams &params);
+
+    void reset() override;
+    const PCStateBase *lookup(ThreadID tid, Addr instPC,
+                           BranchClass type = BranchClass::NoBranch) override;
+    bool valid(ThreadID tid, Addr instPC,
+                           BranchClass type = BranchClass::NoBranch) override;
+    void update(ThreadID tid, Addr instPC, const PCStateBase &target_pc,
+                           BranchClass type = BranchClass::NoBranch,
+                           StaticInstPtr inst = nullptr) override;
+
+
   private:
     struct BTBEntry
     {
@@ -62,77 +73,7 @@ class BranchTargetBuffer : public SimObject
         bool valid = false;
     };
 
-  public:
-    typedef BranchTargetBufferParams Params;
-    typedef enums::BranchClass BranchClass;
 
-    BranchTargetBuffer(const Params &params);
-
-    virtual void reset() = 0;
-
-    /** Looks up an address in the BTB. Must call valid() first on the address.
-     *  @param inst_PC The address of the branch to look up.
-     *  @return Returns the target of the branch.
-     */
-    virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
-                            BranchClass type = BranchClass::NoBranch) = 0;
-
-    /** Checks if a branch is in the BTB.
-     *  @param inst_PC The address of the branch to look up.
-     *  @param inst Optional passing in the branch type for better statistics.
-     *  @return Whether or not the branch exists in the BTB.
-     */
-    virtual bool valid(ThreadID tid, Addr instPC,
-                            BranchClass type = BranchClass::NoBranch) = 0;
-
-    /** Updates the BTB with the target of a branch.
-     *  @param inst_pc The address of the branch being updated.
-     *  @param target_pc The target address of the branch.
-     */
-    virtual void update(ThreadID tid, Addr inst_pc,
-                          const PCStateBase &target_pc,
-                          BranchClass type = BranchClass::NoBranch,
-                          StaticInstPtr inst = nullptr) = 0;
-
-    /** Update BTB statistics
-     */
-    virtual void incorrectTarget(BranchClass type = BranchClass::NoBranch)
-    {
-      stats.mispredict++;
-      if (type != BranchClass::NoBranch) {
-        stats.mispredictType[type]++;
-      }
-    }
-
-    /** Number of the threads for which the branch history is maintained. */
-    const unsigned numThreads;
-
-    struct BranchTargetBufferStats : public statistics::Group
-    {
-        BranchTargetBufferStats(statistics::Group *parent);
-
-        /** Stat for number of BTB lookups. */
-        statistics::Scalar lookups;
-        statistics::Vector lookupType;
-        /** Stat for number of BTB misses. */
-        statistics::Scalar misses;
-        statistics::Vector missType;
-        /** Stat for number for the ratio between BTB misses and lookups. */
-        statistics::Formula missRatio;
-        /** Stat for number of BTB updates. */
-        statistics::Scalar updates;
-        statistics::Vector updateType;
-        /** Stat for number of BTB updates. */
-        statistics::Scalar evictions;
-        statistics::Vector evictionType;
-        /** Stat for number BTB mispredictions.
-         * No target found or target wrong */
-        statistics::Scalar mispredict;
-        statistics::Vector mispredictType;
-
-    } stats;
-
-  private:
     /** Returns the index into the BTB, based on the branch's PC.
      *  @param inst_PC The branch to look up.
      *  @return Returns the index into the BTB.
@@ -173,4 +114,4 @@ class BranchTargetBuffer : public SimObject
 } // namespace branch_prediction
 } // namespace gem5
 
-#endif // __CPU_PRED_BTB_HH__
+#endif // __CPU_PRED_SIMPLE_BTB_HH__

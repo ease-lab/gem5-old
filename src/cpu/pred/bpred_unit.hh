@@ -137,10 +137,22 @@ class BPredUnit : public SimObject
      * @param corr_target The correct branch target.
      * @param actually_taken The correct branch direction.
      * @param tid The thread id.
+     * @param inst The static instruction that caused the misprediction
      */
     void squash(const InstSeqNum &squashed_sn,
                 const PCStateBase &corr_target,
                 bool actually_taken, ThreadID tid);
+
+    void squash(const InstSeqNum &squashed_sn,
+                const PCStateBase &corr_target,
+                bool actually_taken, ThreadID tid,
+                StaticInstPtr inst, const PCStateBase &pc);
+
+  protected:
+    void regProbePoints() override;
+
+    // @todo: Rename this function.
+    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
     /**
      * @param bp_history Pointer to the history object.  The predictor
@@ -186,6 +198,29 @@ class BPredUnit : public SimObject
     {
         return BTB.lookup(inst_pc, 0);
     }
+
+    /**
+     * Looks up a given PC in the BTB to get current static instruction
+     * information. This is necessary in a decoupled frontend as
+     * the information does not usually exist at that this point.
+     * Only for instructions (branches) that hit in the BTB this information
+     * is available as the BTB stores them together with the target.
+     *
+     * @param inst_PC The PC to look up.
+     * @return The static instruction info of the given PC if existant.
+     */
+    const StaticInstPtr
+    BTBLookupInst(Addr instPC, ThreadID tid)
+    {
+        return btb->lookupInst(tid, instPC);
+    }
+    const StaticInstPtr
+    BTBLookupInst(PCStateBase &instPC, ThreadID tid)
+    {
+        return BTBLookupInst(instPC.instAddr(), tid);
+    }
+
+
 
     /**
      * Updates the BP with taken/not taken information.

@@ -143,6 +143,7 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     // up once it's done.
 
     bool pred_taken = false;
+
     std::unique_ptr<PCStateBase> target(pc.clone());
 
     stats.lookups[tid]++;
@@ -190,7 +191,7 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
         predict_record.wasUncond = true;
     }
 
-    if (pred_taken) {
+    if (orig_pred_taken) {
         stats.dirPredTakenType[tid][brType]++;
     } else {
         stats.dirPredNotTakenType[tid][brType]++;
@@ -451,6 +452,49 @@ BPredUnit::squash(const InstSeqNum &squashed_sn, ThreadID tid)
     }
 }
 
+
+
+void
+BPredUnit::squash(const InstSeqNum &squashed_sn,
+                  const PCStateBase &corr_target,
+                  bool actually_taken, ThreadID tid,
+                  StaticInstPtr inst, const PCStateBase &pc)
+{
+    History &pred_hist = predHist[tid];
+
+    DPRINTF(Branch, "[tid:%i] Squashing and dummy prediction for sequence "
+            "number %i, setting target to %s\n",
+            tid, squashed_sn, corr_target);
+
+    // dump();
+
+    // Squash All Branches AFTER this mispredicted branch
+    squash(squashed_sn, tid);
+
+    auto hist_it = pred_hist.begin();
+
+    // If there's no history of this branch the BPU did not detect it.
+    // we need to make a dummy prediction so that it created the history.
+    if (hist_it == pred_hist.end() || hist_it->seqNum != squashed_sn) {
+        DPRINTF(Branch, "No Branch history found for for sn %i. "
+                    "Make dummy prediction to create one.\n",
+                    pred_hist.front().seqNum);
+
+
+        // Create a dummy PC with the current one
+        // we dont care what the BP is predicting as
+        // we fix it anyway in a moment.
+        std::unique_ptr<PCStateBase> next_pc(pc.clone());
+        predict(inst, squashed_sn, *next_pc, tid);
+    }
+
+
+    // Now do the actual squash with the function below
+    squash(squashed_sn, corr_target, actually_taken, tid);
+
+}
+
+
 void
 BPredUnit::squash(const InstSeqNum &squashed_sn,
                   const PCStateBase &corr_target,
@@ -481,12 +525,29 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
     // Squash All Branches AFTER this mispredicted branch
     squash(squashed_sn, tid);
 
+
+    auto hist_it = pred_hist.begin();
+
+    // // If there's no history of this branch the BPU did not detect it.
+    // // we need to make a dummy prediction so that it created the history.
+    // if (hist_it == pred_hist.end() || hist_it->seqNum != squashed_sn) {
+    //     DPRINTF(Branch, "No Branch history found for for sn %i. "
+    //                 "Make dummy prediction to create one.\n",
+    //                 pred_hist.front().seqNum);
+
+    //     Addr pc =
+
+    //     predict(inst, squashed_sn, inst->p)
+    // }
+
+
     // If there's a squash due to a syscall, there may not be an entry
     // corresponding to the squash.  In that case, don't bother trying to
     // fix up the entry.
     if (!pred_hist.empty()) {
 
-        auto hist_it = pred_hist.begin();
+
+
         //HistoryIt hist_it = find(pred_hist.begin(), pred_hist.end(),
         //                       squashed_sn);
 
@@ -615,7 +676,8 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         "PC %#x\n", tid, squashed_sn,
                         hist_it->seqNum, hist_it->pc);
 
-            btb->update(tid, hist_it->pc, corr_target, hist_it->type);
+            btb->update(tid, hist_it->pc, corr_target,
+                             hist_it->type, hist_it->inst);
 
 
 

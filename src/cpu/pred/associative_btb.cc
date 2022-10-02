@@ -142,9 +142,27 @@ AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
     return nullptr;
 }
 
+const StaticInstPtr
+AssociativeBTB::lookupInst(ThreadID tid, Addr instPC)
+{
+    uint64_t idx = getIndex(tid, instPC);
+    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
+
+    if (entry != nullptr && entry->tid == tid) {
+        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
+                     __func__, instPC, idx);
+
+        // The access was done earlier so it should not be necessary right?
+        // btb.accessEntry(entry);
+        return entry->inst;
+    }
+    return nullptr;
+}
+
 void
 AssociativeBTB::update(ThreadID tid, Addr instPC,
-                    const PCStateBase &target, BranchClass type)
+                    const PCStateBase &target,
+                    BranchClass type, StaticInstPtr inst)
 {
     stats.updates++;
     if (type != BranchClass::NoBranch) {
@@ -169,6 +187,7 @@ AssociativeBTB::update(ThreadID tid, Addr instPC,
 
     entry->tid = tid;
     set(entry->target, &target);
+    entry->inst = inst;
     // entry->target = &target;
 }
 
