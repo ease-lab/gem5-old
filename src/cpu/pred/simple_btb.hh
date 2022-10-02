@@ -53,7 +53,8 @@ class SimpleBTB : public BranchTargetBuffer
     bool valid(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
     void update(ThreadID tid, Addr instPC, const PCStateBase &target_pc,
-                           BranchClass type = BranchClass::NoBranch) override;
+                           BranchClass type = BranchClass::NoBranch,
+                           StaticInstPtr inst = nullptr) override;
 
 
   private:

@@ -689,11 +689,15 @@ Fetch::produceFetchTargets(bool &status_change)
 
     // The current PC.
     PCStateBase &this_pc = *bpuPC[tid];
-    std::unique_ptr<PCStateBase> next_pc(this_pc.clone());
-    std::unique_ptr<PCStateBase> old_pc(this_pc.clone());
-    BpuPCStatePtr tmp_pc = std::make_unique<BpuPCState>();
-    BpuPCStatePtr tmp_pc2 = std::make_unique<BpuPCState>();
+    // std::unique_ptr<PCStateBase> old_pc(this_pc.clone());
 
+
+    // Create two temporal branches that will be used fot the branch
+    // predictor to search each individual address.
+    BpuPCStatePtr search_pc = std::make_unique<BpuPCState>();
+    BpuPCStatePtr search_pc_tmp = std::make_unique<BpuPCState>();
+    search_pc->update(this_pc);
+    search_pc_tmp->update(this_pc);
 
     // // BasicBlockPtr curBB = basicBlockProduce[tid];
     // // BasicBlockPtr curBB = NULL;
@@ -723,47 +727,58 @@ Fetch::produceFetchTargets(bool &status_change)
 
 
 
-    tmp_pc->update(this_pc);
-    tmp_pc2->update(this_pc);
+
 
     // DynInstPtr inst = buildInstPlaceholder();
 
     // Loop through the predicted instruction stream and try to find the
     // the terminating branch.
     seqNum = cpu->getAndIncrementFTSeq();
-    while ((numAddrSearched < searchWidth) && !branchFound) {
+    while (numAddrSearched < searchWidth) {
 
         // Start by creating a new sequence number
         // seqNum = cpu->getAndIncrementInstSeq();
-        curAddr = tmp_pc->instAddr();
-        tmp_pc2->update(*tmp_pc);
+        curAddr = search_pc->instAddr();
+
+        // search_pc_tmp->update(*search_pc);
 
         // Check if the current search address can be found in the BTB
         // indicating the end of the branch.
-        branchFound = branchPred->BTBValid(this_pc, tid);
+        branchFound = branchPred->BTBValid(curAddr, tid);
 
-        if (!branchFound) {
-
-            // Not a branch instruction
-            // - Add the sequence number to the basic block
-            // - Add always two sequence numbers
-            // - Advance the PC.
-            // - Continue searching.
-            //
-            // curBB->addSeqNum(seqNum);
-            // curBB->addSeqNum(cpu->getAndIncrementInstSeq());
-            tmp_pc->advance();
-
-            // this_pc.advance();
-            numAddrSearched++;
-
-            DPRINTF(Fetch, "[tid:%i] [sn:%llu] No branch instruction PC %#x "
-                           "Next PC: %#x\n",
-                            tid, seqNum, curAddr, tmp_pc->instAddr());
+        // If its a branch stop searching
+        if (branchFound) {
+            break;
         }
+
+        // Not a branch instruction
+        // - Add the sequence number to the basic block
+        // - Add always two sequence numbers
+        // - Advance the PC.
+        // - Continue searching.
+        //
+        // curBB->addSeqNum(seqNum);
+        // curBB->addSeqNum(cpu->getAndIncrementInstSeq());
+        search_pc->advance();
+
+        // this_pc.advance();
+        numAddrSearched++;
+
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] No branch instruction PC %#x "
+                        "Next PC: %#x\n",
+                        tid, seqNum, curAddr, search_pc->instAddr());
     }
-    set(this_pc, *tmp_pc);
-    set(old_pc, *tmp_pc2);
+
+    // Update the current PC to point to the last instruction
+    // in the fetch target
+    set(this_pc, *search_pc);
+    // Depending on the branch prediction we might need
+    // std::unique_ptr<PCStateBase> next_pc(this_pc.clone());
+
+
+
+
+    // set(old_pc, *tmp_pc2);
 
     // Search stopped either by a branch found in instruction stream
     // or the maximum search width per cycle was reached.
@@ -787,7 +802,7 @@ Fetch::produceFetchTargets(bool &status_change)
         // Now predict the direction. Note the BP will advance
         // the PC to the next instruction.
         predict_taken = branchPred->predict(staticInst, seqNum,
-                                            *next_pc, tid);
+                                            *search_pc, tid);
 
         // DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch found at PC %#x "
         //         "predicted: %s, target: %s\n",
@@ -797,7 +812,7 @@ Fetch::produceFetchTargets(bool &status_change)
         if (predict_taken) {
             DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %s "
                     "predicted to be taken to %s\n",
-                    tid, seqNum, this_pc, *next_pc);
+                    tid, seqNum, this_pc, *search_pc);
         } else {
             DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %s "
                     "predicted to be not taken\n",
@@ -812,25 +827,24 @@ Fetch::produceFetchTargets(bool &status_change)
             ++fetchStats.predictedBranches;
         }
 
-        // Finalize BB and insert in FTQ.
-        DPRINTF(Fetch, "[tid:%i] [sn:%llu] BB:%#x end with PC:%#x. Size:%ib"
-                "Start next BB at addr:%#x in next cycle",
-                tid, seqNum, curBB, curAddr, curBB->size(),
-                next_pc->instAddr());
+        // // Finalize BB and insert in FTQ.
+        // DPRINTF(Fetch, "[tid:%i] [sn:%llu] BB:%#x end with PC:%#x. Size:%ib "
+        //                     "Start next BB at addr:%#x in next cycle\n",
+        //         tid, seqNum, curBB, curAddr, curBB->size(),
+        //         next_pc->instAddr());
 
-        // Add the branch instruction to the BB and insert it in FTQ.
-        // curBB->addTerminalBranch(inst);
-        curBB->addTerminal(this_pc, seqNum, true, predict_taken, *next_pc);
+        // // Add the branch instruction to the BB and insert it in FTQ.
+        // // curBB->addTerminalBranch(inst);
+        // curBB->addTerminal(this_pc, seqNum, true, predict_taken, *next_pc);
 
     } else {
 
-        DPRINTF(Fetch, "[tid:%i] [sn:%llu] %i addresses searched. "
-                "No branch found. Continue with BB:%#x+1 at addr:%#x in next cycle\n",
-                tid, seqNum, numAddrSearched, curBB, this_pc.instAddr());
+        // Not a branch therefore we will continue the next FT at the
+        // next address
+        search_pc->advance();
 
-        // Add a dummy instruction to the BB and insert it in FTQ.
-        curBB->addTerminal(*old_pc, seqNum, false, false, this_pc);
     }
+
 
 
         // // curBB->taken = predict_taken;
@@ -842,6 +856,9 @@ Fetch::produceFetchTargets(bool &status_change)
         // inst->setPredTaken(predict_taken);
 
 
+
+    // Add a dummy instruction to the BB and insert it in FTQ.
+    curBB->addTerminal(this_pc, seqNum, branchFound, predict_taken, *search_pc);
 
     ftq[tid].push_back(curBB);
     DPRINTF(Fetch, "Add BB:%#x(%i) to FTQ. FTQ size:%i\n",
@@ -858,6 +875,15 @@ Fetch::produceFetchTargets(bool &status_change)
         fetchStatus[tid] = Running;
         status_change = true;
     }
+
+
+    DPRINTF(Fetch, "[tid:%i] [sn:%llu] %i addresses searched. "
+                "Branch found:%i. Continue at addr:%#x in next cycle\n",
+                tid, seqNum, numAddrSearched, branchFound, search_pc->instAddr());
+
+
+    // Finally set the BPU PC to the next FT in the next cycle
+    set(this_pc, *search_pc);
 
     dumpFTQ(tid);
 
@@ -1487,7 +1513,9 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
             fromCommit->commitInfo[tid].mispredictInst->isControl()) {
             branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
                     *fromCommit->commitInfo[tid].pc,
-                    fromCommit->commitInfo[tid].branchTaken, tid);
+                    fromCommit->commitInfo[tid].branchTaken, tid,
+                    fromCommit->commitInfo[tid].mispredictInst->staticInst,
+                    fromCommit->commitInfo[tid].mispredictInst->pcState());
             fetchStats.branchMisspredict++;
         } else {
             branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
@@ -1517,7 +1545,9 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
         if (fromDecode->decodeInfo[tid].branchMispredict) {
             branchPred->squash(fromDecode->decodeInfo[tid].doneSeqNum,
                     *fromDecode->decodeInfo[tid].nextPC,
-                    fromDecode->decodeInfo[tid].branchTaken, tid);
+                    fromDecode->decodeInfo[tid].branchTaken, tid,
+                    fromDecode->decodeInfo[tid].mispredictInst->staticInst,
+                    fromDecode->decodeInfo[tid].mispredictInst->pcState());
         } else {
             branchPred->squash(fromDecode->decodeInfo[tid].doneSeqNum,
                               tid);

@@ -168,10 +168,16 @@ class BPredUnit : public SimObject
      * @param corr_target The correct branch target.
      * @param actually_taken The correct branch direction.
      * @param tid The thread id.
+     * @param inst The static instruction that caused the misprediction
      */
     virtual void squash(const InstSeqNum &squashed_sn,
                 const PCStateBase &corr_target,
                 bool actually_taken, ThreadID tid);
+
+    void squash(const InstSeqNum &squashed_sn,
+                const PCStateBase &corr_target,
+                bool actually_taken, ThreadID tid,
+                StaticInstPtr inst, const PCStateBase &pc);
 
   protected:
     void regProbePoints() override;
@@ -258,6 +264,23 @@ class BPredUnit : public SimObject
     {
         return BTBLookupInst(instPC.instAddr(), tid);
     }
+
+    // /**
+    //  * Inserts a given branch PC into the
+    //  *
+    //  * @param inst_PC The PC to look up.
+    //  * @return The static instruction info of the given PC if existant.
+    //  */
+    // const StaticInstPtr
+    // BTBLookupInst(Addr instPC, ThreadID tid)
+    // {
+    //     return btb->lookupInst(tid, instPC);
+    // }
+    // const StaticInstPtr
+    // BTBLookupInst(PCStateBase &instPC, ThreadID tid)
+    // {
+    //     return BTBLookupInst(instPC.instAddr(), tid);
+    // }
 
 
 

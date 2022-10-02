@@ -84,7 +84,8 @@ class BranchTargetBuffer : public SimObject
      */
     virtual void update(ThreadID tid, Addr inst_pc,
                           const PCStateBase &target_pc,
-                          BranchClass type = BranchClass::NoBranch) = 0;
+                          BranchClass type = BranchClass::NoBranch,
+                          StaticInstPtr inst = nullptr) = 0;
 
     /** Update BTB statistics
      */

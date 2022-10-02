@@ -139,7 +139,8 @@ SimpleBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
 
 void
 SimpleBTB::update(ThreadID tid, Addr instPC,
-                    const PCStateBase &target, BranchClass type)
+                    const PCStateBase &target,
+                    BranchClass type, StaticInstPtr inst)
 {
     unsigned btb_idx = getIndex(instPC, tid);
 
