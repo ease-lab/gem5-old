@@ -336,7 +336,7 @@ class Fetch
         unsigned size() { return endAddress() - startAddress(); }
 
         bool isInBB(Addr addr) {
-            return addr >= startAddress() && addr < endAddress();
+            return addr >= startAddress() && addr <= endAddress();
         }
 
         bool isTerminal(Addr addr) {
@@ -394,6 +394,13 @@ class Fetch
                           const PCStateBase &pred_pc);
         void addTerminalNoBranch(const PCStateBase &br_pc, InstSeqNum seq,
                                bool pred_taken, const PCStateBase &pred_pc);
+
+        std::string print() {
+          std::stringstream ss;
+          ss << "BB[sn:" << startSeqNum << "]: "
+             << *startPC << "->" << *endPC << "";
+          return ss.str();
+        }
     };
 
     struct FetchTarget
@@ -441,12 +448,25 @@ class Fetch
 
     bool ftqValid(ThreadID tid, bool &status_change) {
         // If the FTQ is empty wait unit its filled upis available.
-        if (ftq[tid].empty()){
+        // Need at least two cycles for now.
+        if (ftq[tid].empty()) {
             // DPRINTF(Fetch, "[tid:%i] FTQ is empty\n", tid);
             fetchStatus[tid] = FTQEmpty;
             status_change = true;
             return false;
         }
+        return true;
+    }
+    bool inFTQHead(ThreadID tid, Addr pc) {
+        if (ftq[tid].empty()) {
+            return false;
+        }
+
+      if (!ftq[tid].front()->isInBB(pc)) {
+          // DPRINTF(Fetch, "[tid:%i] PC:%#x not within FT!\n",
+          //     tid, pc);
+          return false;
+      }
         return true;
     }
 

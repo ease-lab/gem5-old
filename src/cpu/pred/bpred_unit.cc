@@ -438,16 +438,23 @@ BPredUnit::updateStaticInst(const InstSeqNum &seqNum,
 
     for (auto& hist : predHist[tid]) {
         if (hist.seqNum == seqNum) {
+
+            DPRINTF(Branch, "[tid:%i] [sn:%llu] hit sn: %s ? %s\n"
+                    , tid, seqNum,
+                    toStr(getBranchClass(hist.inst)),
+                    toStr(getBranchClass(inst)));
+
+
             if (getBranchClass(hist.inst) == getBranchClass(inst)) {
                 DPRINTF(Branch, "[tid:%i] [sn:%llu] Update static instr "
                         "from pre-decode\n", tid, seqNum);
                 hist.inst = inst;
+                return true;
             }
             DPRINTF(Branch, "[tid:%i] [sn:%llu] Update static instr "
                         "fail: types dont match!\n", tid, seqNum);
         }
     }
-    assert(false);
     return false;
 }
 
@@ -825,8 +832,8 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
 
             DPRINTF(Branch,"[tid:%i] [squash sn:%llu] "
                     "BTB Update called for [sn:%llu] "
-                    "PC %#x\n", tid, squashed_sn,
-                    hist_it->seqNum, hist_it->pc);
+                    "PC %#x -> T: %#x\n", tid, squashed_sn,
+                    hist_it->seqNum, hist_it->pc, corr_target);
 
             btb->update(tid, hist_it->pc, corr_target,
                              hist_it->type, hist_it->inst);
