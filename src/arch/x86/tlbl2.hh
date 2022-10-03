@@ -33,19 +33,21 @@
  * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * Authors: Gabe Black
  */
 
-#ifndef __ARCH_X86_TLB_HH__
-#define __ARCH_X86_TLB_HH__
+#ifndef __ARCH_X86_TLBL2_HH__
+#define __ARCH_X86_TLBL2_HH__
 
 #include <list>
 #include <vector>
 
 #include "arch/generic/tlb.hh"
 #include "arch/x86/pagetable.hh"
+#include "arch/x86/tlb.hh"
 #include "base/trie.hh"
 #include "mem/request.hh"
-#include "params/X86TLB.hh"
 #include "params/X86TLBL2.hh"
 #include "sim/stats.hh"
 
@@ -58,7 +60,7 @@ namespace X86ISA
 {
     class Walker;
 
-    class TLB : public BaseTLB
+    class TLBL2 : public TLB
     {
       protected:
         friend class Walker;
@@ -69,88 +71,118 @@ namespace X86ISA
 
       public:
 
-        typedef X86TLBParams Params;
-        TLB(const Params &p);
-        TLB(const X86TLBL2Params &p);
+        typedef X86TLBL2Params Params;
+        TLBL2(const Params &p);
 
-        void takeOverFrom(BaseTLB *otlb) override {}
+        TlbEntry *lookup(Addr va, int &delay_cycles, bool update_lru = true);
 
-        virtual TlbEntry *lookup(Addr va, bool update_lru = true);
-
-        virtual void setConfigAddress(uint32_t addr);
-
-        enum TLBWalkerAction
-        {
-            PageWalk_4K, PageWalk_2M, Access_L2, L1_2M_Hit,
-                              PageWalk_2M_force_4K};
+        void setConfigAddress(uint32_t addr);
 
       protected:
-
-        EntryList::iterator lookupIt(Addr va, bool update_lru = true);
 
         Walker * walker;
 
       public:
         Walker *getWalker();
 
-        virtual void flushAll() override;
+        void flushAll() override;
 
-        virtual void flushNonGlobal();
+        void flushNonGlobal() override;
 
-        virtual void demapPage(Addr va, uint64_t asn) override;
+        void demapPage(Addr va, uint64_t asn) override;
+
+        enum TLBType {L1_4K, L1_2M, L2_4K, L2_2M, Miss};
 
       protected:
-        //L1 TLB
-        uint32_t size;
+        //L1 TLBL2
+        uint32_t size_l1_4k;
+        uint32_t size_l1_2m;
+        uint32_t size_l2;
 
-        std::vector<TlbEntry> tlb;
+        uint32_t assoc_l1_4k;
+        uint32_t assoc_l1_2m;
+        uint32_t assoc_l2;
+
+        uint32_t set_l1_4k;
+        uint32_t set_l1_2m;
+        uint32_t set_l2;
+
+        uint32_t set_bits_l1_4k;
+        uint32_t set_bits_l1_2m;
+        uint32_t set_bits_l2;
+
+        Tick walk_lat;
+        Tick l2_access_lat;
+
+        bool force_4KB_page;
+
+        std::vector<std::vector<TlbEntry*> > tlb_l1_4k;
+        std::vector<std::vector<TlbEntry*> > tlb_l1_2m;
+        std::vector<std::vector<TlbEntry*> > tlb_l2;
 
         EntryList freeList;
 
         TlbEntryTrie trie;
         uint64_t lruSeq;
 
-        AddrRange m5opRange;
 
-        struct TlbStats : public statistics::Group
-        {
-            TlbStats(statistics::Group *parent);
 
-            statistics::Scalar rdAccesses;
-            statistics::Scalar wrAccesses;
-            statistics::Scalar rdMisses;
-            statistics::Scalar wrMisses;
-        } stats;
+        Fault translateInt(bool read, RequestPtr req, ThreadContext *tc);
 
-        virtual Fault translateInt(bool read, RequestPtr req,
-                                              ThreadContext *tc);
-
-        virtual Fault translate(const RequestPtr &req, ThreadContext *tc,
+        Fault translate(const RequestPtr &req, ThreadContext *tc,
                 BaseMMU::Translation *translation, BaseMMU::Mode mode,
                 bool &delayedResponse, bool timing);
 
+        // Inflight translation context
+        bool transInflight;
+        ThreadContext *inflight_tc;
+        RequestPtr inflight_req;
+        BaseMMU::Mode inflight_mode;
+        BaseMMU::Translation *inflight_trans;
+        EventFunctionWrapper walkCompleteEvent;
+
+        int getIndex(Addr va, TLBType type);
+
       public:
-        virtual void inc_walk_cycles(Tick cycles) { };
-        virtual void inc_l2_access_cycles(Tick cycles) { };
-        virtual void inc_walks() {};
-        virtual void inc_squashed_walks(unsigned num) {};
-        virtual void inc_coalesced_walks(unsigned num) {};
 
-        virtual void evictLRU();
+        // void inc_walk_cycles(Tick cycles)
+        // {
+        //     walkCycles += cycles;
+        // }
 
-        virtual uint64_t
+        // void inc_l2_access_cycles(Tick cycles)
+        // {
+        //     l2_access_cycles += cycles;
+        // }
+
+        // void inc_walks()
+        // {
+        //     walks++;
+        // }
+
+        // void inc_squashed_walks(unsigned num_squashed)
+        // {
+        //     squashedWalks+=num_squashed;
+        // }
+
+        // void inc_coalesced_walks(unsigned num)
+        // {
+        //     coalescedWalks+=num;
+        // }
+
+        void completeTranslation();
+
+        uint64_t
         nextSeq()
         {
             return ++lruSeq;
         }
 
-        virtual Fault translateAtomic(
+        Fault translateAtomic(
             const RequestPtr &req, ThreadContext *tc,
             BaseMMU::Mode mode) override;
-        virtual Fault translateFunctional(
-            const RequestPtr &req, ThreadContext *tc,
-            BaseMMU::Mode mode) override;
-        virtual void translateTiming(
+
+        void translateTiming(
             const RequestPtr &req, ThreadContext *tc,
             BaseMMU::Translation *translation, BaseMMU::Mode mode) override;
 
@@ -167,20 +199,20 @@ namespace X86ISA
          * @param mode Request type (read/write/execute).
          * @return A fault on failure, NoFault otherwise.
          */
-        virtual Fault finalizePhysical(const RequestPtr &req,
-                                ThreadContext *tc,
-                                BaseMMU::Mode mode) const override;
+        Fault finalizePhysical(const RequestPtr &req, ThreadContext *tc,
+                               BaseMMU::Mode mode) const override;
 
-        virtual TlbEntry *insert(Addr vpn, const TlbEntry &entry);
+        TlbEntry *insert(Addr vpn, const TlbEntry &entry) override;
+        TlbEntry *insertInto(Addr vpn, const TlbEntry &entry, TLBType dest);
 
         // /*
         //  * Function to register Stats
         //  */
-        // virtual void regStats() override;
+        // void regStats() override;
 
         // Checkpointing
-//        virtual void serialize(CheckpointOut &cp) const override;
-//        virtual void unserialize(CheckpointIn &cp) override;
+//        void serialize(CheckpointOut &cp) const;
+//        void unserialize(CheckpointIn &cp);
 
         /**
          * Get the table walker port. This is used for
@@ -192,10 +224,29 @@ namespace X86ISA
          *
          * @return A pointer to the walker port
          */
-        virtual Port *getTableWalkerPort() override;
-    };
+        Port *getTableWalkerPort() override;
 
+    protected:
+      struct TlbL2Stats : public statistics::Group
+      {
+        TlbL2Stats(statistics::Group *parent);
+        // Statistics
+        statistics::Scalar l1_4k_hits;
+        statistics::Scalar l1_2m_hits;
+        statistics::Scalar l1_misses;
+
+        statistics::Scalar l2_4k_hits;
+        statistics::Scalar l2_2m_hits;
+        statistics::Scalar l2_misses;
+
+        statistics::Scalar l2_access_cycles;
+        statistics::Scalar walkCycles;
+        statistics::Scalar walks;
+        statistics::Scalar coalescedWalks;
+        statistics::Scalar squashedWalks;
+      } stats;
+    };
 } // namespace X86ISA
 } // namespace gem5
 
-#endif // __ARCH_X86_TLB_HH__
+#endif // __ARCH_X86_TLBL2_HH__

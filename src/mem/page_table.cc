@@ -37,6 +37,7 @@
 
 #include "base/compiler.hh"
 #include "base/trace.hh"
+// #include "debug/CHP.hh"
 #include "debug/MMU.hh"
 #include "sim/faults.hh"
 #include "sim/serialize.hh"
@@ -45,13 +46,24 @@ namespace gem5
 {
 
 void
-EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags)
+EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags,
+        bool largepage)
 {
     bool clobber = flags & Clobber;
-    // starting address must be page aligned
-    assert(pageOffset(vaddr) == 0);
+    int p_size;
+    if (largepage) {
+        p_size = largePageSize;
+        // starting address must be page aligned
+        assert(largePageOffset(vaddr) == 0);
+        flags |= LargePage_flag;
+    } else {
+        p_size = _pageSize;
+        // starting address must be page aligned
+        assert(pageOffset(vaddr) == 0);
+    }
 
-    DPRINTF(MMU, "Allocating Page: %#x-%#x\n", vaddr, vaddr + size);
+    DPRINTF(MMU, "Mapping Allocated Page: %#x-%#x isLarge: %c\n", vaddr,
+            vaddr + size, largepage ? 'y' : 'n');
 
     while (size > 0) {
         auto it = pTable.find(vaddr);
@@ -65,9 +77,9 @@ EmulationPageTable::map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags)
             pTable.emplace(vaddr, Entry(paddr, flags));
         }
 
-        size -= _pageSize;
-        vaddr += _pageSize;
-        paddr += _pageSize;
+        size -= p_size;
+        vaddr += p_size;
+        paddr += p_size;
     }
 }
 
@@ -134,9 +146,17 @@ EmulationPageTable::lookup(Addr vaddr)
 {
     Addr page_addr = pageAlign(vaddr);
     PTableItr iter = pTable.find(page_addr);
-    if (iter == pTable.end())
-        return nullptr;
-    return &(iter->second);
+    if (iter != pTable.end())
+        return &(iter->second); // 4KB translated
+
+    // Check 2MB translation!
+    page_addr = largePageAlign(vaddr);
+    iter = pTable.find(page_addr);
+    if (iter != pTable.end() && iter->second.isLargePageEntry()) {
+        return &(iter->second); // 2MB translated
+    }
+
+    return nullptr;
 }
 
 bool
@@ -147,7 +167,11 @@ EmulationPageTable::translate(Addr vaddr, Addr &paddr)
         DPRINTF(MMU, "Couldn't Translate: %#x\n", vaddr);
         return false;
     }
-    paddr = pageOffset(vaddr) + entry->paddr;
+    if (entry->isLargePageEntry()) {
+        paddr = largePageOffset(vaddr) + entry->paddr;
+    } else {
+        paddr = pageOffset(vaddr) + entry->paddr;
+    }
     DPRINTF(MMU, "Translating: %#x->%#x\n", vaddr, paddr);
     return true;
 }

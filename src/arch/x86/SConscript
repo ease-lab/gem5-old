@@ -58,8 +58,17 @@ Source('pagetable_walker.cc', tags='x86 isa')
 Source('process.cc', tags='x86 isa')
 Source('remote_gdb.cc', tags='x86 isa')
 Source('tlb.cc', tags='x86 isa')
+Source('tlbl2.cc', tags='x86 isa')
 Source('types.cc', tags='x86 isa')
 Source('utility.cc', tags='x86 isa')
+
+
+# DebugFlag('Faults', "Trace all faults/exceptions/traps", tags='x86 isa')
+# DebugFlag('PageTableWalker', \
+#             "Page table walker state machine debugging", tags='x86 isa')
+DebugFlag('CHP', "CHP debugging", tags='x86 isa')
+
+
 
 SimObject('X86SeWorkload.py', sim_objects=['X86EmuLinux'], tags='x86 isa')
 SimObject('X86FsWorkload.py',
@@ -70,7 +79,8 @@ SimObject('X86ISA.py', sim_objects=['X86ISA'], tags='x86 isa')
 SimObject('X86LocalApic.py', sim_objects=['X86LocalApic'], tags='x86 isa')
 SimObject('X86MMU.py', sim_objects=['X86MMU'], tags='x86 isa')
 SimObject('X86NativeTrace.py', sim_objects=['X86NativeTrace'], tags='x86 isa')
-SimObject('X86TLB.py', sim_objects=['X86PagetableWalker', 'X86TLB'],
+SimObject('X86TLB.py', sim_objects=['X86PagetableWalker', 'X86TLB','X86TLBL2'],
+# SimObject('X86TLB.py', sim_objects=['X86PagetableWalker', 'X86TLB'],
     tags='x86 isa')
 
 SimObject('X86CPU.py', sim_objects=[], tags='x86 isa')

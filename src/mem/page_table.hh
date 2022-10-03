@@ -60,6 +60,11 @@ class EmulationPageTable : public Serializable
 
         Entry(Addr paddr, uint64_t flags) : paddr(paddr), flags(flags) {}
         Entry() {}
+
+        bool isLargePageEntry () const
+        {
+            return flags & LargePage_flag;
+        }
     };
 
   protected:
@@ -70,6 +75,9 @@ class EmulationPageTable : public Serializable
     const Addr _pageSize;
     const Addr offsetMask;
 
+    const Addr largePageSize;
+    const Addr largeOffsetMask;
+
     const uint64_t _pid;
     const std::string _name;
 
@@ -78,6 +86,7 @@ class EmulationPageTable : public Serializable
     EmulationPageTable(
             const std::string &__name, uint64_t _pid, Addr _pageSize) :
             _pageSize(_pageSize), offsetMask(mask(floorLog2(_pageSize))),
+            largePageSize(1L<<21), largeOffsetMask(mask(21)),
             _pid(_pid), _name(__name), shared(false)
     {
         assert(isPowerOf2(_pageSize));
@@ -92,12 +101,14 @@ class EmulationPageTable : public Serializable
      * bit 0 - no-clobber | clobber
      * bit 2 - cacheable  | uncacheable
      * bit 3 - read-write | read-only
+     * bit 4 - regular pg | largepage
      */
     enum MappingFlags : uint32_t
     {
         Clobber     = 1,
         Uncacheable = 4,
         ReadOnly    = 8,
+        LargePage_flag   =16,
     };
 
     // flag which marks the page table as shared among software threads
@@ -114,6 +125,9 @@ class EmulationPageTable : public Serializable
     // ignore that for now.
     Addr pageSize()   { return _pageSize; }
 
+    Addr largePageAlign(Addr a)  { return (a & ~largeOffsetMask); }
+    Addr largePageOffset(Addr a) { return (a &  largeOffsetMask); }
+
     /**
      * Maps a virtual memory region to a physical memory region.
      * @param vaddr The starting virtual address of the region.
@@ -122,7 +136,8 @@ class EmulationPageTable : public Serializable
      * @param flags Generic mapping flags that can be set by or-ing values
      *              from MappingFlags enum.
      */
-    virtual void map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags = 0);
+    virtual void map(Addr vaddr, Addr paddr, int64_t size, uint64_t flags = 0,
+            bool largepage = false);
     virtual void remap(Addr vaddr, int64_t size, Addr new_vaddr);
     virtual void unmap(Addr vaddr, int64_t size);
 

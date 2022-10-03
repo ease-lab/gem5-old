@@ -43,8 +43,10 @@
 #include "arch/generic/mmu.hh"
 #include "arch/x86/pagetable.hh"
 #include "arch/x86/tlb.hh"
+#include "arch/x86/tlbl2.hh"
 #include "base/types.hh"
 #include "mem/packet.hh"
+#include "mem/page_table.hh"
 #include "params/X86PagetableWalker.hh"
 #include "sim/clocked_object.hh"
 #include "sim/faults.hh"
@@ -115,6 +117,9 @@ namespace X86ISA
             bool retrying;
             bool started;
             bool squashed;
+            bool fixed_lat;
+            Tick walk_lat;
+            TLB::TLBWalkerAction action;
           public:
             WalkerState(Walker * _walker, BaseMMU::Translation *_translation,
                         const RequestPtr &_req, bool _isFunctional = false) :
@@ -122,7 +127,9 @@ namespace X86ISA
                 nextState(Ready), inflight(0),
                 translation(_translation),
                 functional(_isFunctional), timing(false),
-                retrying(false), started(false), squashed(false)
+                retrying(false), started(false), squashed(false),
+                fixed_lat(_walker->fixed_lat), walk_lat(_walker->walk_lat),
+                action(_walker->action)
             {
             }
             void initState(ThreadContext * _tc, BaseMMU::Mode _mode,
@@ -137,6 +144,9 @@ namespace X86ISA
             void retry();
             void squash();
             std::string name() const {return walker->name();}
+
+            TLB::TLBWalkerAction getAction() { return action; }
+            Tick getLatency() { return walk_lat; }
 
           private:
             void setupWalk(Addr vaddr);
@@ -175,16 +185,25 @@ namespace X86ISA
         System * sys;
         RequestorID requestorId;
 
+        // Variables to ddo fixed/latency emulated table walks
+        bool fixed_lat;
+        Tick walk_lat;
+        TLB::TLBWalkerAction action;
+
         // The number of outstanding walks that can be squashed per cycle.
         unsigned numSquashable;
 
         // Wrapper for checking for squashes before starting a translation.
         void startWalkWrapper();
+        void finishedFixedLatWalk();
+        int coalesceWalkRequests(Addr vpn, bool isLarge,
+                const EmulationPageTable::Entry *pte);
 
         /**
          * Event used to call startWalkWrapper.
          **/
         EventFunctionWrapper startWalkWrapperEvent;
+        EventFunctionWrapper fixedLatEvent;
 
         // Functions for dealing with packets.
         bool recvTimingResp(PacketPtr pkt);
@@ -198,14 +217,18 @@ namespace X86ISA
             tlb = _tlb;
         }
 
-        using Params = X86PagetableWalkerParams;
+        void setLatAndAction(Tick lat, TLB::TLBWalkerAction action);
+
+        typedef X86PagetableWalkerParams Params;
 
         Walker(const Params &params) :
             ClockedObject(params), port(name() + ".port", this),
             funcState(this, NULL, NULL, true), tlb(NULL), sys(params.system),
             requestorId(sys->getRequestorId(this)),
+            fixed_lat(false), walk_lat(0UL),
             numSquashable(params.num_squash_per_cycle),
-            startWalkWrapperEvent([this]{ startWalkWrapper(); }, name())
+            startWalkWrapperEvent([this]{ startWalkWrapper(); }, name()),
+            fixedLatEvent([this]{ finishedFixedLatWalk(); }, name())
         {
         }
     };

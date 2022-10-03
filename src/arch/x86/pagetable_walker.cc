@@ -59,9 +59,12 @@
 #include "base/trie.hh"
 #include "cpu/base.hh"
 #include "cpu/thread_context.hh"
+// #include "debug/CHP.hh"
 #include "debug/PageTableWalker.hh"
 #include "mem/packet_access.hh"
+#include "mem/page_table.hh"
 #include "mem/request.hh"
+#include "sim/process.hh"
 
 namespace gem5
 {
@@ -101,11 +104,180 @@ Walker::startFunctional(ThreadContext * _tc, Addr &addr, unsigned &logBytes,
     return funcState.startFunctional(addr, logBytes);
 }
 
+void
+Walker::setLatAndAction(Tick lat, TLB::TLBWalkerAction _action)
+{
+    fixed_lat = true;
+    walk_lat = lat;
+    action = _action;
+    DPRINTF(PageTableWalker, "Turning on Fixed latency to %lu ticks\n", lat);
+}
+
 bool
 Walker::WalkerPort::recvTimingResp(PacketPtr pkt)
 {
     return walker->recvTimingResp(pkt);
 }
+
+void
+Walker::finishedFixedLatWalk()
+{
+    WalkerState *currState = currStates.front();
+    currStates.pop_front();
+
+    Process *p = currState->tc->getProcessPtr();
+    VAddr vaddr = currState->entry.vaddr;
+    Addr alignedVaddr = p->pTable->pageAlign(vaddr);
+    const EmulationPageTable::Entry *pte = p->pTable->lookup(vaddr);
+    bool insertLarge = false;
+
+    TLB::TLBWalkerAction action = currState->getAction();
+    Tick walk_lat = currState->getLatency();
+
+
+    int logbytes = 12;
+    if (action == TLB::PageWalk_2M || action == TLB::PageWalk_2M_force_4K ||
+            action == TLB::L1_2M_Hit ||
+            (action == TLB::Access_L2 && pte->isLargePageEntry())) {
+        logbytes = 21;
+    }
+
+    if (action == TLB::PageWalk_4K) {
+        tlb->insert(alignedVaddr, TlbEntry(
+                    p->pTable->pid(), alignedVaddr, pte->paddr,
+                    pte->flags & EmulationPageTable::Uncacheable,
+                    pte->flags & EmulationPageTable::ReadOnly, insertLarge));
+        DPRINTF(PageTableWalker, "Inserting 4K page into TLB 0x%lx\n",
+                alignedVaddr);
+    } else if (action == TLB::PageWalk_2M) {
+        alignedVaddr = p->pTable->largePageAlign(vaddr);
+        insertLarge = true;
+        tlb->insert(alignedVaddr, TlbEntry(
+                    p->pTable->pid(), alignedVaddr, pte->paddr,
+                    pte->flags & EmulationPageTable::Uncacheable,
+                    pte->flags & EmulationPageTable::ReadOnly, insertLarge));
+        DPRINTF(PageTableWalker, "Inserting 2M page into TLB 0x%lx\n",
+                alignedVaddr);
+    } else if (action == TLB::PageWalk_2M_force_4K) {
+        int regPageOffset = p->pTable->largePageOffset(vaddr);
+        regPageOffset = p->pTable->pageAlign(regPageOffset);
+
+        tlb->insert(alignedVaddr, TlbEntry(
+                    p->pTable->pid(), alignedVaddr,
+                    pte->paddr + regPageOffset,
+                    pte->flags & EmulationPageTable::Uncacheable,
+                    pte->flags & EmulationPageTable::ReadOnly, insertLarge));
+        DPRINTF(PageTableWalker, "Inserting 2M forced 4KB page into TLB"
+                " %#x:%#x\n", alignedVaddr,
+                pte->paddr + regPageOffset);
+    }
+    DPRINTF(PageTableWalker, "Mapping %#x to %#x\n", alignedVaddr,
+                    pte->paddr);
+
+    Addr paddr = pte->paddr | (vaddr & mask(logbytes));
+    DPRINTF(PageTableWalker, "Translated %#x -> %#x.\n", vaddr, paddr);
+    currState->req->setPaddr(paddr);
+    if (pte->flags & EmulationPageTable::Uncacheable)
+        currState->req->setFlags(Request::UNCACHEABLE | Request::STRICT_ORDER);
+
+    tlb->finalizePhysical(currState->req, currState->tc, currState->mode);
+
+    DPRINTF(PageTableWalker, "Finishing translation\n");
+    currState->translation->finish(NoFault, currState->req, currState->tc,
+                                   currState->mode);
+    if (action == TLB::PageWalk_4K || action == TLB::PageWalk_2M ||
+            action == TLB::PageWalk_2M_force_4K) {
+        tlb->inc_walk_cycles(walk_lat);
+        tlb->inc_walks();
+        DPRINTF(PageTableWalker, "Walk latency incremented by %d\n", walk_lat);
+    } else if (action == TLB::Access_L2) {
+        tlb->inc_l2_access_cycles(walk_lat);
+        DPRINTF(PageTableWalker, "L2 TLB access latency added by %d cycles\n",
+                walk_lat);
+    }
+    //handle this state!
+    delete currState;
+
+    int ret = coalesceWalkRequests(alignedVaddr, insertLarge, pte);
+    tlb->inc_coalesced_walks(ret);
+
+    if (currStates.size() && !startWalkWrapperEvent.scheduled())
+            // delay sending any new requests until we are finished
+            // with the responses
+            schedule(startWalkWrapperEvent, clockEdge());
+}
+
+int
+Walker::coalesceWalkRequests(Addr servicedVpn, bool isLarge,
+        const EmulationPageTable::Entry *pte)
+{
+    //Coalesces all inflight page walk requests to the same TLB
+    //that was just serviced (the mapping is passed on via the pte variable
+    //Finalize the translation here
+    DPRINTF(PageTableWalker, "Starting coalesce check for addr %#x. "
+            "list size: %lu\n",
+            servicedVpn, currStates.size());
+
+    int count = 0;
+    for (auto it = currStates.begin(); it != currStates.end(); ) {
+        WalkerState *wState = *(it);
+        TLB::TLBWalkerAction action = wState->getAction();
+
+        if (action == TLB::PageWalk_4K || action == TLB::PageWalk_2M ||
+                action == TLB::PageWalk_2M_force_4K) {
+            Process *p = wState->tc->getProcessPtr();
+            Addr missAddr = wState->req->getVaddr();
+            Addr missVpn;
+            if (action == TLB::PageWalk_2M)
+                missVpn = p->pTable->largePageAlign(missAddr);
+            else
+                missVpn = p->pTable->pageAlign(missAddr);
+
+            DPRINTF(PageTableWalker, "missAddr: %#x, missVpn%#x\n", missAddr,
+                    missVpn);
+
+            if (servicedVpn == missVpn) {
+                //Coalesce hit!
+                count ++;
+
+                int logbytes = 12;
+                if (action == TLB::PageWalk_2M ||
+                        action == TLB::PageWalk_2M_force_4K)
+                    logbytes = 21;
+
+                Addr paddr = pte->paddr | (missAddr & mask(logbytes));
+
+                DPRINTF(PageTableWalker, "Coalesced pageWalk. "
+                        "Translated %#x -> %#x.\n", missAddr, paddr);
+                wState->req->setPaddr(paddr);
+                if (pte->flags & EmulationPageTable::Uncacheable)
+                    wState->req->setFlags(Request::UNCACHEABLE |
+                            Request::STRICT_ORDER);
+
+                tlb->finalizePhysical(wState->req, wState->tc, wState->mode);
+
+                DPRINTF(PageTableWalker, "Finishing translation\n");
+                wState->translation->finish(NoFault, wState->req,
+                        wState->tc, wState->mode);
+
+                it = currStates.erase(it);
+                delete wState;
+                continue; // prevent it++ from being called
+            } else {
+                DPRINTF(PageTableWalker, "Failed to coalesce pageWalk %#x, "
+                        "%#x.\n", missAddr, missVpn);
+            }
+        } else {
+            DPRINTF(PageTableWalker, "Wrong action: %d, addr: %#x\n",
+                    action, wState->req->getVaddr());
+        }
+        it++;
+    }
+
+    return count;
+}
+
+
 
 bool
 Walker::recvTimingResp(PacketPtr pkt)
@@ -224,6 +396,7 @@ Walker::startWalkWrapper()
     }
     if (currState && !currState->wasStarted())
         currState->startWalk();
+    tlb->inc_squashed_walks(num_squashed);
 }
 
 Fault
@@ -544,6 +717,11 @@ Walker::WalkerState::endWalk()
 void
 Walker::WalkerState::setupWalk(Addr vaddr)
 {
+    if (fixed_lat) {
+        nextState = Ready;
+        entry.vaddr = vaddr;
+        return;
+    }
     VAddr addr = vaddr;
     CR3 cr3 = tc->readMiscRegNoEffect(misc_reg::Cr3);
     // Check if we're in long mode or not
@@ -657,6 +835,13 @@ Walker::WalkerState::sendPackets()
     //If we're already waiting for the port to become available, just return.
     if (retrying)
         return;
+
+    if (fixed_lat) {
+        assert(!walker->fixedLatEvent.scheduled());
+        walker->schedule(walker->fixedLatEvent,
+                         curTick() + walk_lat * walker->clockPeriod());
+        return;
+    }
 
     //Reads always have priority
     if (read) {
