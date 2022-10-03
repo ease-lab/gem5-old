@@ -41,95 +41,81 @@ package ProtoMessage;
 // Packet header with the identifier describing what object captured
 // the trace, the version of this file format, and the tick frequency
 // for all the packet time stamps.
-message InstHeader {
+message InstTraceHeader {
   required string obj_id = 1;
   required uint32 ver = 2 [default = 0];
   required uint64 tick_freq = 3;
   required bool has_mem = 4;
+  required bool has_fetch = 5;
 }
 
-message Inst {
-  required uint64 pc = 1;
-
-  // Either inst or inst_bytes must be used, but never both. That should be
-  // enforced by the oneof keyword, but that's not supported in all versions
-  // of protobuf syntax we need to work with for now.
-  optional fixed32 inst = 2;
-  optional bytes inst_bytes = 9;
-
-  optional uint32 nodeid = 3;
-  optional uint32 cpuid = 4;
-  optional fixed64 tick = 5;
+message InstRecord {
 
   enum InstType
   {
-    No_OpClass = 0;
-    IntAlu = 1;
-    IntMult = 2;
-    IntDiv = 3;
-    FloatAdd = 4;
-    FloatCmp = 5;
-    FloatCvt = 6;
-    FloatMult = 7;
-    FloatMultAcc = 8;
-    FloatDiv = 9;
-    FloatMisc = 10;
-    FloatSqrt = 11;
-    SimdAdd = 12;
-    SimdAddAcc = 13;
-    SimdAlu = 14;
-    SimdCmp = 15;
-    SimdCvt = 16;
-    SimdMisc = 17;
-    SimdMult = 18;
-    SimdMultAcc = 19;
-    SimdShift = 20;
-    SimdShiftAcc = 21;
-    SimdDiv = 22;
-    SimdSqrt = 23;
-    SimdFloatAdd = 24;
-    SimdFloatAlu = 25;
-    SimdFloatCmp = 26;
-    SimdFloatCvt = 27;
-    SimdFloatDiv = 28;
-    SimdFloatMisc = 29;
-    SimdFloatMult = 30;
-    SimdFloatMultAcc = 31;
-    SimdFloatSqrt = 32;
-    SimdReduceAdd = 33;
-    SimdReduceAlu = 34;
-    SimdReduceCmp = 35;
-    SimdFloatReduceAdd = 36;
-    SimdFloatReduceCmp = 37;
-    SimdAes = 38;
-    SimdAesMix = 39;
-    SimdSha1Hash = 40;
-    SimdSha1Hash2 = 41;
-    SimdSha256Hash = 42;
-    SimdSha256Hash2 = 43;
-    SimdShaSigma2 = 44;
-    SimdShaSigma3 = 45;
-    SimdPredAlu = 46;
-    MemRead = 47;
-    MemWrite = 48;
-    FloatMemRead = 49;
-    FloatMemWrite = 50;
-    IprAccess = 51;
-    InstPrefetch = 52;
-    Num_OpClass = 53;
+    INVALID = 0;
+    Mem = 1;
+    Control = 2;
+    Other = 3;
   }
 
-  optional InstType type = 6; // add, mul, fp add, load, store, simd add, …
-
-  // Deprecated:
-  optional uint32 inst_flags = 7; // execution mode information
-
-  // If the operation does one or more memory accesses
-  message MemAccess {
-      required uint64 addr = 1;
-      required uint32 size = 2;
-      optional uint32 mem_flags = 3;
+  enum MemType
+  {
+    NoMem = 0;
+    MemRead = 1;
+    MemWrite = 2;
   }
-  repeated MemAccess mem_access = 8;
+
+  enum BranchType
+  {
+    NoBranch = 0;
+    Return = 1;
+    CallDirect = 2;
+    CallIndirect = 3;
+    DirectCond = 4;
+    DirectUncond = 5;
+    IndirectCond = 6;
+    IndirectUncond = 7;
+    Num_BranchClass = 8;
+  }
+
+
+  required uint64 pc = 1;
+  required uint64 tick = 2;
+  required InstType type = 3 [default = INVALID];
+  optional uint64 mtype = 4;
+  optional uint64 p_addr = 5;
+  optional uint32 size = 6;
+  optional uint32 flags = 7;
+  optional uint64 v_addr = 8;
+
+  // Whether the instruction is traced at fetch or commit
+  optional bool is_fetch = 9;
+
+  // Different time stamps
+  optional uint32 fe_tick = 10;
+  optional uint32 de_tick = 11;
+  optional uint32 is_tick = 12;
+  optional uint32 co_tick = 13;
+
+  // Branch data:
+  optional BranchType brtype = 14;
+  optional uint64 target = 15;
+  optional bool taken = 16;
+  optional bool pred_taken = 17;
+
+
+  // optional InstType type = 6; // add, mul, fp add, load, store, simd add, …
+
+  // // Deprecated:
+  // optional uint32 inst_flags = 7; // execution mode information
+
+  // // If the operation does one or more memory accesses
+  // message MemAccess {
+  //     required uint64 addr = 1;
+  //     required uint32 size = 2;
+  //     optional uint32 mem_flags = 3;
+  // }
+  // repeated MemAccess mem_access = 8;
 }
 

@@ -67,6 +67,13 @@ class TAGEBase : public SimObject
   public:
     TAGEBase(const TAGEBaseParams &p);
     void init() override;
+    /* Reset the counter values of the TAGE tables for
+     * a specific range.
+     * @param start,end Start and end of the range of tables to reset.
+     *  start:end. 0:1 will reset only the bimodal predictor.
+     *             1:100 will reset all but bimodal predictor.
+     */
+    void reset(unsigned start = 0, unsigned end = 100);
 
   protected:
     // Prediction Structures

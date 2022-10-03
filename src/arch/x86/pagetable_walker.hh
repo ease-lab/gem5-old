@@ -193,6 +193,9 @@ namespace X86ISA
         // The number of outstanding walks that can be squashed per cycle.
         unsigned numSquashable;
 
+        /** Delay cycles */
+        const Cycles delay;
+
         // Wrapper for checking for squashes before starting a translation.
         void startWalkWrapper();
         void finishedFixedLatWalk();
@@ -208,7 +211,7 @@ namespace X86ISA
         // Functions for dealing with packets.
         bool recvTimingResp(PacketPtr pkt);
         void recvReqRetry();
-        bool sendTiming(WalkerState * sendingState, PacketPtr pkt);
+        bool sendTiming(WalkerState * sendingState, PacketPtr pkt,unsigned n);
 
       public:
 
@@ -227,6 +230,7 @@ namespace X86ISA
             requestorId(sys->getRequestorId(this)),
             fixed_lat(false), walk_lat(0UL),
             numSquashable(params.num_squash_per_cycle),
+            delay(params.delay),
             startWalkWrapperEvent([this]{ startWalkWrapper(); }, name()),
             fixedLatEvent([this]{ finishedFixedLatWalk(); }, name())
         {

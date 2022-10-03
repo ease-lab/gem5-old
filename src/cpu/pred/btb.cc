@@ -28,119 +28,74 @@
 
 #include "cpu/pred/btb.hh"
 
-#include "base/intmath.hh"
-#include "base/trace.hh"
-#include "debug/Fetch.hh"
-
 namespace gem5
 {
 
 namespace branch_prediction
 {
 
-DefaultBTB::DefaultBTB(unsigned _numEntries,
-                       unsigned _tagBits,
-                       unsigned _instShiftAmt,
-                       unsigned _num_threads)
-    : numEntries(_numEntries),
-      tagBits(_tagBits),
-      instShiftAmt(_instShiftAmt),
-      log2NumThreads(floorLog2(_num_threads))
+BranchTargetBuffer::BranchTargetBuffer(const Params &params)
+    : SimObject(params),
+      numThreads(params.numThreads),
+      stats(this)
 {
-    DPRINTF(Fetch, "BTB: Creating BTB object.\n");
+}
 
-    if (!isPowerOf2(numEntries)) {
-        fatal("BTB entries is not a power of 2!");
+BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
+                                                statistics::Group *parent)
+    : statistics::Group(parent),
+      ADD_STAT(lookups, statistics::units::Count::get(),
+               "Number of BTB lookups"),
+      ADD_STAT(lookupType, statistics::units::Count::get(),
+               "Number of BTB lookups per branch type"),
+      ADD_STAT(misses, statistics::units::Count::get(),
+               "Number of BTB misses"),
+      ADD_STAT(missType, statistics::units::Count::get(),
+               "Number of BTB misses per branch type"),
+      ADD_STAT(missRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
+               misses / lookups),
+      ADD_STAT(updates, statistics::units::Count::get(),
+               "Number of BTB updates"),
+      ADD_STAT(updateType, statistics::units::Count::get(),
+               "Number of BTB updates per branch type"),
+      ADD_STAT(evictions, statistics::units::Count::get(),
+               "Number of BTB evictions"),
+      ADD_STAT(evictionType, statistics::units::Count::get(),
+               "Number of BTB evictions per branch type"),
+      ADD_STAT(mispredict, statistics::units::Count::get(),
+               "Number of BTB mispredicts"),
+      ADD_STAT(mispredictType, statistics::units::Count::get(),
+               "Number of BTB mispredicts per branch type")
+{
+    using namespace statistics;
+    missRatio.precision(6);
+    lookupType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    missType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    updateType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    evictionType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    mispredictType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+    for (int i = 0; i < enums::Num_BranchClass; i++) {
+        lookupType.subname(i, enums::BranchClassStrings[i]);
+        missType.subname(i, enums::BranchClassStrings[i]);
+        updateType.subname(i, enums::BranchClassStrings[i]);
+        evictionType.subname(i, enums::BranchClassStrings[i]);
+        mispredictType.subname(i, enums::BranchClassStrings[i]);
     }
-
-    btb.resize(numEntries);
-
-    for (unsigned i = 0; i < numEntries; ++i) {
-        btb[i].valid = false;
-    }
-
-    idxMask = numEntries - 1;
-
-    tagMask = (1 << tagBits) - 1;
-
-    tagShiftAmt = instShiftAmt + floorLog2(numEntries);
-}
-
-void
-DefaultBTB::reset()
-{
-    for (unsigned i = 0; i < numEntries; ++i) {
-        btb[i].valid = false;
-    }
-}
-
-inline
-unsigned
-DefaultBTB::getIndex(Addr instPC, ThreadID tid)
-{
-    // Need to shift PC over by the word offset.
-    return ((instPC >> instShiftAmt)
-            ^ (tid << (tagShiftAmt - instShiftAmt - log2NumThreads)))
-            & idxMask;
-}
-
-inline
-Addr
-DefaultBTB::getTag(Addr instPC)
-{
-    return (instPC >> tagShiftAmt) & tagMask;
-}
-
-bool
-DefaultBTB::valid(Addr instPC, ThreadID tid)
-{
-    unsigned btb_idx = getIndex(instPC, tid);
-
-    Addr inst_tag = getTag(instPC);
-
-    assert(btb_idx < numEntries);
-
-    if (btb[btb_idx].valid
-        && inst_tag == btb[btb_idx].tag
-        && btb[btb_idx].tid == tid) {
-        return true;
-    } else {
-        return false;
-    }
-}
-
-// @todo Create some sort of return struct that has both whether or not the
-// address is valid, and also the address.  For now will just use addr = 0 to
-// represent invalid entry.
-const PCStateBase *
-DefaultBTB::lookup(Addr inst_pc, ThreadID tid)
-{
-    unsigned btb_idx = getIndex(inst_pc, tid);
-
-    Addr inst_tag = getTag(inst_pc);
-
-    assert(btb_idx < numEntries);
-
-    if (btb[btb_idx].valid
-        && inst_tag == btb[btb_idx].tag
-        && btb[btb_idx].tid == tid) {
-        return btb[btb_idx].target.get();
-    } else {
-        return nullptr;
-    }
-}
-
-void
-DefaultBTB::update(Addr inst_pc, const PCStateBase &target, ThreadID tid)
-{
-    unsigned btb_idx = getIndex(inst_pc, tid);
-
-    assert(btb_idx < numEntries);
-
-    btb[btb_idx].tid = tid;
-    btb[btb_idx].valid = true;
-    set(btb[btb_idx].target, target);
-    btb[btb_idx].tag = getTag(inst_pc);
 }
 
 } // namespace branch_prediction

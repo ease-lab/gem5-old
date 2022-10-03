@@ -152,6 +152,13 @@ IEW::IEWStats::IEWStats(CPU *cpu)
              "Number of cycles IEW is blocking"),
     ADD_STAT(unblockCycles, statistics::units::Cycle::get(),
              "Number of cycles IEW is unblocking"),
+    ADD_STAT(blockCyclesMemAny, statistics::units::Cycle::get(),
+             "Number of cycles IEW is unblocking while there is an "
+             "outstanding load."),
+    ADD_STAT(blockCyclesL1Miss, statistics::units::Cycle::get(),
+             "Number of cycles IEW is unblocking while a load waits for L1"),
+    ADD_STAT(blockCyclesTLBMiss, statistics::units::Cycle::get(),
+             "Number of cycles IEW is unblocking while a load waits for TLB"),
     ADD_STAT(dispatchedInsts, statistics::units::Count::get(),
              "Number of instructions dispatched to IQ"),
     ADD_STAT(dispSquashedInsts, statistics::units::Count::get(),
@@ -662,6 +669,16 @@ IEW::updateStatus()
             any_unblocking = true;
             break;
         }
+    }
+
+    // Check of commit stalls while there is an outstanding memory request
+    if (cpu->commitStall) {
+        if (!ldstQueue.lqEmpty())
+            ++iewStats.blockCyclesMemAny;
+        if (!ldstQueue.hasL1Miss())
+            ++iewStats.blockCyclesL1Miss;
+        if (!ldstQueue.hasTLBMiss())
+            ++iewStats.blockCyclesTLBMiss;
     }
 
     // If there are no ready instructions waiting to be scheduled by the IQ,
@@ -1565,9 +1582,9 @@ IEW::updateExeInstStats(const DynInstPtr& inst)
     iewStats.executedInstStats.numInsts++;
 
 #if TRACING_ON
-    if (debug::O3PipeView) {
+    // if (debug::O3PipeView) {
         inst->completeTick = curTick() - inst->fetchTick;
-    }
+    // }
 #endif
 
     //

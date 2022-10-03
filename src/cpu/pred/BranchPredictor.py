@@ -1,5 +1,6 @@
 # Copyright (c) 2012 Mark D. Hill and David A. Wood
 # Copyright (c) 2015 The University of Wisconsin
+# Copyright (c) 2022 The University of Edinburgh
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -28,6 +29,66 @@
 from m5.SimObject import SimObject
 from m5.params import *
 from m5.proxy import *
+
+from m5.objects.IndexingPolicies import *
+from m5.objects.ReplacementPolicies import *
+
+class BranchClass(Enum):
+    vals = [
+            'NoBranch', 'Return',
+            'CallDirect', 'CallIndirect', # 'Call',
+            'DirectCond', 'DirectUncond', # 'Direct',
+            'IndirectCond', 'IndirectUncond', #'Indirect',
+            ]
+
+
+class ReturnAddrStack(SimObject):
+    type = 'ReturnAddrStack'
+    cxx_class = 'gem5::branch_prediction::ReturnAddrStack'
+    cxx_header = "cpu/pred/ras.hh"
+    # abstract = True
+
+    numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+    numEntries = Param.Unsigned(Parent.RASSize, "Number of RAS entries")
+    corruptionDetection = Param.Bool(False, "When corruption detection is "
+                                    "enabled no entry will returned when "
+                                    "the stack was corrupted.")
+
+class BranchTargetBuffer(SimObject):
+    type = 'BranchTargetBuffer'
+    cxx_class = 'gem5::branch_prediction::BranchTargetBuffer'
+    cxx_header = "cpu/pred/btb.hh"
+    abstract = True
+
+    numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+
+class SimpleBTB(BranchTargetBuffer):
+    type = 'SimpleBTB'
+    cxx_class = 'gem5::branch_prediction::SimpleBTB'
+    cxx_header = "cpu/pred/simple_btb.hh"
+
+    numEntries = Param.Unsigned(4096, "Number of BTB entries")
+    tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
+    instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
+                        "Number of bits to shift instructions by")
+
+class AssociativeBTB(BranchTargetBuffer):
+    type = 'AssociativeBTB'
+    cxx_class = 'gem5::branch_prediction::AssociativeBTB'
+    cxx_header = "cpu/pred/associative_btb.hh"
+
+    numEntries = Param.MemorySize("4096", "Number of entries of BTB entries")
+    assoc = Param.Unsigned(8, "Associativity of the BTB")
+    indexing_policy = Param.BaseIndexingPolicy(
+            SetAssociative(entry_size = 1, assoc = Parent.assoc,
+                            size = Parent.numEntries),
+                            "Indexing policy of the BTB")
+    replacement_policy = Param.BaseReplacementPolicy(LRURP(),
+        "Replacement policy of the table")
+
+    tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
+    instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
+                        "Number of bits to shift instructions by")
 
 class IndirectPredictor(SimObject):
     type = 'IndirectPredictor'
@@ -59,13 +120,25 @@ class BranchPredictor(SimObject):
     abstract = True
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+    instShiftAmt = Param.Unsigned(2,"Number of bits to shift instructions by")
+    fallbackBTB = Param.Bool(False, "In case the BTB is corrupt use the BTB "
+                                "prediction")
     BTBEntries = Param.Unsigned(4096, "Number of BTB entries")
     BTBTagSize = Param.Unsigned(16, "Size of the BTB tags, in bits")
     RASSize = Param.Unsigned(16, "RAS size")
-    instShiftAmt = Param.Unsigned(2, "Number of bits to shift instructions by")
+
+
+    BTB = Param.BranchTargetBuffer(SimpleBTB(), "Branch target buffer (BTB)")
+    RAS = Param.ReturnAddrStack(ReturnAddrStack(),
+            "Return address stack, set to NULL to disable RAS.")
 
     indirectBranchPred = Param.IndirectPredictor(SimpleIndirectPredictor(),
-      "Indirect branch predictor, set to NULL to disable indirect predictions")
+            "Indirect branch predictor, set to NULL to disable "
+            "indirect predictions")
+
+    resetBTB = Param.Bool(True,"When memInvalid is called reset also the BTB")
+    resetStart = Param.Int(0,"When reset start resetting at this table")
+    resetEnd = Param.Int(100,"When reset end resetting at this table")
 
 class LocalBP(BranchPredictor):
     type = 'LocalBP'

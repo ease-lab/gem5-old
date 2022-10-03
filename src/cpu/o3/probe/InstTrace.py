@@ -1,4 +1,4 @@
-# Copyright (c) 2007 The Hewlett-Packard Development Company
+# Copyright (c) 2022 The University of Edinburgh
 # All rights reserved.
 #
 # The license below extends only to copyright in the software and shall
@@ -33,52 +33,29 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from m5.params import *
-from m5.proxy import *
+from m5.objects.Probe import *
 
-from m5.objects.BaseTLB import BaseTLB
-from m5.objects.ClockedObject import ClockedObject
+class InstTrace(ProbeListenerObject):
+    type = 'InstTrace'
+    cxx_class = 'gem5::o3::InstTrace'
+    cxx_header = 'cpu/o3/probe/inst_trace.hh'
 
-class X86PagetableWalker(ClockedObject):
-    type = 'X86PagetableWalker'
-    cxx_class = 'gem5::X86ISA::Walker'
-    cxx_header = 'arch/x86/pagetable_walker.hh'
+    # Trace file for the following params are created in the output directory.
+    instTraceFile = Param.String("inst_trace.gz", "Protobuf trace file name")
 
-    port = RequestPort("Port for the hardware table walker")
-    system = Param.System(Parent.any, "system object")
-    delay = Param.Cycles(1, "Delay of page walk step")
-    num_squash_per_cycle = Param.Unsigned(4,
-            "Number of outstanding walks that can be squashed per cycle")
+# # The committed instruction count from which to start tracing
+# startTraceInst = Param.UInt64(0, "The number of committed instructions " \
+#                                 "after which to start tracing. Default " \
+#                                 "zero means start tracing from first " \
+#                                 "committed instruction.")
+# # Whether to trace virtual addresses for memory accesses
+# traceVirtAddr = Param.Bool(False, "Set to true if virtual addresses are " \
+#                             "to be traced.")
+    # Whether to trace fetch
+    trace_fetch = Param.Bool(False, "Set to true if fetch are to be "
+                                    "traced as well.")
 
-class X86TLB(BaseTLB):
-    type = 'X86TLB'
-    cxx_class = 'gem5::X86ISA::TLB'
-    cxx_header = 'arch/x86/tlb.hh'
-
-    size = Param.Unsigned(64, "TLB size")
-    system = Param.System(Parent.any, "system object")
-    walker = Param.X86PagetableWalker(\
-            X86PagetableWalker(), "page table walker")
-
-class X86TLBL2(BaseTLB):
-    type = 'X86TLBL2'
-    # cxx_class = 'X86ISA::TLBL2'
-    cxx_class = 'gem5::X86ISA::TLBL2'
-    cxx_header = 'arch/x86/tlbl2.hh'
-
-    size = Param.Unsigned(64, "Dummy size")
-    size_l1_4k = Param.Unsigned(64, "L1 4KB TLB size")
-    size_l1_2m = Param.Unsigned(32, "L1 2MB TLB size")
-    size_l2 = Param.Unsigned(1536, "L2 TLB size")
-
-    assoc_l1_4k = Param.Unsigned(4, "L1 4KB TLB associativity")
-    assoc_l1_2m = Param.Unsigned(4, "L1 2MB TLB associativity")
-    assoc_l2 = Param.Unsigned(12, "L2 TLB associativity")
-
-    fixed_l2_miss_latency = Param.Cycles(60, "TLB miss handling latency")
-    l2_hit_latency = Param.Cycles(9, "TLB L1 miss, L2 hit latency")
-    force_4k = Param.Bool(False, "Force using 4KB pages (no largepage)")
-
-    system = Param.System(Parent.any, "system object")
-    walker = Param.X86PagetableWalker(\
-            X86PagetableWalker(), "page table walker")
+    # Whether to trace all commited instructions
+    trace_commit = Param.Bool(False, "Trace all commited instructions.")
+    trace_branches = Param.Bool(False, "Trace branches")
+    trace_memref = Param.Bool(False, "Trace memory references")

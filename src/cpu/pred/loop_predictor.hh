@@ -92,6 +92,7 @@ class LoopPredictor : public SimObject
     struct LoopPredictorStats : public statistics::Group
     {
         LoopPredictorStats(statistics::Group *parent);
+        statistics::Scalar used;
         statistics::Scalar correct;
         statistics::Scalar wrong;
     } stats;
@@ -258,6 +259,11 @@ class LoopPredictor : public SimObject
      * Initialize the loop predictor
      */
     void init() override;
+
+    /**
+     * Reset internal state.
+     */
+    void reset();
 
     LoopPredictor(const LoopPredictorParams &p);
 

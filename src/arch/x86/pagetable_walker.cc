@@ -325,8 +325,11 @@ Walker::recvReqRetry()
     }
 }
 
-bool Walker::sendTiming(WalkerState* sendingState, PacketPtr pkt)
+bool Walker::sendTiming(WalkerState* sendingState, PacketPtr pkt, unsigned n)
 {
+    // For each packet we add a delay.
+    pkt->headerDelay = pkt->payloadDelay = n * delay * clockPeriod();
+
     WalkerSenderState* walker_state = new WalkerSenderState(sendingState);
     pkt->pushSenderState(walker_state);
     if (port.sendTimingReq(pkt)) {
@@ -836,6 +839,7 @@ Walker::WalkerState::sendPackets()
     if (retrying)
         return;
 
+    unsigned pkt_nr = 0;
     if (fixed_lat) {
         assert(!walker->fixedLatEvent.scheduled());
         walker->schedule(walker->fixedLatEvent,
@@ -848,7 +852,8 @@ Walker::WalkerState::sendPackets()
         PacketPtr pkt = read;
         read = NULL;
         inflight++;
-        if (!walker->sendTiming(this, pkt)) {
+        pkt_nr++;
+        if (!walker->sendTiming(this, pkt, pkt_nr)) {
             retrying = true;
             read = pkt;
             inflight--;
@@ -860,7 +865,8 @@ Walker::WalkerState::sendPackets()
         PacketPtr write = writes.back();
         writes.pop_back();
         inflight++;
-        if (!walker->sendTiming(this, write)) {
+        pkt_nr++;
+        if (!walker->sendTiming(this, write, pkt_nr)) {
             retrying = true;
             writes.push_back(write);
             inflight--;

@@ -66,13 +66,6 @@ LocalBP::LocalBP(const LocalBPParams &params)
             instShiftAmt);
 }
 
-void
-LocalBP::btbUpdate(ThreadID tid, Addr branch_addr, void * &bp_history)
-{
-// Place holder for a function that is called to update predictor history when
-// a BTB entry is invalid or not found.
-}
-
 
 bool
 LocalBP::lookup(ThreadID tid, Addr branch_addr, void * &bp_history)
@@ -91,6 +84,13 @@ LocalBP::lookup(ThreadID tid, Addr branch_addr, void * &bp_history)
     taken = getPrediction(counter_val);
 
     return taken;
+}
+
+void
+LocalBP::btbUpdate(ThreadID tid, Addr branch_addr, void * &bp_history)
+{
+// Place holder for a function that is called to update predictor history when
+// a BTB entry is invalid or not found.
 }
 
 void
@@ -119,6 +119,21 @@ LocalBP::update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
         localCtrs[local_predictor_idx]--;
     }
 }
+
+void
+LocalBP::squash(ThreadID tid, void *bp_history)
+{
+    assert(bp_history == NULL);
+}
+
+void
+LocalBP::reset(unsigned start, unsigned end)
+{
+    for (int i = 0; i < localCtrs.size(); i++) {
+        localCtrs[i].reset();
+    }
+}
+
 
 inline
 bool

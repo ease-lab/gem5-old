@@ -427,6 +427,11 @@ class IEW
         statistics::Scalar blockCycles;
         /** Stat for total number of unblocking cycles. */
         statistics::Scalar unblockCycles;
+        /** Stat for total cycles while iew blocks and there is an
+         *  outstanding load */
+        statistics::Scalar blockCyclesMemAny;
+        statistics::Scalar blockCyclesL1Miss;
+        statistics::Scalar blockCyclesTLBMiss;
         /** Stat for total number of instructions dispatched. */
         statistics::Scalar dispatchedInsts;
         /** Stat for total number of squashed instructions dispatch skips. */

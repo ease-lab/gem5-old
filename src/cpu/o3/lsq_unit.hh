@@ -561,6 +561,12 @@ class LSQUnit
 
     /** Returns whether or not the LSQ unit is stalled. */
     bool isStalled()  { return stalled; }
+
+    /** Returns whether there is an outstanding load access to the L1-D */
+    bool hasL1Miss() const;
+    /** Returns whether there is an outstanding load access to the DTLB */
+    bool hasTLBMiss() const;
+
   public:
     typedef typename CircularQueue<LQEntry>::iterator LQIterator;
     typedef typename CircularQueue<SQEntry>::iterator SQIterator;

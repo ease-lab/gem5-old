@@ -67,6 +67,19 @@ BiModeBP::BiModeBP(const BiModeBPParams &params)
     notTakenThreshold = (1ULL << (globalCtrBits - 1)) - 1;
 }
 
+void
+BiModeBP::reset(unsigned start, unsigned end)
+{
+    // Reset all counter values
+    for (int i = 0; i < choicePredictorSize; i++) {
+        choiceCounters[i].reset();
+    }
+    for (int i = 0; i < globalPredictorSize; i++) {
+        takenCounters[i].reset();
+        notTakenCounters[i].reset();
+    }
+}
+
 /*
  * For an unconditional branch we set its history such that
  * everything is set to taken. I.e., its choice predictor
@@ -83,15 +96,6 @@ BiModeBP::uncondBranch(ThreadID tid, Addr pc, void * &bpHistory)
     history->finalPred = true;
     bpHistory = static_cast<void*>(history);
     updateGlobalHistReg(tid, true);
-}
-
-void
-BiModeBP::squash(ThreadID tid, void *bpHistory)
-{
-    BPHistory *history = static_cast<BPHistory*>(bpHistory);
-    globalHistoryReg[tid] = history->globalHistoryReg;
-
-    delete history;
 }
 
 /*
@@ -123,19 +127,19 @@ BiModeBP::lookup(ThreadID tid, Addr branchAddr, void * &bpHistory)
                                  > notTakenThreshold;
     bool finalPrediction;
 
-    BPHistory *history = new BPHistory;
-    history->globalHistoryReg = globalHistoryReg[tid];
-    history->takenUsed = choicePrediction;
-    history->takenPred = takenGHBPrediction;
-    history->notTakenPred = notTakenGHBPrediction;
-
     if (choicePrediction) {
         finalPrediction = takenGHBPrediction;
     } else {
         finalPrediction = notTakenGHBPrediction;
     }
 
+    BPHistory *history = new BPHistory;
+    history->globalHistoryReg = globalHistoryReg[tid];
+    history->takenUsed = choicePrediction;
+    history->takenPred = takenGHBPrediction;
+    history->notTakenPred = notTakenGHBPrediction;
     history->finalPred = finalPrediction;
+
     bpHistory = static_cast<void*>(history);
     updateGlobalHistReg(tid, finalPrediction);
 
@@ -147,6 +151,7 @@ BiModeBP::btbUpdate(ThreadID tid, Addr branchAddr, void * &bpHistory)
 {
     globalHistoryReg[tid] &= (historyRegisterMask & ~1ULL);
 }
+
 
 /* Only the selected direction predictor will be updated with the final
  * outcome; the status of the unselected one will not be altered. The choice
@@ -220,6 +225,16 @@ BiModeBP::update(ThreadID tid, Addr branchAddr, bool taken, void *bpHistory,
             choiceCounters[choiceHistoryIdx]--;
         }
     }
+
+    delete history;
+}
+
+
+void
+BiModeBP::squash(ThreadID tid, void *bpHistory)
+{
+    BPHistory *history = static_cast<BPHistory*>(bpHistory);
+    globalHistoryReg[tid] = history->globalHistoryReg;
 
     delete history;
 }

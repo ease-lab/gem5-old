@@ -85,6 +85,7 @@ Rename::Rename(CPU *_cpu, const BaseO3CPUParams &params)
         stalls[tid] = {false, false};
         serializeInst[tid] = nullptr;
         serializeOnNextInst[tid] = false;
+        waitForResteer[tid] = false;
     }
 }
 
@@ -108,6 +109,10 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
                "Number of cycles rename is running"),
       ADD_STAT(unblockCycles, statistics::units::Cycle::get(),
                "Number of cycles rename is unblocking"),
+      ADD_STAT(backendStallCycles, statistics::units::Count::get(),
+               "Number cycles the backend cannot consume more instructions"),
+      ADD_STAT(frontendStallCycles, statistics::units::Count::get(),
+               "Number cycles the frontend does not have new instructions"),
       ADD_STAT(renamedInsts, statistics::units::Count::get(),
                "Number of instructions processed by rename"),
       ADD_STAT(squashedInsts, statistics::units::Count::get(),
@@ -143,7 +148,9 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
       ADD_STAT(tempSerializing, statistics::units::Count::get(),
                "count of temporary serializing insts renamed"),
       ADD_STAT(skidInsts, statistics::units::Count::get(),
-               "count of insts added to the skid buffer")
+               "count of insts added to the skid buffer"),
+      ADD_STAT(resteerCycles, statistics::units::Count::get(),
+               "Number of cycles allocator is idle after branch misp.")
 {
     squashCycles.prereq(squashCycles);
     idleCycles.prereq(idleCycles);
@@ -151,6 +158,10 @@ Rename::RenameStats::RenameStats(statistics::Group *parent)
     serializeStallCycles.flags(statistics::total);
     runCycles.prereq(idleCycles);
     unblockCycles.prereq(unblockCycles);
+    backendStallCycles.prereq(backendStallCycles);
+    frontendStallCycles.prereq(frontendStallCycles);
+    resteerCycles.prereq(resteerCycles);
+
 
     renamedInsts.prereq(renamedInsts);
     squashedInsts.prereq(squashedInsts);
@@ -272,6 +283,7 @@ Rename::resetStage()
         storesInProgress[tid] = 0;
 
         serializeOnNextInst[tid] = false;
+        waitForResteer[tid] = false;
     }
 }
 
@@ -460,6 +472,7 @@ Rename::rename(bool &status_change, ThreadID tid)
 
     if (renameStatus[tid] == Blocked) {
         ++stats.blockCycles;
+        ++stats.backendStallCycles;
     } else if (renameStatus[tid] == Squashing) {
         ++stats.squashCycles;
     } else if (renameStatus[tid] == SerializeStall) {
@@ -518,12 +531,25 @@ Rename::renameInsts(ThreadID tid)
                 tid);
         // Should I change status to idle?
         ++stats.idleCycles;
+        ++stats.frontendStallCycles;
+        // There are no instruction to allocate/rename
+        cpu->frontendStall = true;
+        if (waitForResteer[tid]) {
+            ++stats.resteerCycles;
+        }
         return;
-    } else if (renameStatus[tid] == Unblocking) {
+    }
+    // The frontend has instructions available
+    cpu->frontendStall = false;
+
+    if (renameStatus[tid] == Unblocking) {
         ++stats.unblockCycles;
     } else if (renameStatus[tid] == Running) {
         ++stats.runCycles;
+        if (waitForResteer[tid]) { waitForResteer[tid] = false; }
     }
+
+
 
     // Will have to do a different calculation for the number of free
     // entries.
@@ -794,9 +820,9 @@ Rename::sortInsts()
         const DynInstPtr &inst = fromDecode->insts[i];
         insts[inst->threadNumber].push_back(inst);
 #if TRACING_ON
-        if (debug::O3PipeView) {
+        // if (debug::O3PipeView) {
             inst->renameTick = curTick() - inst->fetchTick;
-        }
+        // }
 #endif
     }
 }
@@ -860,6 +886,8 @@ Rename::block(ThreadID tid)
 {
     DPRINTF(Rename, "[tid:%i] Blocking.\n", tid);
 
+    cpu->backendStall = true;
+
     // Add the current inputs onto the skid buffer, so they can be
     // reprocessed when this stage unblocks.
     skidInsert(tid);
@@ -892,6 +920,8 @@ bool
 Rename::unblock(ThreadID tid)
 {
     DPRINTF(Rename, "[tid:%i] Trying to unblock.\n", tid);
+
+    cpu->backendStall = false;
 
     // Rename is done unblocking if the skid buffer is empty.
     if (skidBuffer[tid].empty() && renameStatus[tid] != SerializeStall) {
@@ -1284,6 +1314,7 @@ Rename::checkSignalsAndUpdate(ThreadID tid)
                 "commit.\n", tid);
 
         squash(fromCommit->commitInfo[tid].doneSeqNum, tid);
+        waitForResteer[tid] = true;
 
         return true;
     }

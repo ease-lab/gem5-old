@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2012, 2014 ARM Limited
- * Copyright (c) 2010 The University of Edinburgh
+ * Copyright (c) 2010,2022 The University of Edinburgh
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -46,11 +46,12 @@
 
 #include "base/statistics.hh"
 #include "base/types.hh"
+#include "cpu/inst_seq.hh"
 #include "cpu/pred/btb.hh"
 #include "cpu/pred/indirect.hh"
 #include "cpu/pred/ras.hh"
-#include "cpu/inst_seq.hh"
 #include "cpu/static_inst.hh"
+#include "enums/BranchClass.hh"
 #include "params/BranchPredictor.hh"
 #include "sim/probe/pmu.hh"
 #include "sim/sim_object.hh"
@@ -61,14 +62,33 @@ namespace gem5
 namespace branch_prediction
 {
 
+  // enum BranchType {
+  //   NoBranch = 0,
+  //   Call,
+  //   CallCond,
+  //   CallUncond,
+  //   Return,
+  //   Direct,
+  //   DirectCond,
+  //   DirectUncond,
+  //   Indirect,
+  //   IndirectCond,
+  //   IndirectUncond,
+  //   NumBranchType
+  // };
+
+
 /**
  * Basically a wrapper class to hold both the branch predictor
  * and the BTB.
  */
 class BPredUnit : public SimObject
 {
+
   public:
-      typedef BranchPredictorParams Params;
+    typedef BranchPredictorParams Params;
+    typedef enums::BranchClass BranchClass;
+
     /**
      * @param params The params object, that has the size of the BP and BTB.
      */
@@ -78,6 +98,11 @@ class BPredUnit : public SimObject
 
     /** Perform sanity checks after a drain. */
     void drainSanityCheck() const;
+
+    /**
+     * Invalidates the branch predictor state.
+     */
+    virtual void memInvalidate() override;
 
     /**
      * Predicts whether or not the instruction is a taken branch, and the
@@ -148,11 +173,17 @@ class BPredUnit : public SimObject
     virtual void btbUpdate(ThreadID tid, Addr instPC, void * &bp_history) = 0;
 
     /**
+     * Reset function. Set back all internal state of the direction predictor
+     * Start and end can be used to define certain ranges to reset
+     */
+    virtual void reset(unsigned start = 0, unsigned end = 100) {}
+
+    /**
      * Looks up a given PC in the BTB to see if a matching entry exists.
      * @param inst_PC The PC to look up.
      * @return Whether the BTB contains the given PC.
      */
-    bool BTBValid(Addr instPC) { return BTB.valid(instPC, 0); }
+    bool BTBValid(Addr instPC) { return btb->valid(instPC, 0); }
 
     /**
      * Looks up a given PC in the BTB to get the predicted target. The PC may
@@ -164,7 +195,7 @@ class BPredUnit : public SimObject
     const PCStateBase *
     BTBLookup(Addr inst_pc)
     {
-        return BTB.lookup(inst_pc, 0);
+        return btb->lookup(inst_pc, 0);
     }
 
     /**
@@ -183,19 +214,26 @@ class BPredUnit : public SimObject
     virtual void update(ThreadID tid, Addr instPC, bool taken,
                    void *bp_history, bool squashed,
                    const StaticInstPtr &inst, Addr corrTarget) = 0;
-    /**
-     * Updates the BTB with the target of a branch.
-     * @param inst_PC The branch's PC that will be updated.
-     * @param target_PC The branch's target that will be added to the BTB.
-     */
-    void
-    BTBUpdate(Addr instPC, const PCStateBase &target)
+    // /**
+    //  * Updates the BTB with the target of a branch.
+    //  * @param inst_PC The branch's PC that will be updated.
+    //  * @param target_PC The branch's target that will be added to the BTB.
+    //  */
+    // void
+    // BTBUpdate(Addr instPC, const PCStateBase &target)
+    // {
+    //     btb->update(0, instPC, target);
+    // }
+    BranchClass getBranchClass(StaticInstPtr inst);
+
+    std::string toStr(BranchClass type) const
     {
-        BTB.update(instPC, target, 0);
+        return std::string(enums::BranchClassStrings[type]);
     }
 
-
     void dump();
+
+
 
   private:
     struct PredictorHistory
@@ -206,23 +244,32 @@ class BPredUnit : public SimObject
          */
         PredictorHistory(const InstSeqNum &seq_num, Addr instPC,
                          bool pred_taken, void *bp_history,
-                         void *indirect_history, ThreadID _tid,
+                         void *indirect_history, void *ras_history,
+                         ThreadID _tid, BranchClass type,
                          const StaticInstPtr & inst)
             : seqNum(seq_num), pc(instPC), bpHistory(bp_history),
-              indirectHistory(indirect_history), tid(_tid),
-              predTaken(pred_taken), inst(inst)
+              indirectHistory(indirect_history), rasHistory(ras_history),
+              tid(_tid), predTaken(pred_taken), type(type), inst(inst)
         {}
 
         PredictorHistory(const PredictorHistory &other) :
             seqNum(other.seqNum), pc(other.pc), bpHistory(other.bpHistory),
-            indirectHistory(other.indirectHistory), RASIndex(other.RASIndex),
-            tid(other.tid), predTaken(other.predTaken), usedRAS(other.usedRAS),
-            pushedRAS(other.pushedRAS), wasCall(other.wasCall),
-            wasReturn(other.wasReturn), wasIndirect(other.wasIndirect),
-            target(other.target), inst(other.inst)
+            indirectHistory(other.indirectHistory),
+            rasHistory(other.rasHistory), tid(other.tid),
+            predTaken(other.predTaken), usedRAS(other.usedRAS),
+            wasCall(other.wasCall), wasReturn(other.wasReturn),
+            wasIndirect(other.wasIndirect),
+            wasPredTakenBTBHit(other.wasPredTakenBTBHit),
+            wasPredTakenBTBMiss(other.wasPredTakenBTBMiss),
+            wasUncond(other.wasUncond),
+            target(other.target),
+            // targetProvider(targetProvider),
+            type(other.type),
+            inst(other.inst)
         {
-            set(RASTarget, other.RASTarget);
         }
+
+
 
         bool
         operator==(const PredictorHistory &entry) const
@@ -244,11 +291,7 @@ class BPredUnit : public SimObject
 
         void *indirectHistory = nullptr;
 
-        /** The RAS target (only valid if a return). */
-        std::unique_ptr<PCStateBase> RASTarget;
-
-        /** The RAS index of the instruction (only valid if a call). */
-        unsigned RASIndex = 0;
+        void *rasHistory = nullptr;
 
         /** The thread id. */
         ThreadID tid;
@@ -259,9 +302,6 @@ class BPredUnit : public SimObject
         /** Whether or not the RAS was used. */
         bool usedRAS = false;
 
-        /* Whether or not the RAS was pushed */
-        bool pushedRAS = false;
-
         /** Whether or not the instruction was a call. */
         bool wasCall = false;
 
@@ -271,10 +311,21 @@ class BPredUnit : public SimObject
         /** Wether this instruction was an indirect branch */
         bool wasIndirect = false;
 
+        /** Was predicted taken and hit in BTB */
+        bool wasPredTakenBTBHit = false;
+
+        /** Was predicted taken but miss in BTB */
+        bool wasPredTakenBTBMiss = false;
+
+        /** Was unconditional control */
+        bool wasUncond = false;
+
         /** Target of the branch. First it is predicted, and fixed later
          *  if necessary
          */
         Addr target = MaxAddr;
+
+        BranchClass type = BranchClass::NoBranch;
 
         /** The branch instrction */
         const StaticInstPtr inst;
@@ -282,8 +333,13 @@ class BPredUnit : public SimObject
 
     typedef std::deque<PredictorHistory> History;
 
+  public:
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
+
+  private:
+    /** Fallback to the BTB prediction in case the RAS is corrupted. */
+    const unsigned fallbackBTB;
 
 
     /**
@@ -294,34 +350,53 @@ class BPredUnit : public SimObject
     std::vector<History> predHist;
 
     /** The BTB. */
-    DefaultBTB BTB;
+    BranchTargetBuffer * btb;
 
-    /** The per-thread return address stack. */
-    std::vector<ReturnAddrStack> RAS;
+    /** The return address stack. */
+    ReturnAddrStack * ras;
 
     /** The indirect target predictor. */
     IndirectPredictor * iPred;
 
     struct BPredUnitStats : public statistics::Group
     {
-        BPredUnitStats(statistics::Group *parent);
+        BPredUnitStats(statistics::Group *parent, BPredUnit *bp);
 
         /** Stat for number of BP lookups. */
-        statistics::Scalar lookups;
+        statistics::Vector lookups;
+
+        /** Stat for BP lookup instructions by branch type (BranchType) */
+        statistics::Vector2d lookupType;
+
+        /** Stat for final prediction of the BPU by branch type (BranchType)*/
+        statistics::Vector2d predTakenType;
+        statistics::Vector2d predNotTakenType;
+
+        /** Stat for direction prediction by branch type (BranchType) */
+        statistics::Vector2d dirPredTakenType;
+        statistics::Vector2d dirPredNotTakenType;
+
+        /** Stat for branches squashed by branch type (BranchType) */
+        statistics::Vector2d squashType;
+        /** Stat for branches mispredicted by branch type (BranchType) */
+        statistics::Vector2d mispredictType;
+        /** Stat for branches commited by branch type (BranchType) */
+        statistics::Vector2d commitType;
+
         /** Stat for number of conditional branches predicted. */
         statistics::Scalar condPredicted;
+        /** Stat for n of conditional branches predicted as taken. */
+        statistics::Scalar condPredictedTaken;
         /** Stat for number of conditional branches predicted incorrectly. */
         statistics::Scalar condIncorrect;
         /** Stat for number of BTB lookups. */
         statistics::Scalar BTBLookups;
         /** Stat for number of BTB hits. */
         statistics::Scalar BTBHits;
-        /** Stat for the ratio between BTB hits and BTB lookups. */
+        /** Stat for number for the ratio between BTB hits and BTB lookups. */
         statistics::Formula BTBHitRatio;
-        /** Stat for number of times the RAS is used to get a target. */
-        statistics::Scalar RASUsed;
-        /** Stat for number of times the RAS is incorrect. */
-        statistics::Scalar RASIncorrect;
+        /** Stat for number BTB misspredictions. No or wrong target found */
+        statistics::Scalar BTBMispredicted;
 
         /** Stat for the number of indirect target lookups.*/
         statistics::Scalar indirectLookups;
@@ -331,11 +406,40 @@ class BPredUnit : public SimObject
         statistics::Scalar indirectMisses;
         /** Stat for the number of indirect target mispredictions.*/
         statistics::Scalar indirectMispredicted;
+
+        /** Stat for the number of conditional calls*/
+        statistics::Scalar indirectCall;
+        /** Stat for the number of unconditional calls*/
+        statistics::Scalar directCall;
+        /** Stat for the number of mispredicted calls*/
+        statistics::Scalar mispredictCall;
+
+        /** Stat for the number of conditional branches mispredicted*/
+        statistics::Scalar mispredictCond;
+        /** Stat for the number of unconditional branches mispredicted*/
+        statistics::Scalar mispredictUncond;
+        /** Stat for the number of branches predicted taken but miss in BTB*/
+        statistics::Scalar predTakenBTBMiss;
+        /** Stat for the number of unconditional branches miss in BTB*/
+        statistics::Scalar uncondBTBMiss;
+
+        /** Stat for the number of branches predicted not taken but
+         * turn out to be taken*/
+        statistics::Scalar NotTakenMispredicted;
+        /** Stat for the number of branches predicted taken but turn
+         * out to be not taken*/
+        statistics::Scalar TakenMispredicted;
+
+
     } stats;
 
   protected:
     /** Number of bits to shift instructions by for predictor addresses. */
     const unsigned instShiftAmt;
+    /** Reset functionality. */
+    const unsigned resetBTB;
+    const unsigned resetStart;
+    const unsigned resetEnd;
 
     /**
      * @{

@@ -148,6 +148,10 @@ Commit::regProbePoints()
 
 Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
     : statistics::Group(cpu, "commit"),
+      ADD_STAT(cyclesInstCommited, statistics::units::Count::get(),
+               "The number of cycles instructions where commited"),
+      ADD_STAT(cyclesNoInstCommited, statistics::units::Count::get(),
+               "The number of cycles no instruction could be commited"),
       ADD_STAT(commitSquashedInsts, statistics::units::Count::get(),
                "The number of squashed insts skipped by commit"),
       ADD_STAT(commitNonSpecStalls, statistics::units::Count::get(),
@@ -185,6 +189,8 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
 {
     using namespace statistics;
 
+    cyclesInstCommited.prereq(cyclesInstCommited);
+    cyclesNoInstCommited.prereq(cyclesNoInstCommited);
     commitSquashedInsts.prereq(commitSquashedInsts);
     commitNonSpecStalls.prereq(commitNonSpecStalls);
     branchMispredicts.prereq(branchMispredicts);
@@ -902,7 +908,14 @@ Commit::commit()
         getInsts();
 
         // Try to commit any instructions.
-        commitInsts();
+        if (commitInsts() > 0) {
+            ++stats.cyclesInstCommited;
+            cpu->commitStall = false;
+
+        } else {
+            ++stats.cyclesNoInstCommited;
+            cpu->commitStall = true;
+        }
     }
 
     //Check for any activity
@@ -941,7 +954,7 @@ Commit::commit()
     }
 }
 
-void
+unsigned
 Commit::commitInsts()
 {
     ////////////////////////////////////
@@ -1138,6 +1151,7 @@ Commit::commitInsts()
     if (num_committed == commitWidth) {
         stats.commitEligibleSamples++;
     }
+    return num_committed;
 }
 
 bool
@@ -1313,9 +1327,9 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
     rob->retireHead(tid);
 
 #if TRACING_ON
-    if (debug::O3PipeView) {
+    // if (debug::O3PipeView) {
         head_inst->commitTick = curTick() - head_inst->fetchTick;
-    }
+    // }
 #endif
 
     // If this was a store, record it for this cycle.

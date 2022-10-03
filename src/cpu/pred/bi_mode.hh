@@ -61,12 +61,17 @@ class BiModeBP : public BPredUnit
 {
   public:
     BiModeBP(const BiModeBPParams &params);
-    void uncondBranch(ThreadID tid, Addr pc, void * &bp_history);
-    void squash(ThreadID tid, void *bp_history);
-    bool lookup(ThreadID tid, Addr branch_addr, void * &bp_history);
-    void btbUpdate(ThreadID tid, Addr branch_addr, void * &bp_history);
+
+    // Override methods called by the Base class
+    void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) override;
+    bool lookup(ThreadID tid, Addr branch_addr, void * &bp_history) override;
+    void btbUpdate(ThreadID tid, Addr branch_addr,
+                   void * &bp_history) override;
     void update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
-                bool squashed, const StaticInstPtr & inst, Addr corrTarget);
+                bool squashed, const StaticInstPtr & inst,
+                Addr corrTarget) override;
+    void squash(ThreadID tid, void *bp_history) override;
+    void reset(unsigned start, unsigned end) override;
 
   private:
     void updateGlobalHistReg(ThreadID tid, bool taken);

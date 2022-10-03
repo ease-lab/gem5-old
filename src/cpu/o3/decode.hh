@@ -294,6 +294,8 @@ class Decode
      */
     bool squashAfterDelaySlot[MaxThreads];
 
+    bool waitForResteer[MaxThreads];
+
     struct DecodeStats : public statistics::Group
     {
         DecodeStats(CPU *cpu);
@@ -320,6 +322,9 @@ class Decode
         statistics::Scalar decodedInsts;
         /** Stat for total number of squashed instructions. */
         statistics::Scalar squashedInsts;
+        /** Stat for total number cycles between detecting an incorrect
+         * branch and the next instruction is issued by fetch. */
+        statistics::Scalar resteerCycles;
     } stats;
 };
 

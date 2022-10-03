@@ -92,6 +92,19 @@ SimpleIndirectPredictor::changeDirectionPrediction(ThreadID tid,
     threadInfo[tid].ghr &= ghrMask;
 }
 
+void
+SimpleIndirectPredictor::reset()
+{
+    DPRINTF(Indirect, "Reset Indirect predictor\n");
+
+    for (auto& ti : threadInfo) {
+        ti.ghr = 0;
+        ti.headHistEntry = 0;
+        ti.pathHist.clear();
+    }
+}
+
+
 bool
 SimpleIndirectPredictor::lookup(Addr br_addr, PCStateBase& target,
     ThreadID tid)
