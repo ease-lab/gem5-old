@@ -83,7 +83,7 @@ TLB::evictLRU()
 {
     // Find the entry with the lowest (and hence least recently updated)
     // sequence number.
-
+    stats.evictions++;
     unsigned lru = 0;
     for (unsigned i = 1; i < size; i++) {
         if (tlb[i].lruSeq < tlb[lru].lruSeq)
@@ -103,14 +103,23 @@ TLB::insert(Addr vpn, const TlbEntry &entry, uint64_t pcid)
     //that multiple processes using the same
     //tlb do not conflict when using the same
     //virtual addresses
-    vpn = concAddrPcid(vpn, pcid);
 
+    // I dont know why we overwrite this
+    // I tried also the other two alternative lines but they do not work either
+    vpn = concAddrPcid(vpn, pcid);
+    // Addr pcid_vaddr = concAddrPcid(vpn, pcid);
+    // TlbEntry *entry = lookup(pcid_vaddr);
+
+    if (!pcid) stats.insertNoPCID++;
+
+    stats.insertions++;
     // If somebody beat us to it, just use that existing entry.
     TlbEntry *newEntry = trie.lookup(vpn);
     if (newEntry) {
         assert(newEntry->vaddr == vpn);
         return newEntry;
     }
+    stats.newInsertions++;
 
     if (freeList.empty())
         evictLRU();
@@ -121,14 +130,15 @@ TLB::insert(Addr vpn, const TlbEntry &entry, uint64_t pcid)
     *newEntry = entry;
     newEntry->lruSeq = nextSeq();
     newEntry->vaddr = vpn;
-    if (FullSystem) {
-        newEntry->trieHandle =
-        trie.insert(vpn, TlbEntryTrie::MaxBits-entry.logBytes, newEntry);
-    }
-    else {
-        newEntry->trieHandle =
-        trie.insert(vpn, TlbEntryTrie::MaxBits, newEntry);
-    }
+    // if (FullSystem) {
+    //     newEntry->trieHandle =
+    //     trie.insert(vpn, TlbEntryTrie::MaxBits-entry.logBytes, newEntry);
+    // }
+    // else {
+    //     newEntry->trieHandle =
+    //     trie.insert(vpn, TlbEntryTrie::MaxBits, newEntry);
+    // }
+    newEntry->trieHandle = trie.insert(vpn, TlbEntryTrie::MaxBits - (entry.logBytes - X86ISA::PageShift), newEntry);
     return newEntry;
 }
 
@@ -144,6 +154,7 @@ TLB::lookup(Addr va, bool update_lru)
 void
 TLB::flushAll()
 {
+    stats.flushes++;
     DPRINTF(TLB, "Invalidating all entries.\n");
     for (unsigned i = 0; i < size; i++) {
         if (tlb[i].trieHandle) {
@@ -163,6 +174,7 @@ TLB::setConfigAddress(uint32_t addr)
 void
 TLB::flushNonGlobal()
 {
+    stats.noGlobalFlushes++;
     DPRINTF(TLB, "Invalidating all non global entries.\n");
     for (unsigned i = 0; i < size; i++) {
         if (tlb[i].trieHandle && !tlb[i].global) {
@@ -181,6 +193,7 @@ TLB::demapPage(Addr va, uint64_t asn)
         trie.remove(entry->trieHandle);
         entry->trieHandle = NULL;
         freeList.push_back(entry);
+        stats.pageDemaps++;
     }
 }
 
@@ -415,8 +428,9 @@ TLB::translate(const RequestPtr &req,
             else
                 pcid = 0x000;
 
-            pageAlignedVaddr = concAddrPcid(pageAlignedVaddr, pcid);
-            TlbEntry *entry = lookup(pageAlignedVaddr);
+            // pageAlignedVaddr = concAddrPcid(pageAlignedVaddr, pcid);
+            Addr pcid_vaddr = concAddrPcid(vaddr, pcid);
+            TlbEntry *entry = lookup(pcid_vaddr);
 
             if (mode == BaseMMU::Read) {
                 stats.rdAccesses++;
@@ -439,7 +453,7 @@ TLB::translate(const RequestPtr &req,
                         delayedResponse = true;
                         return fault;
                     }
-                    entry = lookup(pageAlignedVaddr);
+                    entry = lookup(pcid_vaddr);
                     assert(entry);
                 } else {
                     Process *p = tc->getProcessPtr();
@@ -473,6 +487,8 @@ TLB::translate(const RequestPtr &req,
                 // The page must have been present to get into the TLB in
                 // the first place. We'll assume the reserved bits are
                 // fine even though we're not checking them.
+                DPRINTF(TLB, "In user%i mode. entry user%i. Bad write:%i. va:%#x, pa:%#x Mode:%i The page must have been present in the first place paddr\n",
+                        inUser, entry->user, badWrite, vaddr, entry->paddr, mode);
                 return std::make_shared<PageFault>(vaddr, true, mode, inUser,
                                                    false);
             }
@@ -576,7 +592,21 @@ TLB::TlbStats::TlbStats(statistics::Group *parent)
     ADD_STAT(rdMisses, statistics::units::Count::get(),
              "TLB misses on read requests"),
     ADD_STAT(wrMisses, statistics::units::Count::get(),
-             "TLB misses on write requests")
+             "TLB misses on write requests"),
+    ADD_STAT(flushes, statistics::units::Count::get(),
+             "TLB flushes"),
+    ADD_STAT(noGlobalFlushes, statistics::units::Count::get(),
+             "TLB no global flushes"),
+    ADD_STAT(pageDemaps, statistics::units::Count::get(),
+             "TLB page demaps"),
+    ADD_STAT(evictions, statistics::units::Count::get(),
+             "TLB misses on write requests"),
+    ADD_STAT(insertions, statistics::units::Count::get(),
+             "TLB insertions"),
+    ADD_STAT(newInsertions, statistics::units::Count::get(),
+             "TLB new insertions"),
+    ADD_STAT(insertNoPCID, statistics::units::Count::get(),
+             "TLB insertions without PCID enabled")
 {
 }
 

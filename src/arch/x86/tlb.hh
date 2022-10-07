@@ -79,7 +79,8 @@ namespace X86ISA
         //concatenate Page Addr and pcid
         inline Addr concAddrPcid(Addr vpn, uint64_t pcid)
         {
-          return (vpn | pcid);
+          // return (vpn | pcid);
+          return (vpn >> X86ISA::PageShift) | ((uint64_t)pcid << (64ULL - X86ISA::PageShift));
         }
 
       protected:
@@ -117,6 +118,16 @@ namespace X86ISA
             statistics::Scalar wrAccesses;
             statistics::Scalar rdMisses;
             statistics::Scalar wrMisses;
+
+            statistics::Scalar flushes;
+            statistics::Scalar noGlobalFlushes;
+            statistics::Scalar pageDemaps;
+            statistics::Scalar evictions;
+            statistics::Scalar insertions;
+            statistics::Scalar newInsertions;
+            statistics::Scalar insertNoPCID;
+
+
         } stats;
 
         Fault translateInt(bool read, RequestPtr req, ThreadContext *tc);

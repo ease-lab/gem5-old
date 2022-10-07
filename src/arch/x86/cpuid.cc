@@ -169,8 +169,11 @@ namespace X86ISA {
                 }
                 break;
               case FamilyModelStepping:
+                // result = CpuidResult(0x00020f51, 0x00000805,
+                //                      0xefdbfbff, 0x00020209);
                 result = CpuidResult(0x00020f51, 0x00000805,
                                      0xefdbfbff, 0x00000209);
+
                 break;
               case ExtendedFeatures:
                 result = CpuidResult(0x00000000, 0x01800000,
