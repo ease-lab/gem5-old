@@ -622,6 +622,7 @@ BitUnion64(CR3)
 EndBitUnion(CR3)
 
 BitUnion64(CR4)
+    Bitfield<20> smep; // Enables supervisor-mode execution prevention (SMEP)
     Bitfield<18> osxsave; // Enable XSAVE and Proc Extended States
     Bitfield<17> pcide; // PCID Enable
     Bitfield<16> fsgsbase; // Enable RDFSBASE, RDGSBASE, WRFSBASE,

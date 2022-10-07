@@ -64,7 +64,7 @@ namespace X86ISA {
 
 TLB::TLB(const Params &p)
     : BaseTLB(p), configAddress(0), size(p.size),
-      tlb(size), lruSeq(0), m5opRange(p.system->m5opRange()), stats(this)
+      tlb(size), lruSeq(0), m5opRange(p.system->m5opRange()), stats(*this)
 {
     if (!size)
         fatal("TLBs must have a non-zero size.\n");
@@ -83,7 +83,7 @@ TLB::evictLRU()
 {
     // Find the entry with the lowest (and hence least recently updated)
     // sequence number.
-
+    stats.evictions++;
     unsigned lru = 0;
     for (unsigned i = 1; i < size; i++) {
         if (tlb[i].lruSeq < tlb[lru].lruSeq)
@@ -97,20 +97,35 @@ TLB::evictLRU()
 }
 
 TlbEntry *
-TLB::insert(Addr vpn, const TlbEntry &entry, uint64_t pcid)
+TLB::insert(Addr vpn, const TlbEntry &entry)
 {
     //Adding pcid to the page address so
     //that multiple processes using the same
     //tlb do not conflict when using the same
     //virtual addresses
-    vpn = concAddrPcid(vpn, pcid);
 
+    // I dont know why we overwrite this
+    // I tried also the other two alternative lines but they do not work either
+    // vpn = concAddrPcid(vpn, pcid);
+
+    // TlbEntry *entry = lookup(pcid_vaddr);
+
+    DPRINTF(TLB, "%s(vpn=%#x, asid=%#x): ppn=%#x\n",
+        __func__, vpn, entry.pcid, entry.paddr);
+
+    // if (!pcid) stats.insertNoPCID++;
+
+    stats.inserts++;
     // If somebody beat us to it, just use that existing entry.
-    TlbEntry *newEntry = trie.lookup(vpn);
+    // TlbEntry *newEntry = trie.lookup(pcid_vaddr);
+    TlbEntry *newEntry = lookup(vpn, entry.pcid, BaseMMU::Read, false);
+
     if (newEntry) {
         assert(newEntry->vaddr == vpn);
+        assert(newEntry->pcid == entry.pcid);
         return newEntry;
     }
+    // stats.newInsertions++;
 
     if (freeList.empty())
         evictLRU();
@@ -118,26 +133,57 @@ TLB::insert(Addr vpn, const TlbEntry &entry, uint64_t pcid)
     newEntry = freeList.front();
     freeList.pop_front();
 
+    Addr pcid_vaddr = concAddrPcid(vpn, entry.pcid);
     *newEntry = entry;
     newEntry->lruSeq = nextSeq();
     newEntry->vaddr = vpn;
-    if (FullSystem) {
-        newEntry->trieHandle =
-        trie.insert(vpn, TlbEntryTrie::MaxBits-entry.logBytes, newEntry);
-    }
-    else {
-        newEntry->trieHandle =
-        trie.insert(vpn, TlbEntryTrie::MaxBits, newEntry);
-    }
+    newEntry->pcid = entry.pcid;
+    // if (FullSystem) {
+    //     newEntry->trieHandle =
+    //     trie.insert(vpn, TlbEntryTrie::MaxBits-entry.logBytes, newEntry);
+    // }
+    // else {
+    //     newEntry->trieHandle =
+    //     trie.insert(vpn, TlbEntryTrie::MaxBits, newEntry);
+    // }
+    newEntry->trieHandle = trie.insert(
+                pcid_vaddr,
+                TlbEntryTrie::MaxBits - (entry.logBytes - X86ISA::PageShift),
+                newEntry);
     return newEntry;
 }
 
 TlbEntry *
-TLB::lookup(Addr va, bool update_lru)
+TLB::lookup(Addr vpn, uint16_t pcid, BaseMMU::Mode mode, bool update_lru)
 {
-    TlbEntry *entry = trie.lookup(va);
-    if (entry && update_lru)
-        entry->lruSeq = nextSeq();
+    TlbEntry *entry = trie.lookup(concAddrPcid(vpn, pcid));
+
+    if (update_lru) {
+        if (entry)
+            entry->lruSeq = nextSeq();
+
+        // Computing stats.
+        if (!entry) {
+            if (mode == BaseMMU::Execute) {
+                stats.instMisses++;
+            } else if (mode == BaseMMU::Write) {
+                stats.writeMisses++;
+            } else {
+                stats.readMisses++;
+            }
+        } else {
+            if (mode == BaseMMU::Execute) {
+                stats.instHits++;
+            } else if (mode == BaseMMU::Write) {
+                stats.writeHits++;
+            } else {
+                stats.readHits++;
+            }
+        }
+    }
+    DPRINTF(TLB, "%s(vpn=%#x, pcid=%#x): %s ppn %#x\n", __func__,
+                vpn, pcid, entry ? "hit" : "miss", entry ? entry->paddr : 0);
+
     return entry;
 }
 
@@ -152,6 +198,7 @@ TLB::flushAll()
             freeList.push_back(&tlb[i]);
         }
     }
+    stats.flushTlb++;
 }
 
 void
@@ -169,8 +216,29 @@ TLB::flushNonGlobal()
             trie.remove(tlb[i].trieHandle);
             tlb[i].trieHandle = NULL;
             freeList.push_back(&tlb[i]);
+            stats.flushedEntries++;
         }
     }
+    stats.flushTlbNoGlobal++;
+}
+
+void
+TLB::flushPcid(uint64_t pcid)
+{
+    int cnt = 0;
+    for (unsigned i = 0; i < size; i++) {
+        if (tlb[i].trieHandle && !tlb[i].global && tlb[i].pcid == pcid) {
+            trie.remove(tlb[i].trieHandle);
+            tlb[i].trieHandle = NULL;
+            freeList.push_back(&tlb[i]);
+            cnt++;
+        }
+    }
+    DPRINTF(TLB, "Invalidated %i entries for PCID: %x\n", cnt, pcid);
+    stats.flushedEntries += cnt;
+    stats.flushTlbPcid++;
+    if (pcid == 0x000)
+        stats.flushTlbZeroPcid++;
 }
 
 void
@@ -181,6 +249,7 @@ TLB::demapPage(Addr va, uint64_t asn)
         trie.remove(entry->trieHandle);
         entry->trieHandle = NULL;
         freeList.push_back(entry);
+        // stats.pageDemaps++;
     }
 }
 
@@ -406,32 +475,18 @@ TLB::translate(const RequestPtr &req,
             //Appending the pcid (last 12 bits of CR3) to the
             //page aligned vaddr if pcide is set
             CR4 cr4 = tc->readMiscRegNoEffect(misc_reg::Cr4);
-            Addr pageAlignedVaddr = vaddr & (~mask(X86ISA::PageShift));
+            // Addr pageAlignedVaddr = vaddr & (~mask(X86ISA::PageShift));
             CR3 cr3 = tc->readMiscRegNoEffect(misc_reg::Cr3);
-            uint64_t pcid;
+            uint64_t pcid = (cr4.pcide) ? cr3.pcid : 0x000;
 
-            if (cr4.pcide)
-                pcid = cr3.pcid;
-            else
-                pcid = 0x000;
+            // pageAlignedVaddr = concAddrPcid(pageAlignedVaddr, pcid);
+            // Addr pcid_vaddr = concAddrPcid(vaddr, pcid);
+            TlbEntry *entry = lookup(vaddr, pcid, mode);
 
-            pageAlignedVaddr = concAddrPcid(pageAlignedVaddr, pcid);
-            TlbEntry *entry = lookup(pageAlignedVaddr);
-
-            if (mode == BaseMMU::Read) {
-                stats.rdAccesses++;
-            } else {
-                stats.wrAccesses++;
-            }
             if (!entry) {
                 DPRINTF(TLB, "Handling a TLB miss for "
                         "address %#x at pc %#x.\n",
                         vaddr, tc->pcState().instAddr());
-                if (mode == BaseMMU::Read) {
-                    stats.rdMisses++;
-                } else {
-                    stats.wrMisses++;
-                }
                 if (FullSystem) {
                     Fault fault = walker->start(tc, translation, req, mode);
                     if (timing || fault != NoFault) {
@@ -439,24 +494,26 @@ TLB::translate(const RequestPtr &req,
                         delayedResponse = true;
                         return fault;
                     }
-                    entry = lookup(pageAlignedVaddr);
+                    entry = lookup(vaddr, pcid, mode);
                     assert(entry);
                 } else {
                     Process *p = tc->getProcessPtr();
                     const EmulationPageTable::Entry *pte =
                         p->pTable->lookup(vaddr);
                     if (!pte) {
-                        return std::make_shared<PageFault>(vaddr, true, mode,
-                                                           true, false);
+                        auto fault = std::make_shared<PageFault>(vaddr,
+                                                true, mode, true, false);
+                        DPRINTF(TLB, "PageFault for %#x: %s\n", vaddr,
+                                                        fault->describe());
+                        return fault;
                     } else {
                         Addr alignedVaddr = p->pTable->pageAlign(vaddr);
                         DPRINTF(TLB, "Mapping %#x to %#x\n", alignedVaddr,
                                 pte->paddr);
                         entry = insert(alignedVaddr, TlbEntry(
-                                p->pTable->pid(), alignedVaddr, pte->paddr,
+                                pcid, alignedVaddr, pte->paddr,
                                 pte->flags & EmulationPageTable::Uncacheable,
-                                pte->flags & EmulationPageTable::ReadOnly),
-                                pcid);
+                                pte->flags & EmulationPageTable::ReadOnly));
                     }
                     DPRINTF(TLB, "Miss was serviced.\n");
                 }
@@ -473,14 +530,22 @@ TLB::translate(const RequestPtr &req,
                 // The page must have been present to get into the TLB in
                 // the first place. We'll assume the reserved bits are
                 // fine even though we're not checking them.
-                return std::make_shared<PageFault>(vaddr, true, mode, inUser,
-                                                   false);
+                DPRINTF(TLB, "In user%i mode. entry user%i. Bad write:%i. va:%#x, pa:%#x Mode:%i The page must have been present in the first place paddr\n",
+                        inUser, entry->user, badWrite, vaddr, entry->paddr, mode);
+                auto fault = std::make_shared<PageFault>(vaddr, true,
+                                                    mode, inUser, false);
+                DPRINTF(TLB, "PageFault for %#x: %s\n",
+                                    vaddr, fault->describe());
+                return fault;
             }
             if (storeCheck && badWrite) {
                 // This would fault if this were a write, so return a page
                 // fault that reflects that happening.
-                return std::make_shared<PageFault>(
-                    vaddr, true, BaseMMU::Write, inUser, false);
+                auto fault = std::make_shared<PageFault>(vaddr, true,
+                                            BaseMMU::Write, inUser, false);
+                DPRINTF(TLB, "PageFault for %#x: %s\n",
+                                    vaddr, fault->describe());
+                return fault;
             }
 
             Addr paddr = entry->paddr | (vaddr & mask(entry->logBytes));
@@ -537,8 +602,13 @@ TLB::translateFunctional(const RequestPtr &req, ThreadContext *tc,
             }
         }
 
-        if (!pte)
-            return std::make_shared<PageFault>(vaddr, true, mode, true, false);
+        if (!pte) {
+            auto fault = std::make_shared<PageFault>(vaddr, true,
+                                                        mode, true, false);
+            DPRINTF(TLB, "PageFault for %#x: %s\n",
+                                vaddr, fault->describe());
+            return fault;
+        }
 
         paddr = pte->paddr | process->pTable->pageOffset(vaddr);
     }
@@ -567,17 +637,98 @@ TLB::getWalker()
     return walker;
 }
 
-TLB::TlbStats::TlbStats(statistics::Group *parent)
-  : statistics::Group(parent),
-    ADD_STAT(rdAccesses, statistics::units::Count::get(),
-             "TLB accesses on read requests"),
-    ADD_STAT(wrAccesses, statistics::units::Count::get(),
-             "TLB accesses on write requests"),
-    ADD_STAT(rdMisses, statistics::units::Count::get(),
-             "TLB misses on read requests"),
-    ADD_STAT(wrMisses, statistics::units::Count::get(),
-             "TLB misses on write requests")
+// TLB::TlbStats::TlbStats(statistics::Group *parent)
+//   : statistics::Group(parent),
+//     ADD_STAT(rdAccesses, statistics::units::Count::get(),
+//              "TLB accesses on read requests"),
+//     ADD_STAT(wrAccesses, statistics::units::Count::get(),
+//              "TLB accesses on write requests"),
+//     ADD_STAT(rdMisses, statistics::units::Count::get(),
+//              "TLB misses on read requests"),
+//     ADD_STAT(wrMisses, statistics::units::Count::get(),
+//              "TLB misses on write requests"),
+//     ADD_STAT(flushes, statistics::units::Count::get(),
+//              "TLB flushes"),
+//     ADD_STAT(noGlobalFlushes, statistics::units::Count::get(),
+//              "TLB no global flushes"),
+//     ADD_STAT(pcidFlushes, statistics::units::Count::get(),
+//              "TLB flushes per PCID"),
+//     ADD_STAT(pageDemaps, statistics::units::Count::get(),
+//              "TLB page demaps"),
+//     ADD_STAT(evictions, statistics::units::Count::get(),
+//              "TLB misses on write requests"),
+//     ADD_STAT(insertions, statistics::units::Count::get(),
+//              "TLB insertions"),
+//     ADD_STAT(newInsertions, statistics::units::Count::get(),
+//              "TLB new insertions"),
+//     ADD_STAT(insertNoPCID, statistics::units::Count::get(),
+//              "TLB insertions without PCID enabled")
+// {
+// }
+
+
+TLB::TlbStats::TlbStats(TLB &parent)
+  : statistics::Group(&parent), tlb(parent),
+    ADD_STAT(instHits, statistics::units::Count::get(), "Inst hits"),
+    ADD_STAT(instMisses, statistics::units::Count::get(), "Inst misses"),
+    ADD_STAT(readHits, statistics::units::Count::get(), "Read hits"),
+    ADD_STAT(readMisses, statistics::units::Count::get(),  "Read misses"),
+    ADD_STAT(writeHits, statistics::units::Count::get(), "Write hits"),
+    ADD_STAT(writeMisses, statistics::units::Count::get(), "Write misses"),
+    ADD_STAT(inserts, statistics::units::Count::get(),
+             "Number of times an entry is inserted into the TLB"),
+    ADD_STAT(insertsZeroPcid, statistics::units::Count::get(),
+             "Number of times an entry with PCID 0x000 is inserted"),
+    ADD_STAT(evictions, statistics::units::Count::get(),
+             "Number of times an entry is evicted from the TLB"),
+    ADD_STAT(flushTlb, statistics::units::Count::get(),
+             "Number of times complete TLB was flushed"),
+    ADD_STAT(flushTlbNoGlobal, statistics::units::Count::get(),
+             "Number of times non global entries was flushed from the TLB"),
+    ADD_STAT(flushTlbPcid, statistics::units::Count::get(),
+             "Number of times TLB was flushed by PCID"),
+    ADD_STAT(flushTlbZeroPcid, statistics::units::Count::get(),
+             "Number of times TLB was flushed by PCID == 0x000"),
+    ADD_STAT(flushedEntries, statistics::units::Count::get(),
+             "Number of entries that have been flushed from TLB"),
+    ADD_STAT(readAccesses, statistics::units::Count::get(), "Read accesses",
+             readHits + readMisses),
+    ADD_STAT(writeAccesses, statistics::units::Count::get(), "Write accesses",
+             writeHits + writeMisses),
+    ADD_STAT(instAccesses, statistics::units::Count::get(), "Inst accesses",
+             instHits + instMisses),
+    ADD_STAT(hits, statistics::units::Count::get(),
+             "Total TLB (inst and data) hits",
+             readHits + writeHits + instHits),
+    ADD_STAT(misses, statistics::units::Count::get(),
+             "Total TLB (inst and data) misses",
+             readMisses + writeMisses + instMisses),
+    ADD_STAT(accesses, statistics::units::Count::get(),
+             "Total TLB (inst and data) accesses",
+             readAccesses + writeAccesses + instAccesses)
 {
+    // If this is a pure Data TLB, mark the instruction
+    // stats as nozero, so that they won't make it in
+    // into the final stats file
+    if (tlb.type() == TypeTLB::data) {
+        instHits.flags(statistics::nozero);
+        instMisses.flags(statistics::nozero);
+
+        instAccesses.flags(statistics::nozero);
+    }
+
+    // If this is a pure Instruction TLB, mark the data
+    // stats as nozero, so that they won't make it in
+    // into the final stats file
+    if (tlb.type() & TypeTLB::instruction) {
+        readHits.flags(statistics::nozero);
+        readMisses.flags(statistics::nozero);
+        writeHits.flags(statistics::nozero);
+        writeMisses.flags(statistics::nozero);
+
+        readAccesses.flags(statistics::nozero);
+        writeAccesses.flags(statistics::nozero);
+    }
 }
 
 void
@@ -612,8 +763,13 @@ TLB::unserialize(CheckpointIn &cp)
         freeList.pop_front();
 
         newEntry->unserializeSection(cp, csprintf("Entry%d", x));
-        newEntry->trieHandle = trie.insert(newEntry->vaddr,
-            TlbEntryTrie::MaxBits - newEntry->logBytes, newEntry);
+        Addr pcid_addr = concAddrPcid(newEntry->vaddr, newEntry->pcid);
+        // newEntry->trieHandle = trie.insert(pcid_addr,
+        //     TlbEntryTrie::MaxBits - newEntry->logBytes, newEntry);
+        newEntry->trieHandle = trie.insert(
+            pcid_addr,
+            TlbEntryTrie::MaxBits - (newEntry->logBytes - X86ISA::PageShift),
+            newEntry);
     }
 }
 

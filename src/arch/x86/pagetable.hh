@@ -69,6 +69,11 @@ namespace X86ISA
 
         // The beginning of the virtual page this entry maps.
         Addr vaddr;
+        // process context id/address space id to use
+        uint16_t pcid = 0;
+        // if on lookup asn should be ignored
+        bool ignorePcid = false;
+
         // The size of the page this represents, in address bits.
         unsigned logBytes;
 

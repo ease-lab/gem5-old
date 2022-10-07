@@ -63,6 +63,15 @@ class MMU : public BaseMMU
         static_cast<TLB*>(dtb)->flushNonGlobal();
     }
 
+    void
+    flushPcid(uint64_t pcid)
+    {
+        static_cast<TLB*>(itb)->flushPcid(pcid);
+        static_cast<TLB*>(dtb)->flushPcid(pcid);
+    }
+
+
+
     Walker*
     getDataWalker()
     {

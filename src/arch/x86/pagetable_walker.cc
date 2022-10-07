@@ -508,19 +508,9 @@ Walker::WalkerState::stepWalk(PacketPtr &write)
     if (doEndWalk) {
         if (doTLBInsert)
             if (!functional) {
-
-                // Check if PCIDE is set in CR4
-                CR4 cr4 = tc->readMiscRegNoEffect(misc_reg::Cr4);
-                if (cr4.pcide){
-                    CR3 cr3 = tc->readMiscRegNoEffect(misc_reg::Cr3);
-                    walker->tlb->insert(entry.vaddr, entry, cr3.pcid);
-                }
-                else{
-                    // The current PCID is always 000H if PCIDE
-                    // is not set [sec 4.10.1 of Intel's Software
-                    // Developer Manual]
-                    walker->tlb->insert(entry.vaddr, entry, 0x000);
-                }
+                DPRINTF(PageTableWalker, "Insert in TLB: VA:%#x. pcid:%#x\n",
+                                    entry.vaddr, entry.pcid);
+                walker->tlb->insert(entry.vaddr, entry);
             }
 
         endWalk();
@@ -596,6 +586,12 @@ Walker::WalkerState::setupWalk(Addr vaddr)
 
     nextState = Ready;
     entry.vaddr = vaddr;
+    // The current PCID is always 000H if PCIDE
+    // is not set [sec 4.10.1 of Intel's Software
+    // Developer Manual]
+    entry.pcid = (cr4.pcide) ? cr3.pcid : 0x000;
+    DPRINTF(PageTableWalker, "%s: VA:%#x. pcid:%#x, CR3:%#x, CR4:%#x\n",
+                                __func__, entry.vaddr, entry.pcid, cr3, cr4);
 
     Request::Flags flags = Request::PHYSICAL;
 

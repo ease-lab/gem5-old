@@ -312,14 +312,42 @@ ISA::setMiscReg(int miscReg, RegVal val)
       case misc_reg::Cr2:
         break;
       case misc_reg::Cr3:
-        static_cast<MMU *>(tc->getMMUPtr())->flushNonGlobal();
+        {
+            // CR4 cr4 = regVal[misc_reg::Cr4];
+            // CR3 cr3 = val;
+            // // Mov to CR3 depends on CR4.PCIDE
+            // // - If CR4.PCIDE = 0 invalidate all non-global entries with
+            // //   PCID 0x000
+            // if (!cr4.pcide) {
+            //     static_cast<MMU *>(tc->getMMUPtr())->flushPcid(0x000);
+            // }
+            // // - If CR4.PCIDE = 1 and bit 63 of CR3 = 0 invalidate all non-global
+            // //   entries for CR3.PCID
+            // if (cr4.pcide && (val & (1ULL << 63))) {
+            //     static_cast<MMU *>(tc->getMMUPtr())->flushPcid(cr3.pcid);
+            // }
+            static_cast<MMU *>(tc->getMMUPtr())->flushNonGlobal();
+        }
         break;
       case misc_reg::Cr4:
         {
+            // Mov to CR4 invalidates all TLB entries (incl. global entries)
+            // if (1) it changes the value of CR4.PGE;1 or (2) it changes the
+            // value of the CR4.PCIDE from 1 to 0.
             CR4 toggled = regVal[miscReg] ^ val;
-            if (toggled.pae || toggled.pse || toggled.pge) {
+            if (toggled.pae || toggled.pse || toggled.pge || toggled.pcide) {
                 tc->getMMUPtr()->flushAll();
             }
+            // if (toggled.pse || toggled.pge || toggled.pcide) {
+            //     tc->getMMUPtr()->flushAll();
+            // }
+            // // Also invalidates all entries for the current PCID if (1) it
+            // // changes the value of CR4.PAE; or (2) it changes the value
+            // // of CR4.SMEP from 0 to 1.
+            // CR3 cr3 = regVal[misc_reg::Cr3];
+            // if (toggled.pae || toggled.smep) {
+            //     static_cast<MMU *>(tc->getMMUPtr())->flushPcid(cr3.pcid);
+            // }
         }
         break;
       case misc_reg::Cr8:

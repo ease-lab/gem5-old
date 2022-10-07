@@ -73,13 +73,19 @@ namespace X86ISA
 
         void takeOverFrom(BaseTLB *otlb) override {}
 
-        TlbEntry *lookup(Addr va, bool update_lru = true);
+        TlbEntry *lookup(Addr va, uint16_t pcid,
+                          BaseMMU::Mode mode, bool update_lru = true);
 
         void setConfigAddress(uint32_t addr);
         //concatenate Page Addr and pcid
         inline Addr concAddrPcid(Addr vpn, uint64_t pcid)
         {
-          return (vpn | pcid);
+          // return (vpn | pcid);
+          return (vpn >> X86ISA::PageShift) | ((uint64_t)pcid << (64ULL - X86ISA::PageShift));
+        }
+        inline uint64_t extractPCID(Addr vpn)
+        {
+          return (uint64_t)vpn >> (64ULL - X86ISA::PageShift);
         }
 
       protected:
@@ -94,6 +100,8 @@ namespace X86ISA
         void flushAll() override;
 
         void flushNonGlobal();
+
+        void flushPcid(uint64_t pcid);
 
         void demapPage(Addr va, uint64_t asn) override;
 
@@ -111,12 +119,49 @@ namespace X86ISA
 
         struct TlbStats : public statistics::Group
         {
-            TlbStats(statistics::Group *parent);
+            TlbStats(TLB &parent);
 
-            statistics::Scalar rdAccesses;
-            statistics::Scalar wrAccesses;
-            statistics::Scalar rdMisses;
-            statistics::Scalar wrMisses;
+            const TLB &tlb;
+
+            // Access Stats
+            mutable statistics::Scalar instHits;
+            mutable statistics::Scalar instMisses;
+            mutable statistics::Scalar readHits;
+            mutable statistics::Scalar readMisses;
+            mutable statistics::Scalar writeHits;
+            mutable statistics::Scalar writeMisses;
+            mutable statistics::Scalar inserts;
+            mutable statistics::Scalar insertsZeroPcid;
+            mutable statistics::Scalar evictions;
+            mutable statistics::Scalar flushTlb;
+            // mutable statistics::Scalar flushTlbMva;
+            mutable statistics::Scalar flushTlbNoGlobal;
+            mutable statistics::Scalar flushTlbPcid;
+            mutable statistics::Scalar flushTlbZeroPcid;
+            mutable statistics::Scalar flushedEntries;
+
+            statistics::Formula readAccesses;
+            statistics::Formula writeAccesses;
+            statistics::Formula instAccesses;
+            statistics::Formula hits;
+            statistics::Formula misses;
+            statistics::Formula accesses;
+
+            // statistics::Scalar rdAccesses;
+            // statistics::Scalar wrAccesses;
+            // statistics::Scalar rdMisses;
+            // statistics::Scalar wrMisses;
+
+            // statistics::Scalar flushes;
+            // statistics::Scalar noGlobalFlushes;
+            // statistics::Scalar pcidFlushes;
+            // statistics::Scalar pageDemaps;
+            // statistics::Scalar evictions;
+            // statistics::Scalar insertions;
+            // statistics::Scalar newInsertions;
+            // statistics::Scalar insertNoPCID;
+
+
         } stats;
 
         Fault translateInt(bool read, RequestPtr req, ThreadContext *tc);
@@ -161,7 +206,7 @@ namespace X86ISA
         Fault finalizePhysical(const RequestPtr &req, ThreadContext *tc,
                                BaseMMU::Mode mode) const override;
 
-        TlbEntry *insert(Addr vpn, const TlbEntry &entry, uint64_t pcid);
+        TlbEntry *insert(Addr vpn, const TlbEntry &entry);
 
         // Checkpointing
         void serialize(CheckpointOut &cp) const override;
