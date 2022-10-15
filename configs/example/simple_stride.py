@@ -63,8 +63,8 @@ class L1ICache(L1Cache):
 
     is_read_only=True
 
-    prefetcher = TaggedPrefetcher()
-    prefetcher.on_inst = True
+    # prefetcher = TaggedPrefetcher()
+    # prefetcher.on_inst = True
 
 
 class L1DCache(L1Cache):
@@ -81,6 +81,12 @@ class L1DCache(L1Cache):
 
     prefetcher = StridePrefetcher()
     prefetcher.on_inst = False
+    prefetcher.on_data = True
+    prefetcher.prefetch_on_access = False  # Not necessary to set.
+    prefetcher.prefetch_on_pf_hit = True   # Now the prefetcher is triggerd whenever the cache encounter a hit on a cacheline that was brought in by the prefetcher. This is important to set!!
+    prefetcher.queue_filter=True           # This two feature probes the cache and the prefetch queue before a new address
+    prefetcher.cache_snoop=True            # is inserted into the prefetch queue. It will avoid redundant prefetches
+    prefetcher.use_virtual_addresses=True  # This set the prefetcher to use virtual addresses. The addresses will be translated
 
 
 
@@ -106,6 +112,8 @@ system.membus = SystemXBar()
 # Create a caches
 system.icache = L1ICache()
 system.dcache = L1DCache()
+if system.dcache.prefetcher.use_virtual_addresses:     # For virtual address prefetching the prefetcher need to get translations from the TLB
+    system.dcache.prefetcher.registerTLB(system.cpu.mmu.dtb)
 
 # Connect the I and D cache ports of the CPU to the caches.
 # Since cpu_side is a vector port, each time one of these is connected, it will
@@ -138,7 +146,7 @@ process = Process()
 # grab the specific path to the binary
 thispath = os.path.dirname(os.path.realpath(__file__))
 binpath = os.path.join(thispath, '../../',
-                       'tests/test-progs/hello/bin/x86/linux/hello')
+                       'tests/test-progs/stride/stride')
 # cmd is a list which begins with the executable (like argv)
 process.cmd = [binpath]
 # Set the cpu to use the process as its workload and create thread contexts
