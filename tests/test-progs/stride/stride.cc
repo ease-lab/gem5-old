@@ -71,3 +71,60 @@ int main(int argc, char* argv[])
     return 0;
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+// #include <bits/stdc++.h>
+
+// using namespace std;
+
+// int randomNum()
+// {
+//     return (rand() %  27999);
+// }
+
+// //constant stride
+// int main()
+// {
+//     srand(time(0));
+//     vector<int> v1 (128000, 20);
+//     vector<int> v2 (128000, 30);
+
+//     int i;
+
+//     cout << "Hello, This is srijeet" << endl;
+
+//     for(i = 0; i < v1.size(); i+=64)
+//     {
+//         v1[i] = v1[i] + v2[v1.size() - 1 - i];
+//         cout << v1[i] << "  " << v2[v1.size() - 1 - i] << endl;
+//     }
+
+//     cout << "Srijeet : ends" << endl;
+//     return 0;
+// }
+
+// //random stride
+// int main()
+// {
+//     srand(time(0));
+//     vector<int> v1 (28000, 20);
+//     vector<int> v2 (28000, 30);
+
+//     int i;
+
+//     cout << "Hello, This is srijeet" << endl;
+
+//     for(i = 0; i < 2000; i++)
+//     {
+//         v1[randomNum()] = v1[randomNum()] + v2[randomNum()] + randomNum();
+//         v2[randomNum()] = v2[randomNum()] + v1[randomNum()] + randomNum();
+
+
+//         cout << v1[randomNum()] << "    " << v2[randomNum()] << endl;
+//     }
+//     cout << "Srijeet : ends" << endl;
+//     return 0;
+// }
+
+
+
+
