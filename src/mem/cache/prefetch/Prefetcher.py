@@ -531,3 +531,194 @@ class PIFPrefetcher(QueuedPrefetcher):
         if not isinstance(simObj, SimObject):
             raise TypeError("argument must be of SimObject type")
         self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))
+
+
+
+class IStreamRecordLogic(SimObject):
+    type = 'IStreamRecordLogic'
+    cxx_class = 'gem5::prefetch::RecordBuffer'
+    cxx_header = "mem/cache/prefetch/istream.hh"
+
+
+    rec_hit_in_target_cache = Param.Bool(False, "Record accesses found in the"
+                " cache we want to prefetch in")
+    rec_hit_in_listener_cache = Param.Bool(False, "Record accesses found in "
+                " the cache we get notifications")
+    rec_hit_on_pf_target_cache = Param.Bool(True, "Record accesses that hit "
+                " on a prefetch in the cache we want to prefetch in")
+    rec_hit_on_pf_listener_cache = Param.Bool(False, "Record accesses that "
+                "hit on a prefetch in the cache we get notifications")
+
+    rec_n_at_miss= Param.Unsigned("0",
+        "In order to work in combination with NL prefetcher we can specify"
+        " and we do not record those prefetches we can specify the number of "
+        " prefetches that should be generated.")
+    history_bits= Param.Unsigned("0",
+        "Number of bits used to store the history tag.")
+
+
+    block_size = Param.Int(Parent.block_size, "Block size in bytes")
+    region_size = Param.MemorySize(Parent.region_size,
+        "size of the region that is covered "
+        "within one buffer entry. Usually one page.")
+    buffer_entries = Param.Unsigned(Parent.record_buffer_entries,
+        "Number of entries in the FIFO buffer")
+    assoc = Param.Unsigned(1, "Associativity of the Record Buffer")
+    # indexing_policy = Param.BaseIndexingPolicy(
+    #         SetAssociative(entry_size = 1, assoc = Parent.assoc,
+    #                         size = Parent.buffer_entries),
+    #                         "Indexing policy of the record buffer")
+    # replacement_policy = Param.BaseReplacementPolicy(FIFORP(),
+    #     "Replacement policy of the table")
+
+    # parent = Param.IStreamPrefetcher(Parent.any, "The Main Stream prefetcher")
+
+
+
+class IStreamReplayLogic(SimObject):
+    type = 'IStreamReplayLogic'
+    cxx_class = 'gem5::prefetch::ReplayBuffer'
+    cxx_header = "mem/cache/prefetch/istream.hh"
+
+    block_size = Param.Int(Parent.block_size, "Block size in bytes")
+    region_size = Param.MemorySize(Parent.region_size,
+        "size of the region that is covered "
+        "within one buffer entry. Usually one page.")
+    buffer_entries = Param.Unsigned(Parent.replay_buffer_entries,
+        "Number of entries in the FIFO buffer")
+
+
+
+
+class IStreamPrefetcher(QueuedPrefetcher):
+    type = 'IStreamPrefetcher'
+    cxx_class = 'gem5::prefetch::IStream'
+    cxx_header = "mem/cache/prefetch/istream.hh"
+    cxx_exports = [
+        # PyBindMethod("addEventProbeRetiredInsts"),
+        PyBindMethod("startRecord"),
+        PyBindMethod("startReplay"),
+        PyBindMethod("dumpRecTrace"),
+        PyBindMethod("initReplay"),
+        # PyBindMethod("addEventProbeCS"),
+        # PyBindMethod("startAtScheduling"),
+        PyBindMethod("addListenerCache"),
+        PyBindMethod("addCaches"),
+        # PyBindMethod("addCSHook"),
+    ]
+
+    def __init__(self, **kwargs):
+        super(IStreamPrefetcher, self).__init__(**kwargs)
+        self._l1cache = None
+        self._l2cache = None
+        self._cs_hook = None
+
+    def addEvent(self, newObject):
+        print("Add event: ", )
+        self._events.append(newObject)
+
+    # Override the normal SimObject::regProbeListeners method and
+    # register deferred event handlers.
+    def regProbeListeners(self):
+        if self._cs_hook:
+            self.getCCObject().addCSHook(self._cs_hook.getCCObject())
+        self.getCCObject().addCaches(
+                self._l1cache.getCCObject(),
+                self._l2cache.getCCObject())
+        self.getCCObject().regProbeListeners()
+
+    def registerCaches(self, l1Cache, l2Cache):
+        self._l1cache = l1Cache
+        self._l2cache = l2Cache
+
+    # def registerContextSwitchHook(self, cs_hook):
+    #     self._cs_hook = cs_hook
+
+
+    use_virtual_addresses = True
+
+    # l1_cache = Param.SimObject(NULL,"The L1 cache to listen from")
+    # l2_cache = Param.SimObject(Parent,"The L2 cache to listen from")
+
+# context_switch_hook = Param.SimObject(NULL, "Workload hook to instrument "
+#                                 "context switches.")
+
+    recordLogic = Param.IStreamRecordLogic(IStreamRecordLogic(), "Pointer to the record buffer object")
+    replayLogic = Param.IStreamReplayLogic(IStreamReplayLogic(), "Pointer to the replay buffer object")
+
+    rec_hit_in_target_cache = Param.Bool(False, "Record accesses found in the"
+                " cache we want to prefetch in")
+    rec_hit_in_listener_cache = Param.Bool(False, "Record accesses found in "
+                " the cache we get notifications")
+    rec_hit_on_pf_target_cache = Param.Bool(True, "Record accesses that hit "
+                " on a prefetch in the cache we want to prefetch in")
+    rec_hit_on_pf_listener_cache = Param.Bool(False, "Record accesses that "
+                "hit on a prefetch in the cache we get notifications")
+
+    rec_n_at_miss= Param.Unsigned("0",
+        "In order to work in combination with NL prefetcher we can specify"
+        " and we do not record those prefetches we can specify the number of "
+        " prefetches that should be generated.")
+    history_bits= Param.Unsigned("0",
+        "Number of bits used to store the history tag.")
+
+    region_size = Param.MemorySize("4kB","size of the region that is covered "
+        "within one buffer entry. Usually one page.")
+    record_buffer_entries = Param.Unsigned("4",
+        "Number of entries in the FIFO buffer")
+    replay_buffer_entries = Param.Unsigned("4",
+        "Number of entries in the FIFO buffer")
+
+    # Replaying always needs to runs ahead of the actual recording to be
+    # effective. However if replaying is to fast we thrash the cache.
+    # Replayed prefetches will be evicted to fast to be useful. They will hurt
+    # the performance not to much because we still prefetch into the LLC.
+    # However, still we lose unnecessary cycles. In order to avoid the
+    # thrashing one can specify how much the replay can run ahead.
+    # This works because we know that there is a high similarity
+    # and a high accuray.
+    # Its self regulating.
+    # A negative value will not limit the prefetcher.
+    replay_distance = Param.Int(-1,
+                            "Allow replaying to run ahead of recording.")
+
+    port = RequestPort("Interface of the IStream prefetcher to "
+                            "read and write the traces directly to memory")
+    # backdoor = RequestPort("Backdoor to get/set meta data magically "
+    #                         "directly to memory")
+    # dmaport = RequestPort("Backdoor to get/set meta data magically "
+    #                         "directly to memory")
+
+    trace_size = Param.MemorySize("4kB","Because we do not simulate a optimal"
+        " serialization we allocate more memory but limit here the real size")
+    record_addr_range = Param.AddrRange("10kB",
+        "Address where the record trace is placed in memory. "
+        "Because the prefetcher will not override upon reaching the end of "
+        "this address range, the size this address space defines the maximal "
+        "numbers of entries which can be written.")
+    replay_addr_range = Param.AddrRange("10kB",
+        "Same as 'record_addr_range' but the replaying functionality.")
+
+    start_on_context_switch = Param.Bool(False,
+                            "Trigger Record/Replay start by Context Switch")
+    stop_on_context_switch = Param.Bool(False,
+                            "Trigger Record/Replay stop by Context Switch")
+
+    def registerEventProbeCS(self, obj):
+        self.getCCObject().addEventProbeCS(
+                    obj.getCCObject(), "SwitchActiveIdle")
+
+    def listenFromCache(self, listenerCache):
+        # if not isinstance(listenerCache, SimObject):
+        #     raise TypeError("argument must be of SimObjct type")
+        # self.addEvent(HWPProbeEvent(self, listenerCache, "All"))
+        self.getCCObject().addListenerCache(listenerCache.getCCObject())
+
+    # def registerTLB(self, simObj):
+    #     if not isinstance(simObj, SimObject):
+    #         raise TypeError("argument must be a SimObject type")
+    #     self._tlbs.append(simObj)
+# def listenFromProbeRetiredInstructions(self, simObj):
+#     if not isinstance(simObj, SimObject):
+#         raise TypeError("argument must be of SimObject type")
+#     self.addEvent(HWPProbeEventRetiredInsts(self, simObj,"RetiredInstsPC"))

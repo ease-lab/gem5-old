@@ -35,7 +35,8 @@ SimObject('Prefetcher.py', sim_objects=[
     'SignaturePathPrefetcherV2', 'AccessMapPatternMatching', 'AMPMPrefetcher',
     'DeltaCorrelatingPredictionTables', 'DCPTPrefetcher',
     'IrregularStreamBufferPrefetcher', 'SlimAMPMPrefetcher',
-    'BOPPrefetcher', 'SBOOEPrefetcher', 'STeMSPrefetcher', 'PIFPrefetcher'])
+    'BOPPrefetcher', 'SBOOEPrefetcher', 'STeMSPrefetcher', 'PIFPrefetcher',
+    'IStreamPrefetcher', 'IStreamRecordLogic','IStreamReplayLogic'])
 
 Source('access_map_pattern_matching.cc')
 Source('base.cc')
@@ -52,4 +53,5 @@ Source('signature_path_v2.cc')
 Source('slim_ampm.cc')
 Source('spatio_temporal_memory_streaming.cc')
 Source('stride.cc')
+Source('istream.cc')
 Source('tagged.cc')
