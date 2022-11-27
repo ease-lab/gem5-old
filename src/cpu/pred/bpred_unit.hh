@@ -179,11 +179,11 @@ class BPredUnit : public SimObject
                 bool actually_taken, ThreadID tid,
                 StaticInstPtr inst, const PCStateBase &pc);
 
-  protected:
+  // protected:
     void regProbePoints() override;
 
-    // @todo: Rename this function.
-    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
+    // // @todo: Rename this function.
+    // virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
     /**
      * @param bp_history Pointer to the history object.  The predictor

@@ -172,3 +172,6 @@ class BaseO3CPU(BaseCPU):
     needsTSO = Param.Bool(False, "Enable TSO Memory model")
 
     mark_one_as_miss =  Param.Bool(True, "Mark only one instruction as miss")
+
+    ftq_size = Param.Unsigned(8, "Number of entries in the FTQ. "
+                                    "Zero disables the FTQ")

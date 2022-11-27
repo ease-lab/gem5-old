@@ -664,7 +664,8 @@ Decode::decodeInsts(ThreadID tid)
         insts_to_decode.pop();
 
         DPRINTF(Decode, "[tid:%i] Processing instruction [sn:%lli] with "
-                "PC %s\n", tid, inst->seqNum, inst->pcState());
+                "PC %s: %s\n", tid, inst->seqNum, inst->pcState(),
+                inst->staticInst->disassemble(inst->pcState().instAddr()));
 
         if (inst->isSquashed()) {
             DPRINTF(Decode, "[tid:%i] Instruction %i with PC %s is "
@@ -702,28 +703,27 @@ Decode::decodeInsts(ThreadID tid)
         // }
 #endif
 
-        // // Make sure that fetch predicted a control instruction correctly.
-        // // It can happen that fetch predict an instruction as control but it
-        // // was actually no control.
-        // // Or fetch predict a instruction as no control it actually is
-        // // a control instruction.
-        // if (inst->readPredControl() != inst->isControl()) {
-        //     DPRINTF(Decode,
-        //             "[tid:%i] [sn:%llu] "
-        //             "Control mispredict: Pred:%s, actual:%s\n",
-        //             tid, inst->seqNum,
-        //             inst->readPredControl() ? "control" : "no control",
-        //             inst->isControl() ? "control" : "no control");
+        // Make sure that fetch predicted a control instruction correctly.
+        // It can happen that fetch predict an instruction as control but it
+        // was actually no control.
+        // Or fetch predict a instruction as no control it actually is
+        // a control instruction.
+        if (inst->readPredControl() != inst->isControl()) {
+            DPRINTF(Decode,
+                    "[tid:%i] [sn:%llu] "
+                    "Control mispredict: Pred:%s, actual:%s\n",
+                    tid, inst->seqNum,
+                    inst->readPredControl() ? "control" : "no control",
+                    inst->isControl() ? "control" : "no control");
 
-        //     ++stats.controlMispred;
-        //     inst->setResteered(true);
-        //     // Might want to set some sort of boolean and just do
-        //     // a check at the end
-        //     squash(inst, true, inst->threadNumber);
+            ++stats.controlMispred;
+            inst->setResteered(true);
+            // Might want to set some sort of boolean and just do
+            // a check at the end
+            squash(inst, true, inst->threadNumber);
 
-
-        //     break;
-        // }
+            break;
+        }
 
 
         // Go ahead and compute any PC-relative branches.

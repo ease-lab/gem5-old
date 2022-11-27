@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 The Regents of The University of Michigan
+ * Copyright (c) 2022 The University of Edinburgh
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,10 +27,76 @@
  */
 
 #include <stdio.h>
+// #include <vector>
+
+
+int __attribute__ ((noinline)) foo2(int n)
+{
+  return n + 1;
+}
+
+int __attribute__ ((noinline)) foo1(int n)
+{
+  return foo2(n) + 1;
+}
+
+int __attribute__ ((noinline)) foo(int n)
+{
+  return foo1(n) + 1;
+}
+
+
+
+
+
+int stride() {
+
+  int sum = 0;
+
+  const int N = 4*1024*1024;
+
+  int* a = new int[N];
+  int* b = new int[N];
+  int* c = new int[N];
+
+
+  for (int i = 0; i < N; i += 64) {
+    int x = a[i]+3;
+    x+= b[(i*6)%N]+3;
+    // x+= b[(i)%N]+3;
+
+    sum += x;
+    // b[N-i-1] = x+3;
+    b[(i*9)%N] = x+3;
+  }
+
+  delete a;
+  delete b;
+
+  return sum;
+}
+
+
+
+
+
+
+
+
+
+
+
 
 int main(int argc, char* argv[])
 {
-    printf("Hello world!\n");
+    // int i = 0;
+    // i = foo(i);
+
+    // printf("Hello world! %d\n",i);
+
+    int r = stride();
+
+    // printf("It really works %d\n",r);
     return 0;
 }
 

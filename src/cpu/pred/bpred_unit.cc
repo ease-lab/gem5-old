@@ -210,7 +210,7 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
 
     void *bp_history = NULL;
     void *indirect_history = NULL;
-    void *ras_history = NULL;
+    // void *ras_history = NULL;
 
     if (inst->isUncondCtrl()) {
         DPRINTF(Branch, "[tid:%i] [sn:%llu] Unconditional control\n",
@@ -263,6 +263,10 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
         // Use RAS for returns if available
         if (ras && inst->isReturn()) {
             predict_record.wasReturn = true;
+
+            // We only know if its a return if there is a BTB hit
+            if (btb_hit) {
+
             // If it's a function return call, then look up the address
             // in the RAS.
             const PCStateBase *ras_top = ras->pop(tid,
@@ -276,6 +280,7 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                     "return, RAS predicted target: %s\n",
                     tid, seqNum, pc, *target);
             }
+        }
         }
 
         if (!predict_record.usedRAS) {
@@ -651,7 +656,7 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
         // If this is not the last branch in the history we know
         // the squash was initiated from decode to correct an
         // unconditional branch and perform an early resteere of the front end
-        bool early_resteere = false;
+        // bool early_resteere = false;
         if (hist_it != pred_hist.end()) {
             // DPRINTF(Branch, "Early squash from DECODE sn %i\n",
             //         pred_hist.front().seqNum);

@@ -60,6 +60,8 @@
 #include "sim/eventq.hh"
 #include "sim/probe/probe.hh"
 
+
+// #define FDIP
 namespace gem5
 {
 
@@ -436,7 +438,7 @@ class Fetch
    typedef std::deque<BasicBlockPtr> FetchTargetQueue;
 
    FetchTargetQueue ftq[MaxThreads];
-    const unsigned ftqSize = 8;
+    const unsigned ftqSize;
 
     void dumpFTQ(ThreadID tid);
     bool updateFTQStatus(ThreadID tid);
@@ -445,8 +447,9 @@ class Fetch
     BasicBlockPtr basicBlockProduce[MaxThreads];
     BasicBlockPtr basicBlockConsume[MaxThreads];
 
-
+#ifdef FDIP
     bool ftqValid(ThreadID tid, bool &status_change) {
+
         // If the FTQ is empty wait unit its filled upis available.
         // Need at least two cycles for now.
         if (ftq[tid].empty()) {
@@ -457,6 +460,10 @@ class Fetch
         }
         return true;
     }
+#else
+  bool ftqValid(ThreadID tid, bool &status_change) {return true;}
+#endif
+
     bool inFTQHead(ThreadID tid, Addr pc) {
         if (ftq[tid].empty()) {
             return false;

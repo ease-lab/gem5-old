@@ -70,6 +70,7 @@
 #include "sim/full_system.hh"
 #include "sim/system.hh"
 
+
 namespace gem5
 {
 
@@ -83,6 +84,7 @@ Fetch::IcachePort::IcachePort(Fetch *_fetch, CPU *_cpu) :
 
 Fetch::Fetch(CPU *_cpu, const BaseO3CPUParams &params)
     : fetchPolicy(params.smtFetchPolicy),
+      ftqSize(params.ftq_size),
       cpu(_cpu),
       branchPred(nullptr),
       wasICacheMiss(false), accessDepth(0), wasHitOnPf(false),
@@ -682,8 +684,8 @@ Fetch::produceFetchTargets(bool &status_change)
     bool branchFound = false;
     bool predict_taken = false;
     unsigned numAddrSearched = 0;
-    unsigned addrDistance = 4;
-    unsigned inst_width = 1;
+    // unsigned addrDistance = 4;
+    // unsigned inst_width = 1;
     InstSeqNum seqNum;
     Addr curAddr;
 
@@ -1249,8 +1251,10 @@ Fetch::doSquash(const PCStateBase &new_pc, const DynInstPtr squashInst,
 
     ++fetchStats.squashCycles;
 
+#ifdef FDIP
     // Squash also the FTQ
     doFTQSquash(new_pc, tid);
+#endif
 }
 
 
@@ -1370,11 +1374,13 @@ Fetch::tick()
     //     consumeFetchTargets(status_change);
     // }
 
+#ifdef FDIP
     for (threadFetched = 0; threadFetched < numFetchingThreads;
          threadFetched++) {
         // Produce for each actively threads.
         produceFetchTargets(status_change);
     }
+#endif
 
     for (threadFetched = 0; threadFetched < numFetchingThreads;
          threadFetched++) {
@@ -1511,21 +1517,26 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
         // invalid state we generated in after sequence number
         if (fromCommit->commitInfo[tid].mispredictInst &&
             fromCommit->commitInfo[tid].mispredictInst->isControl()) {
-            branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
-                    *fromCommit->commitInfo[tid].pc,
-                    fromCommit->commitInfo[tid].branchTaken, tid,
-                    fromCommit->commitInfo[tid].mispredictInst->staticInst,
-                    fromCommit->commitInfo[tid].mispredictInst->pcState());
-            fetchStats.branchMisspredict++;
+                branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
+                        *fromCommit->commitInfo[tid].pc,
+                        fromCommit->commitInfo[tid].branchTaken, tid,
+                        fromCommit->commitInfo[tid].mispredictInst->staticInst,
+                        fromCommit->commitInfo[tid].mispredictInst->pcState());
+                fetchStats.branchMisspredict++;
         } else {
             branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
-                              tid);
-            DPRINTF(Fetch, "[tid:%i] Squashing due to mispredict of non-"
+                            tid);
+            if (fromCommit->commitInfo[tid].mispredictInst) {
+                DPRINTF(Fetch, "[tid:%i] Squashing due to mispredict of non-"
                 "control instruction: %s\n",tid,
                 fromCommit->commitInfo[tid]
                         .mispredictInst->staticInst->disassemble(
                     fromCommit->commitInfo[tid]
                         .mispredictInst->pcState().instAddr()));
+            } else {
+                DPRINTF(Fetch, "[tid:%i] Squashing due to mispredict of non-"
+                "control instruction: %s\n",tid);
+            }
             fetchStats.noBranchMisspredict++;
         }
 
@@ -1568,6 +1579,7 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
     }
 
     // Update FTQ status first.
+#ifdef FDIP
     bool ret_val = updateFTQStatus(tid);
 
 
@@ -1601,6 +1613,35 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
     // If we've reached this point, we have not gotten any signals that
     // cause fetch to change its status.  Fetch remains the same as before.
     return ret_val;
+#else
+
+    if (checkStall(tid) &&
+        fetchStatus[tid] != IcacheWaitResponse &&
+        fetchStatus[tid] != IcacheWaitRetry &&
+        fetchStatus[tid] != ItlbWait &&
+        fetchStatus[tid] != QuiescePending) {
+        DPRINTF(Fetch, "[tid:%i] Setting to blocked\n",tid);
+
+        fetchStatus[tid] = Blocked;
+
+        return true;
+    }
+
+    // Check if there is at least one fetch target in the FTQ
+    if (fetchStatus[tid] == Blocked ||
+             fetchStatus[tid] == Squashing) {
+        // Switch status to running if fetch isn't being told to block or
+        // squash this cycle.
+        DPRINTF(Fetch, "[tid:%i] Done squashing, switching to running.\n",
+                tid);
+
+        fetchStatus[tid] = Running;
+
+        return true;
+    }
+
+    return false;
+#endif
 }
 
 ////////////////
@@ -1988,10 +2029,12 @@ Fetch::buildInst(ThreadID tid, StaticInstPtr staticInst,
     instruction->traceData = NULL;
 #endif
 
-    // Add instruction to the CPU's list of instructions.
-    instruction->setInstListIt(cpu->addInst(instruction));
 
     if (insert_IQ) {
+
+        // Add instruction to the CPU's list of instructions.
+        instruction->setInstListIt(cpu->addInst(instruction));
+
         // Write the instruction to the first slot in the queue
         // that heads to decode.
         assert(numInst < fetchWidth);
@@ -2043,7 +2086,11 @@ Fetch::fetch(bool &status_change)
     Addr fetchAddr = (this_pc.instAddr() + pcOffset) & decoder[tid]->pcMask();
 
     bool inRom = isRomMicroPC(this_pc.microPC());
+#ifdef FDIP
     bool inFT = inFTQHead(tid, this_pc.instAddr());
+#else
+    const bool inFT = true;
+#endif
 
     // If returning from the delay of a cache miss, then update the status
     // to running, otherwise do the cache access.  Possibly move this up
@@ -2218,7 +2265,9 @@ Fetch::fetch(bool &status_change)
             }
 
 
+#ifdef FDIP
 ///////////////////////////////
+            predictedBranch |= this_pc.branching();
 
             DynInstPtr instruction = getInstrFromBB(tid, staticInst, curMacroop,
                                             this_pc, *next_pc);
@@ -2233,23 +2282,23 @@ Fetch::fetch(bool &status_change)
 
             // set(next_pc, this_pc);
 
-            predictedBranch = instruction->readPredTaken();
+            predictedBranch |= instruction->readPredTaken();
 
+#else
+///////////////////////
+            DynInstPtr instruction = buildInst(tid, staticInst, curMacroop,
+                                            this_pc, *next_pc, 0, true, true);
 
-// ///////////////////////
-//             DynInstPtr instruction = buildInst(tid, staticInst, curMacroop,
-//                                             this_pc, *next_pc, 0, true, true);
+            set(next_pc, this_pc);
 
-//             set(next_pc, this_pc);
+            // If we're branching after this instruction, quit fetching
+            // from the same block.
+            predictedBranch |= this_pc.branching();
+            predictedBranch |= lookupAndUpdateNextPC(instruction, *next_pc);
+            // predictedBranch |= searchBTBAndUpdateNextPC(instruction, *next_pc);
 
-//             // If we're branching after this instruction, quit fetching
-//             // from the same block.
-//             predictedBranch |= this_pc.branching();
-//             predictedBranch |= lookupAndUpdateNextPC(instruction, *next_pc);
-//             // predictedBranch |= searchBTBAndUpdateNextPC(instruction, *next_pc);
-
-// /////////////////////
-
+/////////////////////
+#endif
             ppFetch->notify(instruction);
             numInst++;
 
@@ -2294,7 +2343,9 @@ Fetch::fetch(bool &status_change)
         // Re-evaluate whether the next instruction to fetch is
         // (1) in micro-op ROM or not and (2) in the
         inRom = isRomMicroPC(this_pc.microPC());
+#ifdef FDIP
         inFT = inFTQHead(tid, this_pc.instAddr());
+#endif
         // The current BB to fetch from
         // curBB = getCurrentFetchTarget(tid, status_change);
     }
@@ -2324,7 +2375,9 @@ Fetch::fetch(bool &status_change)
     issuePipelinedIfetch[tid] = fetchBufferBlockPC != fetchBufferPC[tid] &&
         fetchStatus[tid] != IcacheWaitResponse &&
         fetchStatus[tid] != ItlbWait &&
+#ifdef FDIP
         fetchStatus[tid] != FTQEmpty &&
+#endif
         fetchStatus[tid] != IcacheWaitRetry &&
         fetchStatus[tid] != QuiescePending &&
         !curMacroop;
