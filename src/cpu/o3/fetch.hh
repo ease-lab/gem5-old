@@ -430,6 +430,11 @@ class Fetch
      */
     bool wroteToTimeBuffer;
 
+    bool wasICacheMiss;
+    int accessDepth;
+    bool wasHitOnPf;
+    const bool mark_one_as_miss;
+
     /** Tracks how many instructions has been fetched this cycle. */
     int numInst;
 
@@ -545,6 +550,10 @@ class Fetch
         statistics::Scalar branches;
         /** Stat for total number of predicted branches. */
         statistics::Scalar predictedBranches;
+        /** Stat for total number of misspredicted instructions. */
+        statistics::Scalar branchMisspredict;
+        statistics::Scalar noBranchMisspredict;
+
         /** Stat for total number of cycles spent fetching. */
         statistics::Scalar cycles;
         /** Stat for total number of cycles spent squashing. */

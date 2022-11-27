@@ -170,3 +170,5 @@ class BaseO3CPU(BaseCPU):
                                                        Parent.numThreads),
                                        "Branch Predictor")
     needsTSO = Param.Bool(False, "Enable TSO Memory model")
+
+    mark_one_as_miss =  Param.Bool(True, "Mark only one instruction as miss")

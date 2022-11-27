@@ -362,6 +362,7 @@ BaseCache::handleTimingReqMiss(PacketPtr pkt, MSHR *mshr, CacheBlk *blk,
         // no MSHR
         assert(pkt->req->requestorId() < system->maxRequestors());
         stats.cmdStats(pkt).mshrMisses[pkt->req->requestorId()]++;
+        pkt->req->incAccessDepth();
         if (prefetcher && pkt->isDemand())
             prefetcher->incrDemandMhsrMisses();
 
@@ -453,6 +454,7 @@ BaseCache::recvTimingReq(PacketPtr pkt)
             DPRINTF(Cache, "Hit on prefetch for addr %#x (%s)\n",
                     pkt->getAddr(), pkt->isSecure() ? "s" : "ns");
             blk->clearPrefetched();
+            pkt->req->setHitOnPF(true);
         }
 
         handleTimingReqHit(pkt, blk, request_time);
@@ -923,6 +925,7 @@ BaseCache::getNextQueueEntry()
                 // (hwpf_mshr_misses)
                 assert(pkt->req->requestorId() < system->maxRequestors());
                 stats.cmdStats(pkt).mshrMisses[pkt->req->requestorId()]++;
+                pkt->req->incAccessDepth();
 
                 // allocate an MSHR and return it, note
                 // that we send the packet straight away, so do not

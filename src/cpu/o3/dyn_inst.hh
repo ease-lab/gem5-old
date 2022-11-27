@@ -184,6 +184,8 @@ class DynInst : public ExecContext, public RefCounted
         MemAccPredicate,
         PredTaken,
         Resteered,
+        ICacheMiss,
+        HitOnPf,
         IsStrictlyOrdered,
         ReqMade,
         MemOpDone,
@@ -533,6 +535,31 @@ class DynInst : public ExecContext, public RefCounted
     {
         instFlags[Resteered] = t;
     }
+
+    /** Returns whether the instruction was resteered due to BTB miss or not */
+    bool wasICacheMiss() const { return instFlags[ICacheMiss]; }
+
+    void
+    setICacheMiss(bool t = false)
+    {
+        instFlags[ICacheMiss] = t;
+    }
+
+
+    int depth = 0;
+    void setAccessDepth(int _depth) { depth = _depth; }
+    int getAccessDepth() const { return depth; }
+
+
+    /** Returns whether the instruction was resteered due to BTB miss or not */
+    bool wasHitOnPf() const { return instFlags[HitOnPf]; }
+
+    void
+    setHitOnPf(bool t = false)
+    {
+        instFlags[HitOnPf] = t;
+    }
+
     /** Returns whether the instruction mispredicted. */
     bool
     mispredicted() const

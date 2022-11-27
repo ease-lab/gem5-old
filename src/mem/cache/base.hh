@@ -1297,7 +1297,7 @@ class BaseCache : public ClockedObject
     {
         assert(pkt->req->requestorId() < system->maxRequestors());
         stats.cmdStats(pkt).misses[pkt->req->requestorId()]++;
-        pkt->req->incAccessDepth();
+        // pkt->req->incAccessDepth();
         if (missCount) {
             --missCount;
             if (missCount == 0)

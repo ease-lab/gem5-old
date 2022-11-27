@@ -166,6 +166,10 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
                "Number of insts commited each cycle"),
       ADD_STAT(instsCommitted, statistics::units::Count::get(),
                "Number of instructions committed"),
+      ADD_STAT(instsCommittedICMisses, statistics::units::Count::get(),
+               "Number of instructions committed"),
+      ADD_STAT(instsCommittedICHitOnPf, statistics::units::Count::get(),
+               "Number of instructions committed"),
       ADD_STAT(opsCommitted, statistics::units::Count::get(),
                "Number of ops (including micro ops) committed"),
       ADD_STAT(memRefs, statistics::units::Count::get(),
@@ -187,6 +191,8 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
                "Number of function calls committed."),
       ADD_STAT(committedInstType, statistics::units::Count::get(),
                "Class of committed instruction"),
+      ADD_STAT(noCtrlBranching, statistics::units::Count::get(),
+               "Class of non control branching instructions"),
       ADD_STAT(commitEligibleSamples, statistics::units::Cycle::get(),
                "number cycles where commit BW limit reached")
 {
@@ -203,6 +209,12 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
         .flags(statistics::pdf);
 
     instsCommitted
+        .init(cpu->numThreads)
+        .flags(total);
+    instsCommittedICMisses
+        .init(cpu->numThreads)
+        .flags(total);
+    instsCommittedICHitOnPf
         .init(cpu->numThreads)
         .flags(total);
 
@@ -251,6 +263,10 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
         .flags(total | pdf | dist);
 
     committedInstType.ysubnames(enums::OpClassStrings);
+
+    noCtrlBranching
+        .init(commit->numThreads)
+        .flags(total);
 }
 
 void
@@ -1406,8 +1422,19 @@ Commit::updateComInstStats(const DynInstPtr &inst)
 {
     ThreadID tid = inst->threadNumber;
 
-    if (!inst->isMicroop() || inst->isLastMicroop())
+    if (!inst->isMicroop() || inst->isLastMicroop()) {
         stats.instsCommitted[tid]++;
+
+        if (inst->wasICacheMiss()) {
+            stats.instsCommittedICMisses[tid]++;
+        } else {
+            if (inst->wasHitOnPf()) {
+                stats.instsCommittedICHitOnPf[tid]++;
+            }
+        }
+
+    }
+
     stats.opsCommitted[tid]++;
 
     // To match the old model, don't count nops and instruction

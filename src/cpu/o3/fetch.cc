@@ -85,6 +85,8 @@ Fetch::Fetch(CPU *_cpu, const BaseO3CPUParams &params)
     : fetchPolicy(params.smtFetchPolicy),
       cpu(_cpu),
       branchPred(nullptr),
+      wasICacheMiss(false), accessDepth(0), wasHitOnPf(false),
+      mark_one_as_miss(params.mark_one_as_miss),
       decodeToFetchDelay(params.decodeToFetchDelay),
       renameToFetchDelay(params.renameToFetchDelay),
       iewToFetchDelay(params.iewToFetchDelay),
@@ -169,6 +171,10 @@ Fetch::FetchStatGroup::FetchStatGroup(CPU *cpu, Fetch *fetch)
     ADD_STAT(branches, statistics::units::Count::get(),
              "Number of branches that fetch encountered"),
     ADD_STAT(predictedBranches, statistics::units::Count::get(),
+             "Number of branches that fetch has predicted taken"),
+    ADD_STAT(branchMisspredict, statistics::units::Count::get(),
+             "Number of branches that fetch has predicted taken"),
+    ADD_STAT(noBranchMisspredict, statistics::units::Count::get(),
              "Number of branches that fetch has predicted taken"),
     ADD_STAT(cycles, statistics::units::Cycle::get(),
              "Number of cycles fetch has run and was not squashing or "
@@ -356,8 +362,12 @@ void
 Fetch::processCacheCompletion(PacketPtr pkt)
 {
     ThreadID tid = cpu->contextToThread(pkt->req->contextId());
+    wasICacheMiss = pkt->req->getAccessDepth() > 0;
+    wasHitOnPf = pkt->req->getHitOnPF();
+    accessDepth = pkt->req->getAccessDepth();
 
-    DPRINTF(Fetch, "[tid:%i] Waking up from cache miss.\n", tid);
+    DPRINTF(Fetch, "[tid:%i] Waking up from cache %s: Depth: %i \n", tid,
+            wasICacheMiss ? "miss" : "hit", pkt->req->getAccessDepth());
     assert(!cpu->switchedOut());
 
     // Only change the status if it's still waiting on the icache access
@@ -979,9 +989,17 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
             branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
                     *fromCommit->commitInfo[tid].pc,
                     fromCommit->commitInfo[tid].branchTaken, tid);
+            fetchStats.branchMisspredict++;
         } else {
             branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
                               tid);
+            DPRINTF(Fetch, "[tid:%i] Squashing due to mispredict of non-"
+                "control instruction: %s\n",tid,
+                fromCommit->commitInfo[tid]
+                        .mispredictInst->staticInst->disassemble(
+                    fromCommit->commitInfo[tid]
+                        .mispredictInst->pcState().instAddr()));
+            fetchStats.noBranchMisspredict++;
         }
 
         return true;
@@ -1065,14 +1083,25 @@ Fetch::buildInst(ThreadID tid, StaticInstPtr staticInst,
     DynInstPtr instruction = new (arrays) DynInst(
             arrays, staticInst, curMacroop, this_pc, next_pc, seq, cpu);
     instruction->setTid(tid);
+    instruction->setICacheMiss(wasICacheMiss);
+    instruction->setAccessDepth(accessDepth);
+    instruction->setHitOnPf(wasHitOnPf);
 
     instruction->setThreadState(cpu->thread[tid]);
 
-    DPRINTF(Fetch, "[tid:%i] Instruction PC %s created [sn:%lli].\n",
-            tid, this_pc, seq);
+    DPRINTF(Fetch, "[tid:%i] Instruction PC %s created [sn:%lli]. %s\n",
+            tid, this_pc, seq, wasICacheMiss ? "I$ miss" : "");
 
     DPRINTF(Fetch, "[tid:%i] Instruction is: %s\n", tid,
             instruction->staticInst->disassemble(this_pc.instAddr()));
+
+    // Only mark the very first instruction after a I-cache miss as
+    // miss causing.
+    if (mark_one_as_miss && instruction->isLastMicroop()) {
+        wasICacheMiss = false;
+    }
+
+
 
 #if TRACING_ON
     if (trace) {

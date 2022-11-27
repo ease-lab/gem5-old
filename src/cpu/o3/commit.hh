@@ -490,6 +490,9 @@ class Commit
 
         /** Total number of instructions committed. */
         statistics::Vector instsCommitted;
+        /** Total number of instructions committed. */
+        statistics::Vector instsCommittedICMisses;
+        statistics::Vector instsCommittedICHitOnPf;
         /** Total number of ops (including micro ops) committed. */
         statistics::Vector opsCommitted;
         /** Stat for the total number of committed memory references. */
@@ -512,6 +515,8 @@ class Commit
         statistics::Vector functionCalls;
         /** Committed instructions by instruction type (OpClass) */
         statistics::Vector2d committedInstType;
+
+        statistics::Vector noCtrlBranching;
 
         /** Number of cycles where the commit bandwidth limit is reached. */
         statistics::Scalar commitEligibleSamples;
