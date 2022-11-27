@@ -183,6 +183,7 @@ class DynInst : public ExecContext, public RefCounted
         Predicate,
         MemAccPredicate,
         PredTaken,
+        Resteered,
         IsStrictlyOrdered,
         ReqMade,
         MemOpDone,
@@ -524,6 +525,14 @@ class DynInst : public ExecContext, public RefCounted
         instFlags[PredTaken] = predicted_taken;
     }
 
+    /** Returns whether the instruction was resteered due to BTB miss or not */
+    bool readResteered() const { return instFlags[Resteered]; }
+
+    void
+    setResteered(bool t = false)
+    {
+        instFlags[Resteered] = t;
+    }
     /** Returns whether the instruction mispredicted. */
     bool
     mispredicted() const

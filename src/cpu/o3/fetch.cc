@@ -523,6 +523,7 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &next_pc)
         inst->staticInst->advancePC(next_pc);
         inst->setPredTarg(next_pc);
         inst->setPredTaken(false);
+        inst->setResteered(false);
         return false;
     }
 
@@ -548,6 +549,7 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &next_pc)
             tid, inst->seqNum, inst->pcState().instAddr(), next_pc);
     inst->setPredTarg(next_pc);
     inst->setPredTaken(predict_taken);
+    inst->setResteered(false);
 
     ++fetchStats.branches;
 

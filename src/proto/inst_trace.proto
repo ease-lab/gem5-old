@@ -88,21 +88,23 @@ message InstRecord {
   optional uint32 size = 6;
   optional uint32 flags = 7;
   optional uint64 v_addr = 8;
+  optional bool use_stack = 9;
 
   // Whether the instruction is traced at fetch or commit
-  optional bool is_fetch = 9;
+  optional bool is_fetch = 10;
 
   // Different time stamps
-  optional uint32 fe_tick = 10;
-  optional uint32 de_tick = 11;
-  optional uint32 is_tick = 12;
-  optional uint32 co_tick = 13;
+  optional uint32 fe_tick = 11;
+  optional uint32 de_tick = 12;
+  optional uint32 is_tick = 13;
+  optional uint32 co_tick = 14;
 
   // Branch data:
-  optional BranchType brtype = 14;
-  optional uint64 target = 15;
-  optional bool taken = 16;
-  optional bool pred_taken = 17;
+  optional BranchType brtype = 15;
+  optional uint64 target = 16;
+  optional bool taken = 17;
+  optional bool pred_taken = 18;
+  optional bool resteered = 19;
 
 
   // optional InstType type = 6; // add, mul, fp add, load, store, simd add, …

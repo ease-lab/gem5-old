@@ -42,6 +42,7 @@ class InstTrace(ProbeListenerObject):
 
     # Trace file for the following params are created in the output directory.
     instTraceFile = Param.String("inst_trace.gz", "Protobuf trace file name")
+    funcTraceFile = Param.String("func_trace.txt", "Protobuf trace file name")
 
 # # The committed instruction count from which to start tracing
 # startTraceInst = Param.UInt64(0, "The number of committed instructions " \
@@ -59,3 +60,4 @@ class InstTrace(ProbeListenerObject):
     trace_commit = Param.Bool(False, "Trace all commited instructions.")
     trace_branches = Param.Bool(False, "Trace branches")
     trace_memref = Param.Bool(False, "Trace memory references")
+    trace_functions = Param.Bool(False, "Trace memory references")

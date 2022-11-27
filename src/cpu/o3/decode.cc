@@ -708,10 +708,11 @@ Decode::decodeInsts(ThreadID tid)
             panic("Instruction predicted as a branch!");
 
             ++stats.controlMispred;
-
+            inst->setResteered(true);
             // Might want to set some sort of boolean and just do
             // a check at the end
             squash(inst, inst->threadNumber);
+
 
             break;
         }
@@ -719,8 +720,10 @@ Decode::decodeInsts(ThreadID tid)
         // Go ahead and compute any PC-relative branches.
         // This includes direct unconditional control and
         // direct conditional control that is predicted taken.
+        // We can also redirect returns.
         if (inst->isDirectCtrl() &&
            (inst->isUncondCtrl() || inst->readPredTaken()))
+        //    || inst->isReturn())
         // {
         // if (inst->isDirectCtrl() && inst->isUncondCtrl())
         {
@@ -741,6 +744,7 @@ Decode::decodeInsts(ThreadID tid)
                         tid, inst->seqNum, inst->readPredTarg(), *target);
                 //The micro pc after an instruction level branch should be 0
                 inst->setPredTarg(*target);
+                inst->setResteered(true);
                 break;
             }
         }

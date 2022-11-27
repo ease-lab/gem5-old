@@ -75,4 +75,5 @@ message Packet {
   optional uint32 flags = 5;
   optional uint64 pkt_id = 6;
   optional uint64 pc = 7;
+  optional uint64 vaddr = 8;
 }

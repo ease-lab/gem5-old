@@ -91,12 +91,17 @@ class InstTrace : public ProbeListenerObject
     bool trace_branches = false;
     // Enable tracing of commited memory reference instructions.
     bool trace_memref = false;
+    // Enable function tracing
+    bool trace_func = false;
+    int call_stack_idx = 0;
 
 
     /** One output stream for the entire simulation.
      * We encode the CPU & system ID so all we need is a single file
      */
     ProtoOutputStream *traceStream;
+
+    std::ostream *functionTraceStream;
 
 
 
@@ -105,6 +110,8 @@ class InstTrace : public ProbeListenerObject
 
     void traceBranch(const DynInstConstPtr& dynInst);
     void traceMemRef(const DynInstConstPtr& dynInst);
+    void traceFunction(const DynInstConstPtr& dynInst);
+
 
     BranchClass getBranchClass(StaticInstPtr inst);
 
