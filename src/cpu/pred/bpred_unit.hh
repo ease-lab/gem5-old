@@ -177,7 +177,7 @@ class BPredUnit : public SimObject
      * Reset function. Set back all internal state of the direction predictor
      * Start and end can be used to define certain ranges to reset
      */
-    virtual void reset(unsigned start = 0, unsigned end = 100) {}
+    virtual void reset(uint start = 0, uint end = 100, uint val = 0) {}
 
     /**
      * Looks up a given PC in the BTB to see if a matching entry exists.
@@ -441,6 +441,7 @@ class BPredUnit : public SimObject
     const unsigned resetBTB;
     const unsigned resetStart;
     const unsigned resetEnd;
+    const unsigned resetVal;
 
     /**
      * @{

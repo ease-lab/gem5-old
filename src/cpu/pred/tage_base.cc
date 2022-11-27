@@ -37,8 +37,12 @@
 
 #include "cpu/pred/tage_base.hh"
 
+#include <regex>
+
 #include "base/intmath.hh"
 #include "base/logging.hh"
+#include "base/output.hh"
+#include "base/random.hh"
 #include "debug/Fetch.hh"
 #include "debug/Tage.hh"
 
@@ -145,31 +149,154 @@ TAGEBase::init()
     tableIndices = new int [nHistoryTables+1];
     tableTags = new int [nHistoryTables+1];
     initialized = true;
+    file_cnt = 0;
 }
 
 void
-TAGEBase::reset(unsigned start, unsigned end)
+TAGEBase::reset(uint start, uint end, uint val)
 {
+    std::string fn = "tage_dump_" + std::to_string(file_cnt) + ".csv";
+    dump(fn);
     DPRINTF(Tage, "Reset TAGE tables %i->%i\n", start, end);
+
 
     if (start == 0 && end > 0) {
         // Reset the base predictor
+        unsigned cnt = 0;
+        bool _val = val ? true : false;
         for (int i = 0; i < btablePrediction.size(); i++) {
-            btablePrediction[i] = false;
+            // val = random_mt.random<int>() & 1;
+            cnt = (btablePrediction[i]) ? cnt+1 : cnt;
+            btablePrediction[i] = _val;
         }
+        warn("Reset BIM direction to %i. "
+                    "Was: %i of %i (%.2f) where set\n",
+                        _val, cnt, btablePrediction.size(),
+                        (float)cnt / (float)btablePrediction.size());
+
+        _val = !_val;
+        cnt = 0;
         for (int i = 0; i < btableHysteresis.size(); i++) {
-            btableHysteresis[i] = true;
+            // val = random_mt.random<int>() & 1;
+            cnt = (btableHysteresis[i]) ? cnt+1 : cnt;
+            btableHysteresis[i] = _val;
         }
+        warn("Reset BIM hysteresis to %i. "
+                    "Was: %i of %i (%.2f) where set.\n",
+                        _val, cnt, btableHysteresis.size(),
+                        (float)cnt / (float)btableHysteresis.size());
     }
 
     // TAGE tables
     int i = (start == 0) ? 1 : start;
     for (; i <= nHistoryTables && i < end; i++) {
+        unsigned cnt = 0;
+        unsigned ctr_u = 0;
         for (int j = 0; j < (1<<(logTagTableSizes[i])); j++) {
-            gtable[i][j].tag = 0;
+            // if (gtable[i][j].correct_pred > 1) {
+                gtable[i][j].tag = 0;
+                gtable[i][j].u = 0;
+            // }
+            // gtable[i][j].tag = 0;
+            cnt = (gtable[i][j].correct_pred) ? cnt+1 : cnt;
+            // gtable[i][j].u = 0;
+            ctr_u = (gtable[i][j].ctr != 0) ? ctr_u+1 : ctr_u;
+        }
+        warn("Reset TAGE Table %i. Was: %i of %i (%.2f) useful. %i (%.2f) "
+                "used.\n",
+                i, cnt, (1<<(logTagTableSizes[i])),
+                (float)cnt / (float)(1<<(logTagTableSizes[i])),
+                ctr_u,
+                (float)ctr_u / (float)(1<<(logTagTableSizes[i])));
+    }
+
+    // if (file_cnt > 2) {
+        fn = "tage_restore_" + std::to_string(file_cnt) + ".csv";
+        restore(fn);
+    // }
+    file_cnt += 1;
+}
+
+
+void
+TAGEBase::dump(const std::string& filename)
+{
+    DPRINTF(Tage, "Dump TAGE tables to %s\n", filename);
+
+    std::ofstream fileStream(simout.resolve(filename), std::ios::out);
+    if (!fileStream.good())
+        panic("Could not open %s for writing\n", filename);
+
+
+
+    ccprintf(fileStream,"TTBank,TTIdx,ctr,u,tag,correct,pc\n");
+
+
+    // TAGE tables
+    int i = 1;
+    for (; i <= nHistoryTables; i++) {
+        for (int j = 0; j < (1<<(logTagTableSizes[i])); j++) {
+
+            if (gtable[i][j].tag != 0) {
+                ccprintf(fileStream,"%d,%d,%i,%i,%d,%d,%llu\n",
+                            i,j,
+                            gtable[i][j].ctr, gtable[i][j].u,
+                            gtable[i][j].tag, gtable[i][j].correct_pred,
+                            gtable[i][j].pc);
+            }
         }
     }
+    fileStream.close();
 }
+
+
+void
+TAGEBase::restore(const std::string& filename)
+{
+    DPRINTF(Tage, "Restore TAGE tables to %s\n", filename);
+
+    std::ifstream fileStream(simout.resolve(filename), std::ios::in);
+    // if (!fileStream.good())
+    //     panic("Could not open %s for writing\n", filename);
+
+
+    if (fileStream.is_open()){   //checking whether the file is open
+
+        std:: string line;
+        std::regex rgx("(\\d+),(\\d+),(-?\\d+),(\\d+),(\\d+),\\d+,(\\d+)");
+        std::smatch matches;
+
+        while (std::getline(fileStream, line))
+        {
+            // std::cout << line << std::endl;
+
+            if (std::regex_search(line, matches, rgx)) {
+
+                auto bank = std::stoi(matches[1]);
+                auto idx = std::stoi(matches[2]);
+                auto ctr = std::stoi(matches[3]);
+                auto tag = std::stoi(matches[5]);
+                auto pc = std::stoull(matches[6]);
+
+                assert(bank <= nHistoryTables);
+                assert(idx < (1<<(logTagTableSizes[bank])));
+
+                gtable[bank][idx].ctr = ctr;
+                gtable[bank][idx].tag = tag;
+                gtable[bank][idx].pc = pc;
+            }
+        }
+        fileStream.close(); //close the file object.
+    } else {
+        warn("Could not open %s for restoring\n", filename);
+    }
+}
+
+
+
+
+
+
 
 void
 TAGEBase::initFoldedHistories(ThreadHistory & history)
@@ -500,6 +627,8 @@ TAGEBase::handleAllocAndUReset(bool alloc, bool taken, BranchInfo* bi,
             if (gtable[i][bi->tableIndices[i]].u == 0) {
                 gtable[i][bi->tableIndices[i]].tag = bi->tableTags[i];
                 gtable[i][bi->tableIndices[i]].ctr = (taken) ? 0 : -1;
+                gtable[i][bi->tableIndices[i]].correct_pred = 0;
+                gtable[i][bi->tableIndices[i]].pc = bi->branchPC;
                 ++numAllocated;
                 if (numAllocated == maxNumAlloc) {
                     break;
@@ -598,8 +727,21 @@ TAGEBase::handleTAGEUpdate(Addr branch_pc, bool taken, BranchInfo* bi)
             }
         }
 
+        if (bi->tagePred == taken) {
+            gtable[bi->hitBank][bi->hitBankIndex].correct_pred++;
+
+            DPRINTF(Tage, "Tag(%d,%d) for branch %lx was: %s. "
+                    "Used already: %d direction:%i, ctr:%i\n",
+                    bi->hitBank, bi->hitBankIndex, branch_pc,
+                    (bi->tagePred == taken) ? "correct" : "wrong",
+                    gtable[bi->hitBank][bi->hitBankIndex].correct_pred,
+                    taken, gtable[bi->hitBank][bi->hitBankIndex].ctr);
+        }
+
         // update the u counter
         if (bi->tagePred != bi->altTaken) {
+            DPRINTF(Tage, "TAGE correct - TT:[%d,%d] PC:%llx\n",
+                        bi->hitBank, bi->hitBankIndex, branch_pc);
             unsignedCtrUpdate(gtable[bi->hitBank][bi->hitBankIndex].u,
                               bi->tagePred == taken, tagTableUBits);
         }

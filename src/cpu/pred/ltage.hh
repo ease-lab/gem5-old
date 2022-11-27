@@ -75,7 +75,7 @@ class LTAGE : public TAGE
                 Addr corrTarget) override;
 
     void init() override;
-    void reset(unsigned start, unsigned end) override;
+    void reset(uint start = 0, uint end = 100, uint val = 0) override;
 
   protected:
     /** The loop predictor object */

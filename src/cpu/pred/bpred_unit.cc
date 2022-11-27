@@ -68,7 +68,8 @@ BPredUnit::BPredUnit(const Params &params)
       instShiftAmt(params.instShiftAmt),
       resetBTB(params.resetBTB),
       resetStart(params.resetStart),
-      resetEnd(params.resetEnd)
+      resetEnd(params.resetEnd),
+      resetVal(params.resetVal)
 {
 }
 
@@ -102,7 +103,7 @@ void
 BPredUnit::memInvalidate()
 {
     // Reset direction predictor
-    reset(resetStart,resetEnd);
+    reset(resetStart,resetEnd,resetVal);
 
     // Reset the BTB and RAS
     if (resetBTB) {

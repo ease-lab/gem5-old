@@ -73,7 +73,11 @@ class TAGEBase : public SimObject
      *  start:end. 0:1 will reset only the bimodal predictor.
      *             1:100 will reset all but bimodal predictor.
      */
-    void reset(unsigned start = 0, unsigned end = 100);
+    void reset(uint start = 0, uint end = 100, uint val = 0);
+    void dump(const std::string& filename);
+    void restore(const std::string& filename);
+    int file_cnt = 0;
+
 
   protected:
     // Prediction Structures
@@ -84,7 +88,9 @@ class TAGEBase : public SimObject
         int8_t ctr;
         uint16_t tag;
         uint8_t u;
-        TageEntry() : ctr(0), tag(0), u(0) { }
+        uint16_t correct_pred;
+        Addr pc;
+        TageEntry() : ctr(0), tag(0), u(0), correct_pred(0), pc(0) { }
     };
 
     // Folded History Table - compressed history

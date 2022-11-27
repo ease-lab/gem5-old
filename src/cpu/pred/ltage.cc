@@ -62,9 +62,9 @@ LTAGE::init()
 }
 
 void
-LTAGE::reset(unsigned start, unsigned end)
+LTAGE::reset(uint start, uint end, uint val)
 {
-    TAGE::reset(start, end);
+    TAGE::reset(start, end,val);
     loopPredictor->reset();
 }
 

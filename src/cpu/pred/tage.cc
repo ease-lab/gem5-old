@@ -55,9 +55,9 @@ TAGE::TAGE(const TAGEParams &params) : BPredUnit(params), tage(params.tage)
 }
 
 void
-TAGE::reset(unsigned start, unsigned end)
+TAGE::reset(uint start, uint end, uint val)
 {
-    tage->reset(start,end);
+    tage->reset(start,end,val);
 }
 
 // PREDICTOR UPDATE

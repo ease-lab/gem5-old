@@ -139,6 +139,7 @@ class BranchPredictor(SimObject):
     resetBTB = Param.Bool(True,"When memInvalid is called reset also the BTB")
     resetStart = Param.Int(0,"When reset start resetting at this table")
     resetEnd = Param.Int(100,"When reset end resetting at this table")
+    resetVal = Param.Int(0,"What value to reset to")
 
 class PerfectBP(BranchPredictor):
     type = 'PerfectBP'

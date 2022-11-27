@@ -68,7 +68,7 @@ BiModeBP::BiModeBP(const BiModeBPParams &params)
 }
 
 void
-BiModeBP::reset(unsigned start, unsigned end)
+BiModeBP::reset(uint start, uint end, uint val)
 {
     // Reset all counter values
     for (int i = 0; i < choicePredictorSize; i++) {

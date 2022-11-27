@@ -127,7 +127,7 @@ LocalBP::squash(ThreadID tid, void *bp_history)
 }
 
 void
-LocalBP::reset(unsigned start, unsigned end)
+LocalBP::reset(uint start, uint end, uint val)
 {
     for (int i = 0; i < localCtrs.size(); i++) {
         localCtrs[i].reset();
