@@ -52,6 +52,7 @@
 #include "cpu/o3/limits.hh"
 #include "cpu/pc_event.hh"
 #include "cpu/pred/bpred_unit.hh"
+#include "cpu/o3/decoupled_bpred_unit.hh"
 #include "cpu/timebuf.hh"
 #include "cpu/translation.hh"
 #include "enums/SMTFetchPolicy.hh"
@@ -61,7 +62,7 @@
 #include "sim/probe/probe.hh"
 
 
-// #define FDIP
+#define FDIP
 namespace gem5
 {
 
@@ -214,6 +215,8 @@ class Fetch
     ProbePointArg<DynInstPtr> *ppFetch;
     /** To probe when a fetch request is successfully sent. */
     ProbePointArg<RequestPtr> *ppFetchRequestSent;
+    ProbePointArg<DynInstPtr> *ppFetchSquash;
+    ProbePointArg<DynInstPtr> *ppFTQInsert;
 
   public:
     /** Fetch constructor. */
@@ -362,6 +365,7 @@ class Fetch
         InstSeqNum startSeqNum;
         unsigned seq_num_iter = 0;
         InstSeqNum brSeqNum;
+        InstSeqNum ftSeqNum;
 
 
         // /** The branch that terminate the BB */
@@ -476,6 +480,9 @@ class Fetch
       }
         return true;
     }
+
+    InstSeqNum globalFTSeqNum;
+    InstSeqNum getAndIncrementFTSeq() { return globalFTSeqNum++; }
 
 
     /** Feed the fetch target queue.
@@ -652,8 +659,12 @@ class Fetch
   private:
     DynInstPtr buildInst(ThreadID tid, StaticInstPtr staticInst,
             StaticInstPtr curMacroop, const PCStateBase &this_pc,
-            const PCStateBase &next_pc, InstSeqNum seq = 0,
-            bool insert_IQ = true, bool trace = false);
+            const PCStateBase &next_pc, InstSeqNum seq,
+            bool insert_IQ, bool trace);
+
+    DynInstPtr buildInst(ThreadID tid, StaticInstPtr staticInst,
+            StaticInstPtr curMacroop, const PCStateBase &this_pc,
+            const PCStateBase &next_pc, bool trace);
 
     /** Returns the appropriate thread to fetch, given the fetch policy. */
     ThreadID getFetchingThread();
@@ -702,6 +713,9 @@ class Fetch
 
     /** BPredUnit. */
     branch_prediction::BPredUnit *branchPred;
+
+    /** BPredict. */
+    BPredict *decoupledBPU;
 
     std::unique_ptr<PCStateBase> pc[MaxThreads];
 
@@ -837,6 +851,8 @@ class Fetch
         /** Stat for total number of cycles stalled due to an icache miss.
          * while the CPU is waiting for new instructions */
         statistics::Scalar feIcacheStallCycles;
+        /** Distribution of the L1 instruction fetch access latency. */
+        statistics::SparseHistogram l1AccessLatency;
         /** Stat for total number of fetched instructions. */
         statistics::Scalar insts;
         /** Total number of fetched branches. */
