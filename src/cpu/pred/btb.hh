@@ -89,7 +89,8 @@ class BranchTargetBuffer : public SimObject
 
     /** Update BTB statistics
      */
-    virtual void incorrectTarget(BranchClass type = BranchClass::NoBranch)
+    virtual void incorrectTarget(Addr inst_pc,
+                                  BranchClass type = BranchClass::NoBranch)
     {
       stats.mispredict++;
       if (type != BranchClass::NoBranch) {
@@ -110,6 +111,7 @@ class BranchTargetBuffer : public SimObject
         /** Stat for number of BTB misses. */
         statistics::Scalar misses;
         statistics::Vector missType;
+        statistics::Scalar missesComp; /* Compulsory*/
         /** Stat for number for the ratio between BTB misses and lookups. */
         statistics::Formula missRatio;
         /** Stat for number of BTB updates. */

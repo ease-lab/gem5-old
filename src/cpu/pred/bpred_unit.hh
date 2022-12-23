@@ -43,6 +43,7 @@
 #define __CPU_PRED_BPRED_UNIT_HH__
 
 #include <deque>
+#include <set>
 
 #include "base/statistics.hh"
 #include "base/types.hh"
@@ -58,6 +59,10 @@
 
 namespace gem5
 {
+
+namespace o3 {
+    class BAC;
+}
 
 namespace branch_prediction
 {
@@ -84,6 +89,7 @@ namespace branch_prediction
  */
 class BPredUnit : public SimObject
 {
+    friend class o3::BAC;
 
   public:
     typedef BranchPredictorParams Params;
@@ -111,33 +117,6 @@ class BPredUnit : public SimObject
                  PCStateBase &pc, ThreadID tid);
 
 
-    /**
-     * Checks if the pre-decoded instruction matches the predicted
-     * instruction type. If so update the information with the new.
-     * In case the types dont match something is wrong and we need
-     * to squash. (should not be the case.)
-     * @param seq_num The branches sequence that we want to update.
-     * @param inst The new pre-decoded branch instruction.
-     * @param tid The thread id.
-     * @return Returns if the update was successful.
-     */
-    bool updateStaticInst(const InstSeqNum &seqNum,
-                          const StaticInstPtr &inst, ThreadID tid);
-
-    // /**
-    //  * Lookup the BTB to check if the given PC is a branch instruction
-    //  * The BTB will also provide the static instruction information
-    //  * If so will it will predict the whether the branch was taken or not
-    //  * and finally set the target PC respectively.
-    //  * @param PC The PC of the instruction branch instruction.
-    //  * @param targetPC The predicted PC is passed back through this parameter.
-    //  * @param seqNum The sequence number of the dynamic instruction
-    //  * @param tid The thread id.
-    //  * @return Returns if the branch is taken or not.
-    //  */
-    // bool predict(PCStateBase &pc, PCStateBase &pc,
-    //              const InstSeqNum &seqNum, ThreadID tid);
-
     // @todo: Rename this function.
     virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
@@ -156,6 +135,7 @@ class BPredUnit : public SimObject
      * @param tid The thread id.
      */
     virtual void squash(const InstSeqNum &squashed_sn, ThreadID tid);
+
 
     /** Perform sanity checks after a drain. */
     virtual void drainSanityCheck() const;
@@ -321,7 +301,7 @@ class BPredUnit : public SimObject
 
 
 
-  private:
+  protected:
 
     // Target provider type
     enum TARGET_PROVIDER
@@ -359,8 +339,7 @@ class BPredUnit : public SimObject
             wasPredTakenBTBHit(other.wasPredTakenBTBHit),
             wasPredTakenBTBMiss(other.wasPredTakenBTBMiss),
             wasUncond(other.wasUncond),
-            target(other.target),
-            // targetProvider(targetProvider),
+            targetProvider(other.targetProvider),
             type(other.type),
             inst(other.inst)
         {
@@ -423,6 +402,9 @@ class BPredUnit : public SimObject
         /** Was unconditional control */
         bool wasUncond = false;
 
+        /** Which component provided the target */
+        int targetProvider = NO_TARGET;
+
         /** Target of the branch. First it is predicted, and fixed later
          *  if necessary
          */
@@ -434,13 +416,32 @@ class BPredUnit : public SimObject
         StaticInstPtr inst;
     };
 
-    typedef std::deque<PredictorHistory> History;
+    typedef std::deque<PredictorHistory*> History;
 
-  public:
+
+
+    /**
+     * Internal prediction function.
+    */
+    bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
+               PCStateBase &pc, ThreadID tid, PredictorHistory* &bpu_history);
+
+    /**
+     * Squashes a particular history
+     * @param tid The thread id.
+     * @param bpu_history The history to be squashed.
+     */
+    void squashHistory(ThreadID tid, PredictorHistory* &bpu_history);
+
+
+
+
+  protected:
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
 
-  private:
+    const bool requiresBTBHit;
+
     /** Fallback to the BTB prediction in case the RAS is corrupted. */
     const unsigned fallbackBTB;
 
@@ -451,7 +452,6 @@ class BPredUnit : public SimObject
      * a squash.
      */
     std::vector<History> predHist;
-    // std::vecotr<PredictorHistory>
 
     /** The BTB. */
     BranchTargetBuffer * btb;
@@ -493,6 +493,11 @@ class BPredUnit : public SimObject
         statistics::Scalar condPredictedTaken;
         /** Stat for number of conditional branches predicted incorrectly. */
         statistics::Scalar condIncorrect;
+        /** Stat for number of branches predicted incorrectly. */
+        statistics::Scalar incorrect;
+        /** Stat for number of branches predicted incorrectly.
+         * (Compulsory miss)*/
+        statistics::Scalar incorrectComp;
         /** Stat for number of BTB lookups. */
         statistics::Scalar BTBLookups;
         /** Stat for number of BTB hits. */
@@ -510,13 +515,9 @@ class BPredUnit : public SimObject
         statistics::Scalar indirectMisses;
         /** Stat for the number of indirect target mispredictions.*/
         statistics::Scalar indirectMispredicted;
-
-        /** Stat for the number of conditional calls*/
-        statistics::Scalar indirectCall;
-        /** Stat for the number of unconditional calls*/
-        statistics::Scalar directCall;
-        /** Stat for the number of mispredicted calls*/
-        statistics::Scalar mispredictCall;
+        /** Stat for the number of indirect branches where the BTB was the.
+         * provider of the target instead of the BTB. */
+        statistics::Scalar indirectProviderBTB;
 
         /** Stat for the number of conditional branches mispredicted*/
         statistics::Scalar mispredictCond;
@@ -570,6 +571,9 @@ class BPredUnit : public SimObject
 
     /** Miss-predicted branches */
     probing::PMUUPtr ppMisses;
+
+    std::set<Addr> seenPCs;
+
     /** @} */
 };
 

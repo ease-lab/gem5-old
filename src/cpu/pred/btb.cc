@@ -59,6 +59,8 @@ BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
                "Number of BTB misses"),
       ADD_STAT(missType, statistics::units::Count::get(),
                "Number of BTB misses per branch type"),
+      ADD_STAT(missesComp, statistics::units::Count::get(),
+               "Number of BTB misses"),
       ADD_STAT(missRatio, statistics::units::Ratio::get(), "BTB Hit Ratio",
                misses / lookups),
       ADD_STAT(updates, statistics::units::Count::get(),

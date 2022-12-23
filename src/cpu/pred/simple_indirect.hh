@@ -31,6 +31,8 @@
 
 #include <deque>
 
+#include "base/circular_queue.hh"
+#include "base/statistics.hh"
 #include "config/the_isa.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/pred/indirect.hh"
@@ -47,20 +49,6 @@ class SimpleIndirectPredictor : public IndirectPredictor
   public:
     SimpleIndirectPredictor(const SimpleIndirectPredictorParams &params);
 
-    void reset() override;
-    bool lookup(Addr br_addr, PCStateBase& br_target, ThreadID tid);
-    void recordIndirect(Addr br_addr, Addr tgt_addr, InstSeqNum seq_num,
-                        ThreadID tid);
-    void commit(InstSeqNum seq_num, ThreadID tid, void * indirect_history);
-    void squash(InstSeqNum seq_num, ThreadID tid);
-    void recordTarget(InstSeqNum seq_num, void * indirect_history,
-                      const PCStateBase& target, ThreadID tid);
-    void genIndirectInfo(ThreadID tid, void* & indirect_history);
-    void updateDirectionInfo(ThreadID tid, bool actually_taken);
-    void deleteIndirectInfo(ThreadID tid, void * indirect_history);
-    void changeDirectionPrediction(ThreadID tid, void * indirect_history,
-                                   bool actually_taken);
-
   private:
     const bool hashGHR;
     const bool hashTargets;
@@ -68,6 +56,7 @@ class SimpleIndirectPredictor : public IndirectPredictor
     const unsigned numWays;
     const unsigned tagBits;
     const unsigned pathLength;
+    const unsigned speculativePathLength;
     const unsigned instShift;
     const unsigned ghrNumBits;
     const unsigned ghrMask;
@@ -80,27 +69,116 @@ class SimpleIndirectPredictor : public IndirectPredictor
 
     std::vector<std::vector<IPredEntry> > targetCache;
 
-    Addr getSetIndex(Addr br_addr, unsigned ghr, ThreadID tid);
+    Addr getSetIndex(Addr br_addr, ThreadID tid);
     Addr getTag(Addr br_addr);
 
     struct HistoryEntry
     {
         HistoryEntry(Addr br_addr, Addr tgt_addr, InstSeqNum seq_num)
             : pcAddr(br_addr), targetAddr(tgt_addr), seqNum(seq_num) { }
+        HistoryEntry() : pcAddr(0), targetAddr(0), seqNum(0) { }
         Addr pcAddr;
         Addr targetAddr;
         InstSeqNum seqNum;
     };
 
+    using HistoryBuffer = CircularQueue<HistoryEntry>;
+    // HistoryBuffer historyBuffer;
+
+    struct IndirectHistory
+    {
+        /* data */
+        Addr pcAddr;
+        Addr targetAddr;
+        InstSeqNum seqNum;
+
+        Addr set_index;
+        Addr tag;
+        bool hit;
+        unsigned ghr;
+        uint64_t pathHist;
+        HistoryBuffer::iterator histTail;
+
+        bool dir_taken;
+        bool was_indirect;
+
+        IndirectHistory()
+            : pcAddr(MaxAddr), targetAddr(MaxAddr),
+              dir_taken(false), was_indirect(false)
+        {}
+    };
+
+    struct PathHistoryRegister
+    {
+        unsigned numTgtBits;
+        unsigned pathLength;
+        unsigned instShift;
+        uint64_t reg;
+        void update(Addr target) {
+            uint64_t v = (target >> instShift) & (numTgtBits-1);
+            reg = (reg << numTgtBits) | v;
+        }
+    };
+
+
+
 
     struct ThreadInfo
     {
         std::deque<HistoryEntry> pathHist;
+        HistoryBuffer indirectHist;
+        HistoryBuffer::iterator histTail;
         unsigned headHistEntry = 0;
+        // Global direction history register
         unsigned ghr = 0;
+        // Path history register
+        uint64_t phr = 0;
+        ThreadInfo(size_t buffer_size)
+          : indirectHist(buffer_size) {
+            // histTail = indirectHist.getIterator(indirectHist.tail());
+          }
     };
 
+    // std::vector<HistoryBuffer> indirectHist;
+
     std::vector<ThreadInfo> threadInfo;
+    std::vector<PathHistoryRegister> pathReg;
+
+
+    void reset() override;
+    bool lookup(ThreadID tid, Addr br_addr,
+                  PCStateBase * &target, IndirectHistory * &history);
+    const PCStateBase * lookupIndirect(ThreadID tid, Addr br_addr,
+                                                void * &history) override;
+    void recordOther(ThreadID tid, bool taken,
+                              void * &indirect_history) override;
+    void recordIndirect(Addr br_addr, Addr tgt_addr, InstSeqNum seq_num,
+                        ThreadID tid);
+    void update(ThreadID tid, InstSeqNum seqNum, bool squash, bool taken,
+              bool indirect, Addr target, void * &indirect_history) override;
+    void commit(InstSeqNum seq_num, ThreadID tid, void * &indirect_history);
+    void squash(InstSeqNum seq_num, ThreadID tid, void * &indirect_history);
+    void recordTarget(InstSeqNum seq_num, void * &indirect_history,
+                      const PCStateBase& target, ThreadID tid);
+    void genIndirectInfo(ThreadID tid, void* &indirect_history);
+    void updateDirectionInfo(ThreadID tid, bool actually_taken) override;
+    void deleteIndirectInfo(ThreadID tid, void *&indirect_history);
+    void changeDirectionPrediction(ThreadID tid, void * &indirect_history,
+                                   bool actually_taken);
+
+  protected:
+    struct IndirectStats : public statistics::Group
+    {
+        IndirectStats(statistics::Group *parent);
+        // STATS
+        statistics::Scalar lookups;
+        statistics::Scalar hits;
+        statistics::Scalar misses;
+        statistics::Scalar targetRecords;
+        statistics::Scalar indirectRecords;
+        statistics::Scalar speculativeOverflows;
+
+    } stats;
 };
 
 } // namespace branch_prediction

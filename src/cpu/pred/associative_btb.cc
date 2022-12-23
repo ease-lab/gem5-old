@@ -48,7 +48,8 @@ AssociativeBTB::AssociativeBTB(const AssociativeBTBParams &p)
         numEntries(p.numEntries),
         assoc(p.assoc),
         tagBits(p.tagBits),
-        instShiftAmt(p.instShiftAmt)
+        instShiftAmt(p.instShiftAmt),
+        assocStats(this)
 {
     if (!isPowerOf2(numEntries)) {
         fatal("BTB entries is not a power of 2!");
@@ -132,6 +133,7 @@ AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
         DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
                      __func__, instPC, idx);
 
+        entry->accesses++;
         btb.accessEntry(entry);
         return entry->target;
     }
@@ -185,11 +187,29 @@ AssociativeBTB::update(ThreadID tid, Addr instPC,
         btb.insertEntry(idx, false, entry);
     }
 
+    assocStats.accesses.sample(entry->accesses == 0 ? 1
+                                : floorLog2(entry->accesses));
+    entry->pc = instPC;
     entry->tid = tid;
     set(entry->target, &target);
     entry->inst = inst;
+    entry->accesses = 0;
     // entry->target = &target;
 }
+
+
+AssociativeBTB::AssociativeBTBStats::AssociativeBTBStats(
+                                                statistics::Group *parent)
+    : statistics::Group(parent),
+    ADD_STAT(accesses, statistics::units::Count::get(),
+             "number of prefetch candidates identified")
+{
+    using namespace statistics;
+    accesses
+        .init(16)
+        .flags(pdf);
+}
+
 
 } // namespace branch_prediction
 } // namespace gem5

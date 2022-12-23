@@ -53,20 +53,29 @@ class IndirectPredictor : public SimObject
     }
 
     virtual void reset() = 0;
-    virtual bool lookup(Addr br_addr, PCStateBase& br_target,
-                        ThreadID tid) = 0;
+    // virtual bool lookup(ThreadID tid, Addr br_addr,
+    //             PCStateBase& br_target, void * &indirect_history) = 0;
+    virtual const PCStateBase* lookupIndirect(ThreadID tid, Addr br_addr,
+                                                void * &indirect_history) = 0;
+    virtual void recordOther(ThreadID tid, bool taken,
+                              void * &indirect_history) = 0;
     virtual void recordIndirect(Addr br_addr, Addr tgt_addr,
                                 InstSeqNum seq_num, ThreadID tid) = 0;
     virtual void commit(InstSeqNum seq_num, ThreadID tid,
-                        void * indirect_history) = 0;
-    virtual void squash(InstSeqNum seq_num, ThreadID tid) = 0;
-    virtual void recordTarget(InstSeqNum seq_num, void * indirect_history,
+                        void * &indirect_history) = 0;
+    virtual void squash(InstSeqNum seq_num, ThreadID tid,
+                        void * &indirect_history) = 0;
+    virtual void update(ThreadID tid, InstSeqNum seqNum, bool squash,
+                          bool taken, bool indirect,
+                          Addr target, void * &indirect_history) = 0;
+
+    virtual void recordTarget(InstSeqNum seq_num, void * &indirect_history,
                               const PCStateBase& target, ThreadID tid) = 0;
-    virtual void genIndirectInfo(ThreadID tid, void* & indirect_history) = 0;
+    virtual void genIndirectInfo(ThreadID tid, void* &indirect_history) = 0;
     virtual void updateDirectionInfo(ThreadID tid, bool actually_taken) = 0;
-    virtual void deleteIndirectInfo(ThreadID tid, void * indirect_history) = 0;
+    virtual void deleteIndirectInfo(ThreadID tid, void * &indirect_history) = 0;
     virtual void changeDirectionPrediction(ThreadID tid,
-                                           void * indirect_history,
+                                           void * &indirect_history,
                                            bool actually_taken) = 0;
 };
 

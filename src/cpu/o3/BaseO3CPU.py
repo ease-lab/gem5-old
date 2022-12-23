@@ -78,6 +78,8 @@ class BaseO3CPU(BaseCPU):
     cacheLoadPorts = Param.Unsigned(200, "Cache Ports. "
           "Constrains loads only.")
 
+    # Backward pipeline delays
+    fetchToBacDelay = Param.Cycles(1, "Fetch to Branch address calc. delay")
     decodeToFetchDelay = Param.Cycles(1, "Decode to fetch delay")
     renameToFetchDelay = Param.Cycles(1 ,"Rename to fetch delay")
     iewToFetchDelay = Param.Cycles(1, "Issue/Execute/Writeback to fetch "
@@ -92,6 +94,9 @@ class BaseO3CPU(BaseCPU):
     iewToDecodeDelay = Param.Cycles(1, "Issue/Execute/Writeback to decode "
                                     "delay")
     commitToDecodeDelay = Param.Cycles(1, "Commit to decode delay")
+
+    # Forward pipeline delays
+    bacToFetchDelay = Param.Cycles(1, "Branch address calc. to fetch delay")
     fetchToDecodeDelay = Param.Cycles(1, "Fetch to decode delay")
     decodeWidth = Param.Unsigned(8, "Decode width")
 
@@ -173,5 +178,8 @@ class BaseO3CPU(BaseCPU):
 
     mark_one_as_miss =  Param.Bool(True, "Mark only one instruction as miss")
 
-    ftq_size = Param.Unsigned(8, "Number of entries in the FTQ. "
+    numFTQEntries = Param.Unsigned(8, "Number of entries in the FTQ. "
                                     "Zero disables the FTQ")
+    fetchTagetWidth = Param.Unsigned(64, "Max width (bytes) of Fetch taget."
+                            "Determines the maximum search width per cycle")
+    decoupledFrontEnd = Param.Bool(False, "Implements a decoupled front-end")

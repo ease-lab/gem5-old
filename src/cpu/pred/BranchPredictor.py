@@ -26,10 +26,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from m5.SimObject import SimObject
+from m5.SimObject import *
 from m5.params import *
 from m5.proxy import *
 
+from m5.objects.ClockedObject import ClockedObject
 from m5.objects.IndexingPolicies import *
 from m5.objects.ReplacementPolicies import *
 
@@ -110,6 +111,10 @@ class SimpleIndirectPredictor(IndirectPredictor):
     indirectTagSize = Param.Unsigned(16, "Indirect target cache tag bits")
     indirectPathLength = Param.Unsigned(3,
         "Previous indirect targets to use for path history")
+    speculativePathLength = Param.Unsigned(3,
+        "Additional buffer space to store speculative path history. "
+        "If there are more speculative branches in flight the history cannot "
+        "be recoverd.")
     indirectGHRBits = Param.Unsigned(13, "Indirect GHR number of bits")
     instShiftAmt = Param.Unsigned(2, "Number of bits to shift instructions by")
 
@@ -123,6 +128,11 @@ class BranchPredictor(SimObject):
     instShiftAmt = Param.Unsigned(2,"Number of bits to shift instructions by")
     fallbackBTB = Param.Bool(False, "In case the BTB is corrupt use the BTB "
                                 "prediction")
+    decoupled = Param.Bool(False, "If the branch predictor is used in FDIP")
+    requiresBTBHit = Param.Bool(False, "Requires a BTB hit to detect if "
+                            " a branch was a return or indirect branch.")
+
+
     BTBEntries = Param.Unsigned(4096, "Number of BTB entries")
     BTBTagSize = Param.Unsigned(16, "Size of the BTB tags, in bits")
     RASSize = Param.Unsigned(16, "RAS size")

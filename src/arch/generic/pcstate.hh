@@ -127,6 +127,13 @@ class PCStateBase : public Serializable
         _upc = 0;
     }
 
+    virtual void
+    set(Addr val)
+    {
+        _pc = val;
+        _upc = 0;
+    }
+
     virtual void advance() = 0;
     virtual bool branching() const = 0;
 
@@ -315,6 +322,14 @@ class PCStateWithNext : public PCStateBase
     }
 
     void
+    set(Addr val) override
+    {
+        PCStateBase::set(val);
+        _npc = 0;
+        _nupc = 1;
+    }
+
+    void
     serialize(CheckpointOut &cp) const override
     {
         PCStateBase::serialize(cp);
@@ -363,10 +378,10 @@ class SimplePCState : public PCStateWithNext
      *
      * @param val The value to set the PC to.
      */
-    virtual void
-    set(Addr val)
+    void
+    set(Addr val) override
     {
-        this->pc(val);
+        Base::set(val);
         this->npc(val + InstWidth);
     };
 

@@ -56,13 +56,21 @@ class AssociativeBTB : public BranchTargetBuffer
                            BranchClass type = BranchClass::NoBranch,
                            StaticInstPtr inst = nullptr) override;
     const StaticInstPtr lookupInst(ThreadID tid, Addr instPC) override;
+    void incorrectTarget(Addr inst_pc,
+                          BranchClass type = BranchClass::NoBranch) override
+    {
+      stats.mispredict++;
+      if (type != BranchClass::NoBranch) {
+        stats.mispredictType[type]++;
+      }
+      auto it = seenAddr.find(inst_pc);
 
   private:
 
     struct BTBEntry : public TaggedEntry
     {
         /** The entry's tag. */
-        Addr tag = 0;
+        Addr pc = 0;
 
         /** The entry's target. */
         PCStateBase * target;
@@ -72,6 +80,8 @@ class AssociativeBTB : public BranchTargetBuffer
 
         /** Whether or not the entry is valid. */
         bool valid = false;
+
+        unsigned accesses;
 
         StaticInstPtr inst;
     };
@@ -102,6 +112,13 @@ class AssociativeBTB : public BranchTargetBuffer
     /** The number of BTB index bits and mask. */
     uint64_t idxBits;
     uint64_t idxMask;
+    struct AssociativeBTBStats : public statistics::Group
+    {
+        AssociativeBTBStats(statistics::Group *parent);
+        // STATS
+        statistics::SparseHistogram accesses;
+    } assocStats;
+
 };
 
 } // namespace branch_prediction

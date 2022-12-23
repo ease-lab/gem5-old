@@ -52,12 +52,14 @@
 #include "arch/generic/pcstate.hh"
 #include "base/statistics.hh"
 #include "config/the_isa.hh"
+#include "cpu/o3/bac.hh"
 #include "cpu/o3/comm.hh"
 #include "cpu/o3/commit.hh"
 #include "cpu/o3/decode.hh"
 #include "cpu/o3/dyn_inst_ptr.hh"
 #include "cpu/o3/fetch.hh"
 #include "cpu/o3/free_list.hh"
+#include "cpu/o3/ftq.hh"
 #include "cpu/o3/iew.hh"
 #include "cpu/o3/limits.hh"
 #include "cpu/o3/rename.hh"
@@ -280,10 +282,12 @@ class CPU : public BaseCPU
 
     /** Get the current instruction sequence number, and increment it. */
     InstSeqNum getAndIncrementInstSeq() { return globalSeqNum++; }
-    InstSeqNum getAndIncrementFTSeq() {
-      globalSeqNum += 256;
-      return globalSeqNum;
-    }
+    // InstSeqNum getAndIncrementFTSeq() { return globalFTSeqNum++; }
+
+    // InstSeqNum getAndIncrementFTSeq() {
+    //   globalSeqNum += 256;
+    //   return globalSeqNum;
+    // }
 
     /** Traps to handle given fault. */
     void trap(const Fault &fault, ThreadID tid, const StaticInstPtr &inst);
@@ -403,6 +407,13 @@ class CPU : public BaseCPU
     bool removeInstsThisCycle;
 
   protected:
+
+    /** The branch and PC address calculation stage. */
+    BAC bac;
+
+    /** The Fetch taget queue. */
+    FTQ ftq;
+
     /** The fetch stage. */
     Fetch fetch;
 
@@ -455,6 +466,7 @@ class CPU : public BaseCPU
      */
     enum StageIdx
     {
+        BACIdx,
         FetchIdx,
         DecodeIdx,
         RenameIdx,

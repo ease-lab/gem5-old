@@ -81,6 +81,8 @@ CPU::CPU(const BaseO3CPUParams &params)
       instcount(0),
 #endif
       removeInstsThisCycle(false),
+      bac(this, params),
+      ftq(this, params),
       fetch(this, params),
       decode(this, params),
       rename(this, params),
@@ -149,6 +151,7 @@ CPU::CPU(const BaseO3CPUParams &params)
     // to the upper level CPU, and not this CPU.
 
     // Set up Pointers to the activeThreads list for each stage
+    bac.setActiveThreads(&activeThreads);
     fetch.setActiveThreads(&activeThreads);
     decode.setActiveThreads(&activeThreads);
     rename.setActiveThreads(&activeThreads);
@@ -156,6 +159,7 @@ CPU::CPU(const BaseO3CPUParams &params)
     commit.setActiveThreads(&activeThreads);
 
     // Give each of the stages the time buffer they will use.
+    bac.setTimeBuffer(&timeBuffer);
     fetch.setTimeBuffer(&timeBuffer);
     decode.setTimeBuffer(&timeBuffer);
     rename.setTimeBuffer(&timeBuffer);
@@ -163,6 +167,10 @@ CPU::CPU(const BaseO3CPUParams &params)
     commit.setTimeBuffer(&timeBuffer);
 
     // Also setup each of the stages' queues.
+    // TODO: BAC
+    bac.setFetchTargetQueue(&ftq);
+    fetch.setFetchTargetQueue(&ftq);
+    fetch.setBACPtr(&bac, nullptr);
     fetch.setFetchQueue(&fetchQueue);
     decode.setFetchQueue(&fetchQueue);
     commit.setFetchQueue(&fetchQueue);
@@ -313,6 +321,7 @@ CPU::regProbePoints()
         std::pair<DynInstPtr, PacketPtr>>(
                 getProbeManager(), "DataAccessComplete");
 
+    bac.regProbePoints();
     fetch.regProbePoints();
     rename.regProbePoints();
     iew.regProbePoints();
@@ -463,6 +472,8 @@ CPU::tick()
 //    activity = false;
 
     //Tick each of the stages
+    bac.tick();
+
     fetch.tick();
 
     decode.tick();
@@ -531,6 +542,7 @@ CPU::startup()
 {
     BaseCPU::startup();
 
+    bac.startupStage();
     fetch.startupStage();
     decode.startupStage();
     iew.startupStage();
@@ -574,6 +586,7 @@ CPU::deactivateThread(ThreadID tid)
         activeThreads.erase(thread_it);
     }
 
+    bac.deactivateThread(tid);
     fetch.deactivateThread(tid);
     commit.deactivateThread(tid);
 }
@@ -624,6 +637,7 @@ CPU::activateContext(ThreadID tid)
         // Be sure to signal that there's some activity so the CPU doesn't
         // deschedule itself.
         activityRec.activity();
+        // bac.wakeFromQuiesce();
         fetch.wakeFromQuiesce();
 
         Cycles cycles(curCycle() - lastRunningCycle);
@@ -737,6 +751,7 @@ CPU::removeThread(ThreadID tid)
     // clear all thread-specific states in each stage of the pipeline
     // since this thread is going to be completely removed from the CPU
     commit.clearStates(tid);
+    bac.clearStates(tid);
     fetch.clearStates(tid);
     decode.clearStates(tid);
     rename.clearStates(tid);
@@ -895,6 +910,7 @@ void
 CPU::drainSanityCheck() const
 {
     assert(isCpuDrained());
+    bac.drainSanityCheck();
     fetch.drainSanityCheck();
     decode.drainSanityCheck();
     rename.drainSanityCheck();
@@ -909,6 +925,11 @@ CPU::isCpuDrained() const
 
     if (!instList.empty() || !removeList.empty()) {
         DPRINTF(Drain, "Main CPU structures not drained.\n");
+        drained = false;
+    }
+
+    if (!bac.isDrained()) {
+        DPRINTF(Drain, "BAC not drained.\n");
         drained = false;
     }
 
@@ -940,7 +961,12 @@ CPU::isCpuDrained() const
     return drained;
 }
 
-void CPU::commitDrained(ThreadID tid) { fetch.drainStall(tid); }
+void
+CPU::commitDrained(ThreadID tid)
+{
+    bac.drainStall(tid);
+    fetch.drainStall(tid);
+}
 
 void
 CPU::drainResume()
@@ -951,6 +977,7 @@ CPU::drainResume()
     DPRINTF(Drain, "Resuming...\n");
     verifyMemoryMode();
 
+    bac.drainResume();
     fetch.drainResume();
     commit.drainResume();
 
@@ -990,6 +1017,7 @@ CPU::takeOverFrom(BaseCPU *oldCPU)
 {
     BaseCPU::takeOverFrom(oldCPU);
 
+    bac.takeOverFrom();
     fetch.takeOverFrom();
     decode.takeOverFrom();
     rename.takeOverFrom();

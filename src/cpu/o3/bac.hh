@@ -2,18 +2,6 @@
  * Copyright (c) 2022 The University of Edinburgh
  * All rights reserved
  *
- * The license below extends only to copyright in the software and shall
- * not be construed as granting a license to any other intellectual
- * property including but not limited to intellectual property relating
- * to a hardware implementation of the functionality of the software
- * licensed hereunder.  You may use the software subject to the license
- * terms below provided that you ensure that this notice is replicated
- * unmodified and in its entirety in all distributions of the software,
- * modified or unmodified, in source code or in binary form.
- *
- * Copyright (c) 2004-2005 The Regents of The University of Michigan
- * All rights reserved.
- *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met: redistributions of source code must retain the above copyright
@@ -38,8 +26,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __CPU_O3_BPREDICT_HH__
-#define __CPU_O3_BPREDICT_HH__
+
+#ifndef __CPU_O3_BAC_HH__
+#define __CPU_O3_BAC_HH__
 
 #include <deque>
 
@@ -47,9 +36,12 @@
 #include "base/statistics.hh"
 #include "cpu/o3/comm.hh"
 #include "cpu/o3/dyn_inst_ptr.hh"
+// #include "cpu/o3/ftq.hh" ///// Remove from header
 #include "cpu/o3/limits.hh"
 #include "cpu/pred/bpred_unit.hh"
 #include "cpu/timebuf.hh"
+
+
 
 namespace gem5
 {
@@ -60,20 +52,24 @@ namespace o3
 {
 
 class CPU;
+class FTQ;
+class FetchTarget;
+typedef std::shared_ptr<FetchTarget> FetchTargetPtr;
+
 
 /**
  * TODO: Maybe better naming would BAC: Branch and Address Calculation.
  * The Branch Predict stage handles branch prediction and next PC
  * address calculation.
  */
-class BPredict
+class BAC
 {
 
   public:
     /** Overall decoupled BPU stage status. Used to determine if the CPU can
      * deschedule itself due to a lack of activity.
      */
-    enum FtqStageStatus
+    enum BACStatus
     {
         Active,
         Inactive
@@ -82,67 +78,71 @@ class BPredict
     /** Individual thread status. */
     enum ThreadStatus
     {
-        Running,
         Idle,
-        StartSquash,
+        Running,
         Squashing,
-        FTQEmpty,
-        Blocked,
-        Unblocking
+        FTQFull
     };
 
-    enum FTQStatus
-    {
-        FTQActive,
-        FTQSquash,
-        FTQFull,
-        FTQInactive
-    };
+    // enum FTQStatus
+    // {
+    //     FTQActive,
+    //     FTQSquash,
+    //     FTQFull,
+    //     FTQInactive
+    // };
 
   private:
     /** Decode status. */
-    FtqStageStatus _status;
+    BACStatus _status;
 
     /** Per-thread status. */
-    ThreadStatus thstatus[MaxThreads];
-    FTQStatus ftqStatus[MaxThreads];
+    ThreadStatus bacStatus[MaxThreads];
+    // FTQStatus ftqStatus[MaxThreads];
 
-
+  public:
     ProbePointArg<DynInstPtr> *ppFTQInsert;
 
 
     // /**
     //  * @param params The params object, that has the size of the BP and BTB.
     //  */
-    // // BPredict(const BPredictParams &params);
-    // ~BPredict() = default;
+    // // BAC(const BACParams &params);
+    // ~BAC() = default;
 
   public:
-    /** BPredict constructor. */
-    BPredict(CPU *_cpu, const BaseO3CPUParams &params);
+    /** BAC constructor. */
+    BAC(CPU *_cpu, const BaseO3CPUParams &params);
 
 
     // Interfaces to CPU ----------------------------------
-    void startupStage();
 
-    /** Clear all thread-specific states */
-    void clearStates(ThreadID tid);
-
-
-    /** Returns the name of decode. */
+    /** Returns the name of the stage. */
     std::string name() const;
+
+    /** Registers probes. */
+    void regProbePoints();
 
     /** Sets the main backwards communication time buffer pointer. */
     void setTimeBuffer(TimeBuffer<TimeStruct> *tb_ptr);
 
-    // /** Sets pointer to time buffer used to communicate to the next stage. */
-    // void setDecodeQueue(TimeBuffer<DecodeStruct> *dq_ptr);
+    /** Sets pointer to time buffer used to communicate to the next stage. */
+    // void setFetchTargeQueue(TimeBuffer<FTQStruct> *ftq_ptr);
 
     // /** Sets pointer to time buffer coming from fetch. */
     // void setFetchQueue(TimeBuffer<FetchStruct> *fq_ptr);
 
     /** Sets pointer to list of active threads. */
     void setActiveThreads(std::list<ThreadID> *at_ptr);
+
+    /** Initialize stage. */
+    void setFetchTargetQueue(FTQ * _ptr);
+
+    /** Initialize stage. */
+    void startupStage();
+
+    /** Clear all thread-specific states*/
+    void clearStates(ThreadID tid);
 
     /** Resume after a drain. */
     void drainResume();
@@ -164,8 +164,8 @@ class BPredict
      */
     void drainStall(ThreadID tid);
 
-    // /** Takes over from another CPU's thread. */
-    // void takeOverFrom() { resetStage(); }
+    /** Takes over from another CPU's thread. */
+    void takeOverFrom() { resetStage(); }
 
 
     /** For priority-based fetch policies, need to keep update priorityList */
@@ -184,6 +184,17 @@ class BPredict
      */
     void switchToInactive();
 
+    /** Checks if a thread is stalled. */
+    bool checkStall(ThreadID tid) const;
+
+    /** Updates overall BAC stage status; to be called at the end of each
+     * cycle. */
+    void updateBACStatus();
+
+    /** Checks all input signals and updates the status as necessary.
+     *  @return: Returns if the status has changed due to input signals.
+     */
+    bool checkSignalsAndUpdate(ThreadID tid);
 
   public:
     /** Ticks ftq, processing all input signals and create the next fetch
@@ -195,6 +206,55 @@ class BPredict
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  /** BRANCH PRedictor ===============================================*/
+
+    /**
+     * Tells the branch predictor to commit any updates until the given
+     * sequence number.
+     * @param done_sn The sequence number to commit any older updates up until.
+     * @param tid The thread id.
+     */
+    void update(const InstSeqNum &done_sn, ThreadID tid)
+    { bpu->update(done_sn, tid); }
+
+    /**
+     * Squashes all outstanding updates until a given sequence number.
+     * @param squashed_sn The sequence number to squash any younger updates up
+     * until.
+     * @param tid The thread id.
+     */
+    void squash(const InstSeqNum &squashed_sn, ThreadID tid)
+    { bpu->squash(squashed_sn, tid); }
+
+    /**
+     * Squashes all outstanding updates until a given sequence number, and
+     * corrects that sn's update with the proper address and taken/not taken.
+     * @param squashed_sn The sequence number to squash any younger updates up
+     * until.
+     * @param corr_target The correct branch target.
+     * @param actually_taken The correct branch direction.
+     * @param tid The thread id.
+     * @param inst The static instruction that caused the misprediction
+     */
+    void squash(const InstSeqNum &squashed_sn, const PCStateBase &corr_target,
+                bool actually_taken, ThreadID tid)
+    { bpu->squash(squashed_sn, corr_target, actually_taken, tid); }
+
+
     /**
      * Predicts whether or not the instruction is a taken branch, and the
      * target of the branch if it is taken.
@@ -203,7 +263,10 @@ class BPredict
      * @param tid The thread id.
      * @return Returns if the branch is taken or not.
      */
-    bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
+    bool predict(const DynInstPtr &inst, const InstSeqNum &seqNum,
+                 PCStateBase &pc, ThreadID tid);
+
+    bool predict(const StaticInstPtr &inst, const FetchTargetPtr &ft,
                  PCStateBase &pc, ThreadID tid);
 
     /**
@@ -221,7 +284,7 @@ class BPredict
      * @param tid The thread id.
      * @return Returns if the update was successful.
      */
-    bool updatePostFetch(PCStateBase &pc, const InstSeqNum &ftNum,
+    bool updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
                           const InstSeqNum &seqNum,
                           const StaticInstPtr &inst, ThreadID tid);
 
@@ -248,16 +311,11 @@ class BPredict
 //     update(ThreadID tid, Addr instPC, bool taken, void *bp_history,
 //             bool squashed, const StaticInstPtr &inst, Addr corrTarget) override
 //     {}
-  void setBranchPredictor(branch_prediction::BPredUnit* _bpu) { bpu = _bpu; }
 
 
   private:
 
     typedef std::deque<branch_prediction::BPredUnit::PredictorHistory*> History;
-
-    CPU* cpu;
-
-    branch_prediction::BPredUnit* bpu;
 
     std::vector<History> preFetchPredHist;
 
@@ -304,180 +362,36 @@ class BPredict
      *******************************************************************/
     //
 
-    class BasicBlock
-    {
-      public:
-        BasicBlock(ThreadID _tid, const PCStateBase &_start_pc, InstSeqNum seqNum);
-        // ~BasicBlock();
-      private:
-        /* Start address of the basic block */
-        std::unique_ptr<PCStateBase> startPC;
-
-        /* End address of the basic block */
-        std::unique_ptr<PCStateBase> endPC;
-
-        /** The thread id. */
-        const ThreadID tid;
-
-      public:
-        /* Start address of the basic block */
-        Addr startAddress() { return startPC->instAddr(); }
-
-        /* End address of the basic block */
-        Addr endAddress() { return (endPC) ? endPC->instAddr() : MaxAddr; }
-
-        /* Basic Block size */
-        unsigned size() { return endAddress() - startAddress(); }
-
-        bool isInBB(Addr addr) {
-            return addr >= startAddress() && addr <= endAddress();
-        }
-
-        bool isTerminal(Addr addr) {
-            return addr == endAddress();
-        }
-
-        bool isTerminalBranch(Addr addr) {
-            return (addr == endAddress()) && is_branch;
-        }
-
-        bool hasExceeded(Addr addr) {
-            return addr > endAddress();
-        }
-
-
-
-        ThreadID getTid() { return tid; }
-
-        /* List of sequence numbers created for the BB */
-        std::list<InstSeqNum> seqNumbers;
-        InstSeqNum startSeqNum;
-        unsigned seq_num_iter = 0;
-        InstSeqNum brSeqNum;
-        InstSeqNum ftSeqNum;
-
-
-        // /** The branch that terminate the BB */
-        // DynInstPtr terminalBranch;
-
-        // std::unique_ptr<PCStateBase> predPC;
-        std::unique_ptr<PCStateBase> predPC;
-        /** Set/Read the predicted target of the terminal branch. */
-        void setPredTarg(const PCStateBase &pred_pc) { set(predPC, pred_pc); }
-        const PCStateBase &readPredTarg() { return *predPC; }
-
-        const PCStateBase &readStartPC() { return *startPC; }
-        const PCStateBase &readEndPC() { return *endPC; }
-
-        /** Whether the determining instruction is a branch
-         *  In case its a branch if it is taken or not.*/
-        bool is_branch;
-        bool taken;
-
-        // std::unique_ptr<PCStateBase> targetAddr;
-
-        void addSeqNum(InstSeqNum seqNum) { seqNumbers.push_back(seqNum); }
-
-        InstSeqNum getNextSeqNum() {
-            seq_num_iter++;
-            assert((startSeqNum + seq_num_iter) < brSeqNum);
-            return startSeqNum + seq_num_iter;
-        }
-
-        void addTerminal(const PCStateBase &br_pc, InstSeqNum seq,
-                          bool _is_branch, bool pred_taken,
-                          const PCStateBase &pred_pc);
-        void addTerminalNoBranch(const PCStateBase &br_pc, InstSeqNum seq,
-                               bool pred_taken, const PCStateBase &pred_pc);
-
-        std::string print() {
-          std::stringstream ss;
-          ss << "BB[sn:" << startSeqNum << "]: "
-             << *startPC << "->" << *endPC << "";
-          return ss.str();
-        }
-    };
-
-    struct FetchTarget
-    {
-        /* Start address of the basic block */
-        std::unique_ptr<PCStateBase> bbStartAddress;
-
-        /* End address of the basic block */
-        std::unique_ptr<PCStateBase> bbEndAddress;
-
-        /* Basic Block size */
-        unsigned bbSize;
-
-        /** The thread id. */
-        ThreadID tid;
-
-        /* Whether the determining branch is taken or not.*/
-        bool taken;
-        std::unique_ptr<PCStateBase> targetAddr;
-
-      // FetchTarget(Addr _addr = 0, bool
-      //     _control = false, bool _taken = false)
-      //   : addr(_addr), control(_control), taken(_taken) {};
-      // FetchTarget(const FetchTarget &other)
-      //   : addr(other.addr), control(other.control), taken(other.taken) {};
-    };
-
-
-
-    typedef std::shared_ptr<BasicBlock> BasicBlockPtr;
-    // using BasicBlockPtr = BasicBlock*;
-
-   typedef std::deque<BasicBlockPtr> FetchTargetQueue;
-
-   FetchTargetQueue ftq[MaxThreads];
-    const unsigned ftqSize;
-
-    void dumpFTQ(ThreadID tid);
-    bool updateFTQStatus(ThreadID tid);
-
-
-    BasicBlockPtr basicBlockProduce[MaxThreads];
-    BasicBlockPtr basicBlockConsume[MaxThreads];
-
-// #ifdef FDIP
-    bool ftqValid(ThreadID tid, bool &status_change) {
-
-        // If the FTQ is empty wait unit its filled upis available.
-        // Need at least two cycles for now.
-        if (ftq[tid].empty()) {
-            // DPRINTF(Fetch, "[tid:%i] FTQ is empty\n", tid);
-            thstatus[tid] = FTQEmpty;
-            status_change = true;
-            return false;
-        }
-        return true;
-    }
-// #else
-//   bool ftqValid(ThreadID tid, bool &status_change) {return true;}
-// #endif
-
-    bool inFTQHead(ThreadID tid, Addr pc) {
-        if (ftq[tid].empty()) {
-            return false;
-        }
-
-      if (!ftq[tid].front()->isInBB(pc)) {
-          // DPRINTF(Fetch, "[tid:%i] PC:%#x not within FT!\n",
-          //     tid, pc);
-          return false;
-      }
-        return true;
-    }
-
+  private:
+    /** Unique sequence number for fetch targets */
     InstSeqNum globalFTSeqNum;
     InstSeqNum getAndIncrementFTSeq() { return globalFTSeqNum++; }
 
+    FetchTargetPtr newFetchTarget(ThreadID tid, const PCStateBase &start_pc);
 
-    /** Feed the fetch target queue.
-     */
-    void produceFetchTargets(bool &status_change);
-    BasicBlockPtr getCurrentFetchTarget(ThreadID tid, bool &status_change);
+    /** Main function that feeds the FTQ with new fetch targets.
+      * By leveraging the BTB up to N consecutive addresses are searched
+      * to detect a branch instruction.
+      * For every BTB hit the direction predictor is asked to make a
+      * prediction.
+      * In every cycle one fetch target is created. A fetch target ends
+      * once the first branch instruction is detected or the maximum
+      * search bandwidth for a cycle is reached.
+      *
+    performs the actual search through
+
+    Feed the fetch target queue. */
+    void generateFetchTargets(ThreadID tid, bool &status_change);
+
+
+
+
+
+
+
+
+
+    // FetchTargetPtr getCurrentFetchTarget(ThreadID tid, bool &status_change);
 
     /** The decoupled PC used by the BPU to generate fetch targets
      *
@@ -509,72 +423,155 @@ class BPredict
     // using BpuPCState = GenericISA::UPCState<1>;
     typedef std::unique_ptr<BpuPCState> BpuPCStatePtr;
 
-    std::unique_ptr<PCStateBase> bpuPC[MaxThreads];
 
     // Addr decoupledOffset[MaxThreads];
 
-    DynInstPtr buildInstPlaceholder(ThreadID tid, StaticInstPtr staticInst,
-                            const PCStateBase &this_pc);
+    // DynInstPtr buildInstPlaceholder(ThreadID tid, StaticInstPtr staticInst,
+    //                         const PCStateBase &this_pc);
 
-    DynInstPtr fillInstPlaceholder(const DynInstPtr &src, StaticInstPtr staticInst,
-        StaticInstPtr curMacroop, const PCStateBase &this_pc,
-        const PCStateBase &next_pc, bool trace);
-
-
-    DynInstPtr getInstrFromBB(ThreadID tid, StaticInstPtr staticInst,
-            StaticInstPtr curMacroop, const PCStateBase &this_pc,
-            PCStateBase &next_pc);
+    // DynInstPtr fillInstPlaceholder(const DynInstPtr &src, StaticInstPtr staticInst,
+    //     StaticInstPtr curMacroop, const PCStateBase &this_pc,
+    //     const PCStateBase &next_pc, bool trace);
 
 
+    // DynInstPtr getInstrFromBB(ThreadID tid, StaticInstPtr staticInst,
+    //         StaticInstPtr curMacroop, const PCStateBase &this_pc,
+    //         PCStateBase &next_pc);
+
+    /** Squashes BAC for a specific thread and resets the PC. */
+    void squash(const PCStateBase &new_pc, ThreadID tid);
+
+    /** Squashes the BPU histories in the FTQ.
+      * by iterating from tail to head and reverts the predictions made.
+      * @param squash_head whether the head fetch target should be squashed
+      */
+    void squashBpuHistories(ThreadID tid);
+
+    /** Update the stats per cycle */
+    void profileCycle(ThreadID tid);
+
+
+  public:
 
 
 
+  private:
+    /** Pointer to the main CPU. */
+    CPU* cpu;
+
+    /** BPredUnit. */
+    branch_prediction::BPredUnit* bpu;
+
+    /** Fetch target Queue. */
+    FTQ* ftq;
+
+    /** Time buffer interface. */
+    TimeBuffer<TimeStruct> *timeBuffer;
+
+    /** Wire to get fetches's information from backwards time buffer. */
+    TimeBuffer<TimeStruct>::wire fromFetch;
+
+    /** Wire to get decode's information from backwards time buffer. */
+    TimeBuffer<TimeStruct>::wire fromDecode;
+
+    /** Wire to get rename's information from backwards time buffer. */
+    TimeBuffer<TimeStruct>::wire fromRename;
+
+    /** Wire to get iew's information from backwards time buffer. */
+    TimeBuffer<TimeStruct>::wire fromIEW;
+
+    /** Wire to get commit's information from backwards time buffer. */
+    TimeBuffer<TimeStruct>::wire fromCommit;
+
+    /** Wire used to write any information heading to fetch. */
+    TimeBuffer<FetchStruct>::wire toFetch;
+
+    /** The decoupled PC which runs ahead of fetch */
+    // TODO: rename
+    std::unique_ptr<PCStateBase> pc[MaxThreads];
 
 
-
-
-
-    /** Squashes the FTQ for a specific thread and resets the PC. */
-    void doFTQSquash(const PCStateBase &new_pc, ThreadID tid);
-
-    /** Checks if a thread is stalled. */
-    bool checkStall(ThreadID tid) const;
-
-
+    /** Variable that tracks if BAC has written to the time buffer this
+     * cycle. Used to tell CPU if there is activity this cycle.
+     */
+    bool wroteToTimeBuffer;
 
     /** Source of possible stalls. */
     struct Stalls
     {
         bool fetch;
         bool drain;
+        bool bpu;
     };
 
     /** Tracks which stages are telling the ftq to stall. */
     Stalls stalls[MaxThreads];
 
+    /** Fetch to BAC delay. */
+    const Cycles fetchToBacDelay;
 
+    /** Decode to fetch delay. (Same delay for BAC) */
+    const Cycles decodeToFetchDelay;
 
+    /** Rename to fetch delay. (Same delay for BAC) */
+    const Cycles renameToFetchDelay;
 
+    /** IEW to fetch delay. (Same delay for BAC) */
+    const Cycles iewToFetchDelay;
 
+    /** Commit to fetch delay. (Same delay for BAC) */
+    const Cycles commitToFetchDelay;
 
+    /** BAC to fetch delay. */
+    const Cycles bacToFetchDelay;
 
+    /** The size of the fetch target queue */
+    const unsigned ftqSize;
 
+    /** The maximum with of a fetch target. This also determin the
+     * maximum search width of the branch predictor in on cycle. */
+    const unsigned fetchTargetWidth;
 
+    /** List of Active FTQ Threads */
+    std::list<ThreadID> *activeThreads;
+
+    /** Number of threads. */
+    const ThreadID numThreads;
 
 
   protected:
-    struct BPredictStats : public statistics::Group
+    struct BACStats : public statistics::Group
     {
-      BPredictStats(CPU *cpu, BPredict *decBpu);
-        // BPredictStats(statistics::Group *parent);
+      BACStats(CPU *cpu, BAC *bac);
 
-        statistics::Scalar fetchTargetsCreated;
+      /** Stat for total number of idle cycles. */
+      statistics::Scalar idleCycles;
+      /** Stat for total number of normal running cycles. */
+      statistics::Scalar runCycles;
+      /** Stat for total number of squashing cycles. */
+      statistics::Scalar squashCycles;
+      /** Stat for total number of cycles the FTQ was full. */
+      statistics::Scalar ftqFullCycles;
 
-    } decoupedStats;
+      /** Stat for total number fetch targets created. */
+      statistics::Scalar fetchTargetsCreated;
+      /** Total number of branches detected. */
+      statistics::Scalar branches;
+      /** Total number of branches predicted taken. */
+      statistics::Scalar predTakenBranches;
+
+      /** Stat for total number of misspredicted instructions. */
+      statistics::Scalar branchMisspredict;
+      statistics::Scalar noBranchMisspredict;
+
+      /** Distribution of number of bytes per fetch target. */
+      statistics::Distribution ftSizeDist;
+
+    } stats;
     /** @} */
 };
 
 } // namespace o3
 } // namespace gem5
 
-#endif // __CPU_O3_BPREDICT_HH__
+#endif // __CPU_O3_BAC_HH__

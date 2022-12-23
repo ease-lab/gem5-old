@@ -58,6 +58,14 @@ namespace gem5
 namespace o3
 {
 
+/** Struct that defines the information passed from BAC to fetch. */
+struct BACStruct
+{
+    int size;
+
+    bool ftqValid;
+};
+
 /** Struct that defines the information passed from fetch to decode. */
 struct FetchStruct
 {
@@ -112,6 +120,16 @@ struct IssueStruct
 /** Struct that defines all backwards communication. */
 struct TimeStruct
 {
+    struct FetchComm
+    {
+        bool block;
+        /** Signals to redirect BAC if something goes wrong. */
+        bool squash;
+        std::unique_ptr<PCStateBase> nextPC;
+    };
+
+    FetchComm fetchInfo[MaxThreads];
+
     struct DecodeComm
     {
         std::unique_ptr<PCStateBase> nextPC;

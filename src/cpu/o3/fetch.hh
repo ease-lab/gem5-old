@@ -52,7 +52,8 @@
 #include "cpu/o3/limits.hh"
 #include "cpu/pc_event.hh"
 #include "cpu/pred/bpred_unit.hh"
-#include "cpu/o3/decoupled_bpred_unit.hh"
+#include "cpu/o3/bac.hh"
+#include "cpu/o3/ftq.hh"
 #include "cpu/timebuf.hh"
 #include "cpu/translation.hh"
 #include "enums/SMTFetchPolicy.hh"
@@ -62,7 +63,6 @@
 #include "sim/probe/probe.hh"
 
 
-#define FDIP
 namespace gem5
 {
 
@@ -171,14 +171,6 @@ class Fetch
         Inactive
     };
 
-    enum FTQStatus
-    {
-        FTQActive,
-        FTQSquash,
-        FTQFull,
-        FTQInactive
-    };
-
     /** Individual thread status. */
     enum ThreadStatus
     {
@@ -203,7 +195,6 @@ class Fetch
 
     /** Per-thread status. */
     ThreadStatus fetchStatus[MaxThreads];
-    FTQStatus ftqStatus[MaxThreads];
 
     /** Fetch policy. */
     SMTFetchPolicy fetchPolicy;
@@ -216,7 +207,6 @@ class Fetch
     /** To probe when a fetch request is successfully sent. */
     ProbePointArg<RequestPtr> *ppFetchRequestSent;
     ProbePointArg<DynInstPtr> *ppFetchSquash;
-    ProbePointArg<DynInstPtr> *ppFTQInsert;
 
   public:
     /** Fetch constructor. */
@@ -237,6 +227,14 @@ class Fetch
 
     /** Sets pointer to time buffer used to communicate to the next stage. */
     void setFetchQueue(TimeBuffer<FetchStruct> *fq_ptr);
+
+    /** Sets pointer to branch address calculation stage
+     * TODO: Add timebuffer.
+     */
+    void setBACPtr(BAC *_ptr, TimeBuffer<BACStruct> *ftq_ptr);
+
+    /** Initialize stage. */
+    void setFetchTargetQueue(FTQ * _ptr);
 
     /** Initialize stage. */
     void startupStage();
@@ -294,275 +292,24 @@ class Fetch
 
 
 
-    /********************************************************************
-     *
-     * Decoupled Frontend functionality
-     *
-     * In a decoupled frontend the Branch predictor Unit
-     * is not directly queried by Fetch once it pre-decodes
-     * a branch. Instead BPU and Fetch is separated and
-     * connected via a queue fetch target queue (FTQ). The BPU generates
-     * fetch targets (basic block addresses (BB)) and inserts them in
-     * the queue. Fetch will consume the addresses and read them from the
-     * I-cache.
-     * The advantages are that it (1) cuts the critical path and (2)
-     * allow a precise, BPU guided prefetching of the fetch targets.
-     *
-     * For determining next PC addresses the BPU relies on the BTB.
-     *
-     *
-     *
-     *******************************************************************/
-    //
-
-    class BasicBlock
-    {
-      public:
-        BasicBlock(ThreadID _tid, const PCStateBase &_start_pc, InstSeqNum seqNum);
-        // ~BasicBlock();
-      private:
-        /* Start address of the basic block */
-        std::unique_ptr<PCStateBase> startPC;
-
-        /* End address of the basic block */
-        std::unique_ptr<PCStateBase> endPC;
-
-        /** The thread id. */
-        const ThreadID tid;
-
-      public:
-        /* Start address of the basic block */
-        Addr startAddress() { return startPC->instAddr(); }
-
-        /* End address of the basic block */
-        Addr endAddress() { return (endPC) ? endPC->instAddr() : MaxAddr; }
-
-        /* Basic Block size */
-        unsigned size() { return endAddress() - startAddress(); }
-
-        bool isInBB(Addr addr) {
-            return addr >= startAddress() && addr <= endAddress();
-        }
-
-        bool isTerminal(Addr addr) {
-            return addr == endAddress();
-        }
-
-        bool isTerminalBranch(Addr addr) {
-            return (addr == endAddress()) && is_branch;
-        }
-
-        bool hasExceeded(Addr addr) {
-            return addr > endAddress();
-        }
-
-
-
-        ThreadID getTid() { return tid; }
-
-        /* List of sequence numbers created for the BB */
-        std::list<InstSeqNum> seqNumbers;
-        InstSeqNum startSeqNum;
-        unsigned seq_num_iter = 0;
-        InstSeqNum brSeqNum;
-        InstSeqNum ftSeqNum;
-
-
-        // /** The branch that terminate the BB */
-        // DynInstPtr terminalBranch;
-
-        // std::unique_ptr<PCStateBase> predPC;
-        std::unique_ptr<PCStateBase> predPC;
-        /** Set/Read the predicted target of the terminal branch. */
-        void setPredTarg(const PCStateBase &pred_pc) { set(predPC, pred_pc); }
-        const PCStateBase &readPredTarg() { return *predPC; }
-
-        const PCStateBase &readStartPC() { return *startPC; }
-        const PCStateBase &readEndPC() { return *endPC; }
-
-        /** Whether the determining instruction is a branch
-         *  In case its a branch if it is taken or not.*/
-        bool is_branch;
-        bool taken;
-
-        // std::unique_ptr<PCStateBase> targetAddr;
-
-        void addSeqNum(InstSeqNum seqNum) { seqNumbers.push_back(seqNum); }
-
-        InstSeqNum getNextSeqNum() {
-            seq_num_iter++;
-            assert((startSeqNum + seq_num_iter) < brSeqNum);
-            return startSeqNum + seq_num_iter;
-        }
-
-        void addTerminal(const PCStateBase &br_pc, InstSeqNum seq,
-                          bool _is_branch, bool pred_taken,
-                          const PCStateBase &pred_pc);
-        void addTerminalNoBranch(const PCStateBase &br_pc, InstSeqNum seq,
-                               bool pred_taken, const PCStateBase &pred_pc);
-
-        std::string print() {
-          std::stringstream ss;
-          ss << "BB[sn:" << startSeqNum << "]: "
-             << *startPC << "->" << *endPC << "";
-          return ss.str();
-        }
-    };
-
-    struct FetchTarget
-    {
-        /* Start address of the basic block */
-        std::unique_ptr<PCStateBase> bbStartAddress;
-
-        /* End address of the basic block */
-        std::unique_ptr<PCStateBase> bbEndAddress;
-
-        /* Basic Block size */
-        unsigned bbSize;
-
-        /** The thread id. */
-        ThreadID tid;
-
-        /* Whether the determining branch is taken or not.*/
-        bool taken;
-        std::unique_ptr<PCStateBase> targetAddr;
-
-      // FetchTarget(Addr _addr = 0, bool
-      //     _control = false, bool _taken = false)
-      //   : addr(_addr), control(_control), taken(_taken) {};
-      // FetchTarget(const FetchTarget &other)
-      //   : addr(other.addr), control(other.control), taken(other.taken) {};
-    };
-
-
-
-    typedef std::shared_ptr<BasicBlock> BasicBlockPtr;
-    // using BasicBlockPtr = BasicBlock*;
-
-   typedef std::deque<BasicBlockPtr> FetchTargetQueue;
-
-   FetchTargetQueue ftq[MaxThreads];
-    const unsigned ftqSize;
-
-    void dumpFTQ(ThreadID tid);
-    bool updateFTQStatus(ThreadID tid);
-
-
-    BasicBlockPtr basicBlockProduce[MaxThreads];
-    BasicBlockPtr basicBlockConsume[MaxThreads];
-
-#ifdef FDIP
-    bool ftqValid(ThreadID tid, bool &status_change) {
-
-        // If the FTQ is empty wait unit its filled upis available.
-        // Need at least two cycles for now.
-        if (ftq[tid].empty()) {
-            // DPRINTF(Fetch, "[tid:%i] FTQ is empty\n", tid);
-            fetchStatus[tid] = FTQEmpty;
-            status_change = true;
-            return false;
-        }
-        return true;
-    }
-#else
-  bool ftqValid(ThreadID tid, bool &status_change) {return true;}
-#endif
-
-    bool inFTQHead(ThreadID tid, Addr pc) {
-        if (ftq[tid].empty()) {
-            return false;
-        }
-
-      if (!ftq[tid].front()->isInBB(pc)) {
-          // DPRINTF(Fetch, "[tid:%i] PC:%#x not within FT!\n",
-          //     tid, pc);
-          return false;
-      }
-        return true;
-    }
-
-    InstSeqNum globalFTSeqNum;
-    InstSeqNum getAndIncrementFTSeq() { return globalFTSeqNum++; }
-
-
-    /** Feed the fetch target queue.
-     */
-    void produceFetchTargets(bool &status_change);
-    BasicBlockPtr getCurrentFetchTarget(ThreadID tid, bool &status_change);
-
-    /** The decoupled PC used by the BPU to generate fetch targets
-     *
-     */
-    class BpuPCState : public GenericISA::UPCState<1>
-    {
-      protected:
-        using Base = GenericISA::UPCState<1>;
-        // uint8_t _size;
-
-      public:
-        // BpuPCState(const BpuPCState &other) : Base(other), _size(other._size) {}
-        BpuPCState(const BpuPCState &other) : Base(other) {}
-
-        BpuPCState &operator=(const BpuPCState &other) = default;
-        BpuPCState() {}
-        explicit BpuPCState(Addr val) { set(val); }
-        void advance() override
-        {
-            Base::advance();
-        }
-        void
-        update(const PCStateBase &other) override
-        {
-            Base::update(other);
-        }
-    };
-
-    // using BpuPCState = GenericISA::UPCState<1>;
-    typedef std::unique_ptr<BpuPCState> BpuPCStatePtr;
-
-    std::unique_ptr<PCStateBase> bpuPC[MaxThreads];
-
-    // Addr decoupledOffset[MaxThreads];
-
-    DynInstPtr buildInstPlaceholder(ThreadID tid, StaticInstPtr staticInst,
-                            const PCStateBase &this_pc);
-
-    DynInstPtr fillInstPlaceholder(const DynInstPtr &src, StaticInstPtr staticInst,
-        StaticInstPtr curMacroop, const PCStateBase &this_pc,
-        const PCStateBase &next_pc, bool trace);
-
-
-    DynInstPtr getInstrFromBB(ThreadID tid, StaticInstPtr staticInst,
+    DynInstPtr getInstrFromFT(FetchTargetPtr &ft, StaticInstPtr staticInst,
             StaticInstPtr curMacroop, const PCStateBase &this_pc,
             PCStateBase &next_pc);
 
 
+    // /**
+    //  * Searches the BTB to see if the current PC is a branch or not.
+    //  * If so the branch predictor is checked as well if the next PC should be
+    //  * either next PC+=MachInst or a branch target.
+    //  * @param next_PC Next PC variable passed in by reference.  It is
+    //  * expected to be set to the current PC; it will be updated with what
+    //  * the next PC will be.
+    //  * @param next_NPC Used for ISAs which use delay slots.
+    //  * @return Whether or not a branch was predicted as taken.
+    //  */
+    // bool searchBTBAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &pc);
 
-
-
-
-
-
-
-
-
-
-
-
-
-    /**
-     * Searches the BTB to see if the current PC is a branch or not.
-     * If so the branch predictor is checked as well if the next PC should be
-     * either next PC+=MachInst or a branch target.
-     * @param next_PC Next PC variable passed in by reference.  It is
-     * expected to be set to the current PC; it will be updated with what
-     * the next PC will be.
-     * @param next_NPC Used for ISAs which use delay slots.
-     * @return Whether or not a branch was predicted as taken.
-     */
-    bool searchBTBAndUpdateNextPC(const DynInstPtr &inst, PCStateBase &pc);
-
-
+    bool ftqReady(ThreadID tid, bool &status_change);
 
     /////////////////////////////////////////////
 
@@ -602,9 +349,6 @@ class Fetch
     void doSquash(const PCStateBase &new_pc, const DynInstPtr squashInst,
             ThreadID tid);
 
-    /** Squashes the FTQ for a specific thread and resets the PC. */
-    void doFTQSquash(const PCStateBase &new_pc, ThreadID tid);
-
     /** Squashes a specific thread and resets the PC. Also tells the CPU to
      * remove any instructions between fetch and decode
      *  that should be sqaushed.
@@ -612,6 +356,9 @@ class Fetch
     void squashFromDecode(const PCStateBase &new_pc,
                           const DynInstPtr squashInst,
                           const InstSeqNum seq_num, ThreadID tid);
+
+    /** Signal BAC to redirect. */
+    void bacResteer(const PCStateBase &new_pc, ThreadID tid);
 
     /** Checks if a thread is stalled. */
     bool checkStall(ThreadID tid) const;
@@ -692,6 +439,9 @@ class Fetch
     /** Pointer to the O3CPU. */
     CPU *cpu;
 
+    // /** Fetch Target Queue */
+    // FTQ *ftq;
+
     /** Time buffer interface. */
     TimeBuffer<TimeStruct> *timeBuffer;
 
@@ -707,15 +457,18 @@ class Fetch
     /** Wire to get commit's information from backwards time buffer. */
     TimeBuffer<TimeStruct>::wire fromCommit;
 
+    /** Wire used to write any information backward to BAC. */
+    TimeBuffer<TimeStruct>::wire toBAC;
+
     //Might be annoying how this name is different than the queue.
     /** Wire used to write any information heading to decode. */
     TimeBuffer<FetchStruct>::wire toDecode;
 
-    /** BPredUnit. */
-    branch_prediction::BPredUnit *branchPred;
-
     /** BPredict. */
-    BPredict *decoupledBPU;
+    BAC *bac;
+
+    /** Fetch Target Queue */
+    FTQ *ftq;
 
     std::unique_ptr<PCStateBase> pc[MaxThreads];
 
@@ -813,9 +566,6 @@ class Fetch
 
     /** List of Active Threads */
     std::list<ThreadID> *activeThreads;
-
-    /** List of Active FTQ Threads */
-    std::list<ThreadID> *activeFTQThreads;
 
     /** Number of threads. */
     ThreadID numThreads;

@@ -309,12 +309,7 @@ LoopPredictor::loopPredict(ThreadID tid, Addr branch_pc, bool cond_branch,
 void
 LoopPredictor::squash(ThreadID tid, BranchInfo *bi)
 {
-    if (bi->loopHit >= 0) {
-        int idx = finallindex(bi->loopIndex,
-                bi->loopIndexB,
-                bi->loopHit);
-        ltable[idx].currentIterSpec = bi->currentIter;
-    }
+    squashLoop(bi);
 }
 
 void
