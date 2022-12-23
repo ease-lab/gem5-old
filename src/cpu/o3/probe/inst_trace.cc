@@ -173,6 +173,9 @@ InstTrace::traceMemRef(const DynInstConstPtr& dynInst)
     uint64_t addr = dynInst->effAddr;
     uint64_t paddr = dynInst->physEffAddr;
     std::string type = dynInst->isLoad() ? "ld" : "st";
+    // assert(dyn)
+    uint64_t val = (dynInst->traceData) ?
+                            dynInst->traceData->getIntData() : MaxAddr;
     MemType mtype = dynInst->isLoad() ? Inst::MemRead : Inst::MemWrite;
 
     bool use_stack = false;
@@ -185,8 +188,8 @@ InstTrace::traceMemRef(const DynInstConstPtr& dynInst)
 
 
 
-    DPRINTFR(InstTrace, "[%s]: Mem | 0x%08x %s -> 0x%08x (0x%08x). | %s.\n",
-        name(), pc_addr, type, addr, paddr,
+    DPRINTFR(InstTrace, "[%s]: Mem | 0x%08x %s -> 0x%08x (0x%08x). "
+        "val: %#x| %s.\n", name(), pc_addr, type, addr, paddr, val,
         dynInst->staticInst->disassemble(pc_addr));
 
     ProtoMessage::InstRecord pkt;
@@ -196,6 +199,7 @@ InstTrace::traceMemRef(const DynInstConstPtr& dynInst)
     pkt.set_mtype(mtype);
     pkt.set_p_addr(paddr);
     pkt.set_v_addr(addr);
+    pkt.set_value(val);
     pkt.set_use_stack(use_stack);
 
     pkt.set_fe_tick(dynInst->fetchTick);

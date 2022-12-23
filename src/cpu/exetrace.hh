@@ -71,8 +71,8 @@ class ExeTracer : public InstTracer
             const StaticInstPtr staticInst, const PCStateBase &pc,
             const StaticInstPtr macroStaticInst=nullptr) override
     {
-        if (!debug::ExecEnable)
-            return NULL;
+        // if (!debug::ExecEnable)
+        //     return NULL;
 
         return new ExeTracerRecord(when, tc,
                 staticInst, pc, macroStaticInst);

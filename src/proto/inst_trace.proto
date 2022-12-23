@@ -89,6 +89,7 @@ message InstRecord {
   optional uint32 flags = 7;
   optional uint64 v_addr = 8;
   optional bool use_stack = 9;
+  optional uint64 value = 20;
 
   // Whether the instruction is traced at fetch or commit
   optional bool is_fetch = 10;
