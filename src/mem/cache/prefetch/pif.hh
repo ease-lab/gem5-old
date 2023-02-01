@@ -37,12 +37,24 @@
 #ifndef __MEM_CACHE_PREFETCH_PIF_HH__
 #define __MEM_CACHE_PREFETCH_PIF_HH__
 
+// #define ADDR_PRINT
+
 #include <deque>
 #include <vector>
+#include <list>
+#include <bitset>
+
 
 #include "base/circular_queue.hh"
+#include "base/output.hh"
+#include "cpu/base.hh"
 #include "mem/cache/prefetch/associative_set.hh"
 #include "mem/cache/prefetch/queued.hh"
+
+#define _max_bits 8
+#define _regionSize 8
+#define _blk_size 64
+
 
 namespace gem5
 {
@@ -61,6 +73,24 @@ class PIF : public Queued
         const unsigned int succSize;
         /** Number of entries used for the temporal compactor */
         const unsigned int maxCompactorEntries;
+        /** Use Block address instead of full instruction address to create
+         *  records*/
+        const bool useBlkAddr;
+        /** Make prediction based on the retired PC instead of the miss
+         * addresses  */
+        const bool predictOnRetiredPC;
+
+        /** Stream address buffer size */
+        const unsigned sabSize;
+        /** The look ahead distance defines the threshold when new entries
+         * filled in. If the matching index in the SAB will exceed this
+         * threashold new entries will be filled by replacing the first
+         * one in the buffer.
+         */
+        const unsigned lookahead;
+
+        const bool compactor_lru;
+
 
         /**
          * The compactor tracks retired instructions addresses, leveraging the
@@ -81,7 +111,9 @@ class PIF : public Queued
             Addr trigger;
             std::vector<bool> prec;
             std::vector<bool> succ;
-            CompactorEntry() {}
+            std::bitset<_max_bits> bits;
+
+            CompactorEntry() { trigger = MaxAddr; }
             CompactorEntry(Addr, unsigned int, unsigned int);
 
             /**
@@ -104,6 +136,38 @@ class PIF : public Queued
              */
             bool hasAddress(Addr target, unsigned int log_blk_size) const;
 
+
+            /**
+             * Checks if the provided compact entry is a subset of
+             * of this
+             * @param other Other compactor entry.
+             * @return TRUE To be true the trigger address must be the same
+             *         as well as the bitvector of the other need to be a
+             *         subset of this one.
+             */
+            bool isSupersetOf(CompactorEntry& other) const;
+
+            /**
+             * Number of blocks recorded in this entry.
+            */
+            unsigned numBlocks() const;
+
+            int getIndex(uint64_t addr, unsigned int log_blk_size) const;
+
+            std::string
+            print()
+            {
+              std::ostringstream oss;
+              oss << "x" << std::hex << trigger << " [";
+              // oss << numBlocks();
+              oss << bits.to_string();
+              // for (auto b : prec) oss << (b) ? "1" : "0";
+              // oss << "|";
+              // for (auto b : succ) oss << (b) ? "1" : "0";
+              oss << "]";
+              return oss.str();
+            }
+
             /**
              * Fills the provided vector with the predicted addresses using the
              * recorded bit vectors of the entry
@@ -112,7 +176,7 @@ class PIF : public Queued
              * addresses
              */
             void getPredictedAddresses(unsigned int log_blk_size,
-                    std::vector<AddrPriority> &addresses) const;
+                    std::list<Addr> &addresses) const;
           private:
             /**
              * Computes the distance, in cache blocks, from an address to the
@@ -126,7 +190,7 @@ class PIF : public Queued
         };
 
         CompactorEntry spatialCompactor;
-        std::deque<CompactorEntry> temporalCompactor;
+        std::list<CompactorEntry> temporalCompactor;
 
         /**
          * History buffer is a circular buffer that stores the sequence of
@@ -134,10 +198,11 @@ class PIF : public Queued
          */
         using HistoryBuffer = CircularQueue<CompactorEntry>;
         HistoryBuffer historyBuffer;
+        typedef HistoryBuffer::iterator HistoryPtr;
 
         struct IndexEntry : public TaggedEntry
         {
-            HistoryBuffer::iterator historyIt;
+            HistoryPtr historyIt;
         };
         /**
          * The index table is a small cache-like structure that facilitates
@@ -151,7 +216,30 @@ class PIF : public Queued
          * history buffer, initiallly set to the pointer taken from the index
          * table
          */
-        CircularQueue<HistoryBuffer::iterator> streamAddressBuffer;
+        std::list<HistoryPtr> streamAddressBuffer;
+
+        /**
+         * A list of prefetch candidates that will be generated from the
+         * prediction function.
+         */
+        std::list<Addr> prefetchCandiates;
+
+        /**
+         * Prediction functionality.
+         * Looks up the given PC in the SAB to create new prefetch
+         * canditates. Predictions will be added to the candidates list.
+         * @param pc PC used to make prediction.
+         */
+        void predict(const Addr pc);
+
+        /**
+         * Recording functionality.
+         * Adds the current PC to the current active temporal
+         * stream. Use spatial, temporal compactor to compress meta data.
+         * @param pc PC of the instruction being retired
+        */
+        void record(const Addr pc);
+
 
         /**
          * Updates the prefetcher structures upon an instruction retired
@@ -159,23 +247,34 @@ class PIF : public Queued
          */
         void notifyRetiredInst(const Addr pc);
 
-        /**
-         * Probe Listener to handle probe events from the CPU
-         */
-        class PrefetchListenerPC : public ProbeListenerArgBase<Addr>
-        {
-          public:
-            PrefetchListenerPC(PIF &_parent, ProbeManager *pm,
-                             const std::string &name)
-                : ProbeListenerArgBase(pm, name),
-                  parent(_parent) {}
-            void notify(const Addr& pc) override;
-          protected:
-            PIF &parent;
-        };
+        std::vector<ProbeListener *> listeners;
+        BaseCPU *cpu;
 
-        /** Array of probe listeners */
-        std::vector<PrefetchListenerPC *> listenersPC;
+
+        struct PIFStats : public statistics::Group
+        {
+            PIFStats(statistics::Group *parent);
+            // STATS
+            // Query stats
+            statistics::Scalar pifQueries;
+            statistics::Scalar pifQHasBeenPref;
+            statistics::Scalar pifQSABHits;
+            statistics::Scalar pifQIndexReset;
+            statistics::Scalar pifQIndexResetMiss;
+            statistics::Scalar pifQIndexResetHit;
+            statistics::Scalar translationFail;
+            statistics::Scalar translationSuccess;
+
+
+            statistics::Scalar pifNRetInst;
+            statistics::Scalar pifRecordPC;
+            statistics::Scalar pifNIndexInsert;
+            statistics::Scalar pifNIndexOverride;
+            statistics::Scalar pifNHistWrites;
+            statistics::Scalar pifNHitSpatial;
+            statistics::Scalar pifNHitTemporal;
+
+        } statsPIF;
 
 
     public:
@@ -185,12 +284,19 @@ class PIF : public Queued
         void calculatePrefetch(const PrefetchInfo &pfi,
                                std::vector<AddrPriority> &addresses);
 
+        void regProbeListeners() override;
+
         /**
-         * Add a SimObject and a probe name to monitor the retired instructions
-         * @param obj The SimObject pointer to listen from
-         * @param name The probe name
-         */
-        void addEventProbeRetiredInsts(SimObject *obj, const char *name);
+         * Invalidates all entries of the history and the index
+        */
+        void memInvalidate() override
+        {
+          index.invalidateAll();
+          streamAddressBuffer.clear();
+
+          historyBuffer.flush();
+          temporalCompactor.clear();
+        }
 };
 
 } // namespace prefetch

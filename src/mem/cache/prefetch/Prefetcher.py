@@ -504,6 +504,35 @@ class PIFPrefetcher(QueuedPrefetcher):
     type = 'PIFPrefetcher'
     cxx_class = 'gem5::prefetch::PIF'
     cxx_header = "mem/cache/prefetch/pif.hh"
+
+    use_blk_addr = Param.Bool(True,
+        "Record block address of the PC as trigger instead of the full PC.")
+    pred_on_retired_pc = Param.Bool(True,
+        "Make prediction based on the retired PC instead of the miss addresses")
+    prec_spatial_region_bits = Param.Unsigned(2,
+        "Number of preceding addresses in the spatial region")
+    succ_spatial_region_bits = Param.Unsigned(8,
+        "Number of subsequent addresses in the spatial region")
+    compactor_entries = Param.Unsigned(2, "Entries in the temp. compactor")
+    compactor_lru = Param.Bool(False, "Use LRU replacement policy instead of "
+                                "FIFO")
+    stream_address_buffer_entries = Param.Unsigned(7, "Entries in the SAB")
+    lookahead = Param.Unsigned(3, "Lookahead distance. ")
+    history_buffer_size = Param.Unsigned(16, "Entries in the history buffer")
+
+    index_entries = Param.MemorySize("64",
+        "Number of entries in the index")
+    index_assoc = Param.Unsigned(64,
+        "Associativity of the index")
+    index_indexing_policy = Param.BaseIndexingPolicy(
+        SetAssociative(entry_size = 1, assoc = Parent.index_assoc,
+        size = Parent.index_entries),
+        "Indexing policy of the index")
+    index_replacement_policy = Param.BaseReplacementPolicy(LRURP(),
+        "Replacement policy of the index")
+    cpu = Param.BaseCPU(Parent.any, "The CPU to train the predictor")
+
+
     cxx_exports = [
         PyBindMethod("addEventProbeRetiredInsts"),
     ]
