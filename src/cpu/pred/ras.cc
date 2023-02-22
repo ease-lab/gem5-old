@@ -44,10 +44,14 @@ void
 ReturnAddrStack::AddrStack::init(unsigned _numEntries)
 {
     numEntries = _numEntries;
+#ifdef USE_PCSTATE
     addrStack.resize(numEntries);
     for (unsigned i = 0; i < numEntries; ++i) {
         addrStack[i] = nullptr;
     }
+#else
+    addrStack.resize(numEntries, MaxAddr);
+#endif
     reset();
 }
 
@@ -59,6 +63,8 @@ ReturnAddrStack::AddrStack::reset()
     cdTos = 0;
     firstWrap = 0;
 }
+
+#ifdef USE_PCSTATE
 
 const PCStateBase *
 ReturnAddrStack::AddrStack::top()
@@ -122,6 +128,7 @@ ReturnAddrStack::AddrStack::restore(unsigned _tos, unsigned _cdTos,
     set(addrStack[tos], restored);
 }
 
+
 std::string
 ReturnAddrStack::AddrStack::print(int n)
 {
@@ -138,6 +145,87 @@ ReturnAddrStack::AddrStack::print(int n)
     return ss.str();
 }
 
+#else
+
+Addr
+ReturnAddrStack::AddrStack::top()
+{
+    if (usedEntries > 0) {
+        return addrStack[tos];
+    }
+    return MaxAddr;
+}
+
+
+void
+ReturnAddrStack::AddrStack::push(const Addr return_addr)
+{
+
+    incrTos();
+    // If TOS is now at the same position as CD-TOS it means
+    // the entry was overwritten.
+    // Increase the CD-TOS to indicate the last valid entry.
+    if (tos == cdTos) {
+        incrCdTos();
+    }
+
+    addrStack[tos] = return_addr;
+
+    if (usedEntries != numEntries) {
+        ++usedEntries;
+    }
+}
+
+bool
+ReturnAddrStack::AddrStack::pop()
+{
+    if (usedEntries > 0) {
+        --usedEntries;
+    }
+
+    decrTos();
+    // The entry is invalid in case the TOS and CD-TOS
+    // point to the same entry and the first wrap bit is unset.
+    // Check the bit before decrementing the CD-TOS
+    bool corrupted = (tos == cdTos) && !firstWrap;
+
+    if (tos == cdTos){
+        decrCdTos();
+    }
+    return corrupted;
+}
+
+
+void
+ReturnAddrStack::AddrStack::restore(unsigned _tos, unsigned _cdTos,
+                                    const Addr restored)
+{
+    if (usedEntries != numEntries) {
+        ++usedEntries;
+    }
+
+    tos = _tos;
+    cdTos = _cdTos;
+    addrStack[tos] = restored;
+}
+
+std::string
+ReturnAddrStack::AddrStack::print(int n)
+{
+    std::stringstream ss;
+    ss << "";
+    for (int i = 0; i<n; i++) {
+        int idx = int(tos)-i;
+        if (idx < 0 || addrStack[idx] == MaxAddr) {
+            break;
+        }
+        ss << std::dec << idx << ":0x" << std::setfill('0') << std::setw(8)
+           << std::hex << addrStack[idx] << ";";
+    }
+    return ss.str();
+}
+
+#endif
 
 // Return address stack class.
 //
@@ -163,6 +251,9 @@ ReturnAddrStack::reset()
     for (auto& r : addrStacks)
         r.reset();
 }
+
+#ifdef USE_PCSTATE
+
 
 void
 ReturnAddrStack::push(ThreadID tid, const PCStateBase &pc,
@@ -317,6 +408,169 @@ ReturnAddrStack::commit(ThreadID tid, bool taken, Addr corrTarget,
     }
     delete history;
 }
+
+#else
+
+
+////////////////////// The same functions with Address state. \\\\\\\ I dont know
+// what is better
+
+
+
+void
+ReturnAddrStack::push(ThreadID tid, const Addr return_addr,
+                                    void * &ras_history)
+{
+    assert(ras_history==nullptr);
+    stats.pushes++;
+
+    RASHistory *history = new RASHistory;
+    ras_history = static_cast<void*>(history);
+    history->pushed = true;
+    history->poped = false;
+
+    addrStacks[tid].push(return_addr);
+
+    DPRINTF(RAS, "%s: RAS[%i] <= %#x. Entries used: %i, tid:%i\n", __func__,
+                    addrStacks[tid].tos, return_addr,
+                    addrStacks[tid].usedEntries,tid);
+    DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
+}
+
+
+Addr
+ReturnAddrStack::pop(ThreadID tid, void * &ras_history)
+{
+    assert(ras_history==nullptr);
+    stats.pops++;
+    stats.used++;
+
+    RASHistory *history = new RASHistory;
+    ras_history = static_cast<void*>(history);
+    history->pushed = false;
+    history->tos = addrStacks[tid].tos;
+    history->cdTos = addrStacks[tid].cdTos;
+
+    if (addrStacks[tid].empty()) {
+        history->poped = false;
+        history->ras_entry = MaxAddr;
+        DPRINTF(RAS, "RAS empty. Don't pop entry.\n");
+        return MaxAddr;
+    }
+
+    history->poped = true;
+    history->ras_entry = addrStacks[tid].top();
+    history->corrupted = addrStacks[tid].pop();
+
+    DPRINTF(RAS, "%s: RAS[%i] => %#x. corrupted:%i, "
+                "Entries used: %i, tid:%i\n", __func__, history->tos,
+                history->ras_entry, history->corrupted,
+                addrStacks[tid].usedEntries, tid);
+    DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
+
+    // TODO: return depending on config.
+    if (history->corrupted) {
+        stats.corrupt++;
+
+        // If BTB fallback is enabled the RAS will return an invalid
+        // address and the BPU will use the BTB as provider for the
+        // target address.
+        if (useBtbFallback) {
+            return MaxAddr;
+        }
+    }
+    return history->ras_entry;
+}
+
+void
+ReturnAddrStack::squash(ThreadID tid, void * &ras_history)
+{
+    if (ras_history == nullptr) {
+        // If ras_history is null no stack operation was performed for
+        // this branch. Nothing to be done.
+        return;
+    }
+    stats.squashes++;
+
+    RASHistory *history = static_cast<RASHistory*>(ras_history);
+
+    if (history->pushed) {
+        stats.pops++;
+        addrStacks[tid].pop();
+
+        DPRINTF(RAS, "RAS::%s Incorrect push. Pop RAS[%i]. "
+            "Entries used: %i, tid:%i\n", __func__,
+            addrStacks[tid].tos,
+            addrStacks[tid].usedEntries, tid);
+
+
+    } else if (history->poped) {
+        stats.pushes++;
+        addrStacks[tid].restore(history->tos, history->cdTos,
+                                history->ras_entry);
+        DPRINTF(RAS, "RAS::%s Incorrect pop. Restore to: RAS[%i]:%#x. "
+            "Entries used: %i, tid:%i\n", __func__,
+            history->tos, history->ras_entry,
+            addrStacks[tid].usedEntries, tid);
+    }
+    DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
+    // DPRINTF(RAS, "RAS: Delete hist:%#x\n", history);
+    delete history;
+}
+
+void
+ReturnAddrStack::commit(ThreadID tid, bool taken, Addr corrTarget,
+                            const StaticInstPtr &inst, void * &ras_history)
+{
+    // Skip branches that are not call or returns
+    if (!(inst->isCall() || inst->isReturn())) {
+        // If its not a call or return there should be no ras history.
+        assert(ras_history == nullptr);
+        return;
+    }
+
+    DPRINTF(RAS, "RAS::%s Commit Branch inst: %s, hist:%#x tid:%i\n",
+                __func__, inst, ras_history, tid);
+
+
+    if (ras_history == nullptr) {
+        /**
+         * The only case where we could have no history at this point is
+         * for a conditional call that is not taken.
+         *
+         * Conditional calls
+         *
+         * Conditional calls have different scenarios:
+         * 1. the call was predicted as non taken but was actually taken
+         * 2. the call was predicted taken but was actually not taken.
+         * 3. the call was taken but the target was incorrect.
+         * 4. the call was correct.
+         *
+         * In case of mispredictions they will be handled during squashing
+         * of the BPU. It will push and pop the RAS accordingly.
+         **/
+        assert(inst->isCondCtrl() && !taken);
+        return;
+    }
+
+    /* Handle all other commited returns and calls */
+    RASHistory *history = static_cast<RASHistory*>(ras_history);
+
+    if (history->poped) {
+        stats.used++;
+        if (history->mispredict) {
+            stats.wrong++;
+        } else {
+            stats.correct++;
+        }
+
+        DPRINTF(RAS, "RAS::%s Commit Return PC %#x, correct:%i, tid:%i\n",
+                __func__, !history->mispredict,
+                history->ras_entry, tid);
+    }
+    delete history;
+}
+#endif
 
 
 

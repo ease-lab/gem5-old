@@ -64,7 +64,8 @@ class TAGE_SC_L_TAGE_64KB : public TAGE_SC_L_TAGE
 
     int gindex_ext(int index, int bank) const override;
 
-    uint16_t gtag(ThreadID tid, Addr pc, int bank) const override;
+    uint16_t gtag(ThreadID tid, Addr pc, int bank,
+                                            bool spec = false) const override;
 
     void handleAllocAndUReset(
         bool alloc, bool taken, TAGEBase::BranchInfo* bi, int nrand) override;

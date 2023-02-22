@@ -78,6 +78,8 @@ TAGE::update(ThreadID tid, Addr branch_pc, bool taken, void* bp_history,
     }
 
     int nrand = random_mt.random<int>() & 3;
+    // int nrand = 3;
+
     if (bi->tageBranchInfo->condBranch) {
         DPRINTF(Tage, "Updating tables for branch:%lx; taken?:%d\n",
                 branch_pc, taken);
@@ -96,6 +98,7 @@ void
 TAGE::squash(ThreadID tid, void *bp_history)
 {
     TageBranchInfo *bi = static_cast<TageBranchInfo*>(bp_history);
+    tage->restoreHistState(tid, bi->tageBranchInfo);
     DPRINTF(Tage, "Deleting branch info: %lx\n", bi->tageBranchInfo->branchPC);
     delete bi;
 }
@@ -109,17 +112,27 @@ TAGE::predict(ThreadID tid, Addr branch_pc, bool cond_branch, void* &b)
 }
 
 bool
-TAGE::lookup(ThreadID tid, Addr branch_pc, void* &bp_history)
+TAGE::lookup(ThreadID tid, Addr branch_pc, void * &bp_history)
 {
     bool retval = predict(tid, branch_pc, true, bp_history);
 
-    TageBranchInfo *bi = static_cast<TageBranchInfo*>(bp_history);
+    // TageBranchInfo *bi = static_cast<TageBranchInfo*>(bp_history);
 
     DPRINTF(Tage, "Lookup branch: %lx; predict:%d\n", branch_pc, retval);
 
-    tage->updateHistories(tid, branch_pc, retval, bi->tageBranchInfo, true);
+    // if (update_history)
+    //     tage->updateHistories(tid, branch_pc, retval,
+    //                           bi->tageBranchInfo, true);
 
     return retval;
+}
+
+void
+TAGE::dummyLookup(ThreadID tid, Addr branch_pc, void * &bp_history)
+{
+    TageBranchInfo *bi = new TageBranchInfo(*tage);//nHistoryTables+1);
+    bp_history = (void*)(bi);
+    tage->tageDummyPredict(tid, branch_pc, true, bi->tageBranchInfo);
 }
 
 void
@@ -130,12 +143,22 @@ TAGE::btbUpdate(ThreadID tid, Addr branch_pc, void* &bp_history)
 }
 
 void
+TAGE::updateHistories(ThreadID tid, bool taken, Addr target,
+                        bool speculative, void * &bp_history)
+{
+    TageBranchInfo *bi = static_cast<TageBranchInfo*>(bp_history);
+    tage->updateHistories(tid, bi->tageBranchInfo->branchPC,
+                          taken, bi->tageBranchInfo, true,
+                          nullStaticInstPtr, target);
+}
+
+void
 TAGE::uncondBranch(ThreadID tid, Addr br_pc, void* &bp_history)
 {
     DPRINTF(Tage, "UnConditionalBranch: %lx\n", br_pc);
     predict(tid, br_pc, false, bp_history);
-    TageBranchInfo *bi = static_cast<TageBranchInfo*>(bp_history);
-    tage->updateHistories(tid, br_pc, true, bi->tageBranchInfo, true);
+    // TageBranchInfo *bi = static_cast<TageBranchInfo*>(bp_history);
+    // tage->updateHistories(tid, br_pc, true, bi->tageBranchInfo, true);
 }
 
 } // namespace branch_prediction

@@ -203,7 +203,7 @@ TAGE_SC_L_TAGE_64KB::gindex_ext(int index, int bank) const
 }
 
 uint16_t
-TAGE_SC_L_TAGE_64KB::gtag(ThreadID tid, Addr pc, int bank) const
+TAGE_SC_L_TAGE_64KB::gtag(ThreadID tid, Addr pc, int bank, bool spec) const
 {
     // very similar to the TAGE implementation, but w/o shifting the pc
     int tag = pc ^ threadHistory[tid].computeTags[0][bank].comp ^

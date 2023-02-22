@@ -78,7 +78,7 @@ class TournamentBP : public BPredUnit
      * @param bp_history Pointer that will be set to the BPHistory object.
      * @return Whether or not the branch is taken.
      */
-    bool lookup(ThreadID tid, Addr branch_addr, void * &bp_history);
+    bool lookup(ThreadID tid, Addr branch_addr, void * &bp_history) override;
 
     /**
      * Records that there was an unconditional branch, and modifies

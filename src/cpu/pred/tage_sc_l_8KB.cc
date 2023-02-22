@@ -168,7 +168,7 @@ TAGE_SC_L_TAGE_8KB::gindex_ext(int index, int bank) const
 }
 
 uint16_t
-TAGE_SC_L_TAGE_8KB::gtag(ThreadID tid, Addr pc, int bank) const
+TAGE_SC_L_TAGE_8KB::gtag(ThreadID tid, Addr pc, int bank, bool spec) const
 {
     int tag = (threadHistory[tid].computeIndices[bank - 1].comp << 2) ^ pc ^
               (pc >> instShiftAmt) ^

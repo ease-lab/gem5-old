@@ -39,6 +39,9 @@
 #include "params/ReturnAddrStack.hh"
 #include "sim/sim_object.hh"
 
+
+// #define USE_PCSTATE
+
 namespace gem5
 {
 
@@ -68,13 +71,20 @@ class ReturnAddrStack : public SimObject
       void reset();
 
       /** Returns the top address on the RAS. */
+#ifdef USE_PCSTATE
       const PCStateBase *top();
-
+#else
+      Addr top();
+#endif
       /** Returns the index of the top of the RAS. */
       unsigned topIdx() { return tos; }
 
       /** Pushes an address onto the RAS. */
+#ifdef USE_PCSTATE
       void push(const PCStateBase &return_addr);
+#else
+      void push(const Addr return_addr);
+#endif
 
       /** Pops the top address from the RAS.
        * @return false if the entry was corrupted, true otherwise.
@@ -86,7 +96,11 @@ class ReturnAddrStack : public SimObject
        *  @param tos, cdtos the indices saved at the time of the prediction.
        *  @param restored The new target address of the new top of the RAS.
        */
+#ifdef USE_PCSTATE
       void restore(unsigned tos, unsigned cdTos, const PCStateBase *restored);
+#else
+      void restore(unsigned tos, unsigned cdTos, const Addr restored);
+#endif
 
       bool empty() { return usedEntries == 0; }
 
@@ -127,7 +141,14 @@ class ReturnAddrStack : public SimObject
       }
 
       /** The Stack itself. */
+#ifdef USE_PCSTATE
       std::vector<std::unique_ptr<PCStateBase>> addrStack;
+#else
+      std::vector<Addr> addrStack;
+#endif
+
+
+
 
       /** The number of entries in the RAS. */
       unsigned numEntries;
@@ -166,7 +187,12 @@ class ReturnAddrStack : public SimObject
      * @param ras_history Pointer that will be set to an object that
      * has the return address state associated when the address was pushed.
      */
-    void push(ThreadID tid, const PCStateBase &pc, void * &ras_history);
+#ifdef USE_PCSTATE
+      void push(ThreadID tid, const PCStateBase &pc, void * &ras_history);
+#else
+      void push(ThreadID tid, const Addr pc, void * &ras_history);
+#endif
+
 
     /**
      * Pops the top address from the RAS.
@@ -174,7 +200,24 @@ class ReturnAddrStack : public SimObject
      * has the return address state associated when an address was poped.
      * @return The address that got poped from the stack.
      *  */
-    const PCStateBase* pop(ThreadID tid, void * &ras_history);
+#ifdef USE_PCSTATE
+      const PCStateBase* pop(ThreadID tid, void * &ras_history);
+#else
+      Addr pop(ThreadID tid, void * &ras_history);
+#endif
+
+    /**
+     * Returns the top address of the RAS. Does not pop the address!
+     * @return The address that got poped from the stack.
+     *  */
+#ifdef USE_PCSTATE
+    const PCStateBase* top(ThreadID tid)
+    { return addrStacks[tid].top(); }
+#else
+    Addr top(ThreadID tid)
+    { return addrStacks[tid].top(); }
+#endif
+
 
     /**
      * The branch (call/return) got squashed.
@@ -210,7 +253,12 @@ class ReturnAddrStack : public SimObject
         bool wasReturn = false;
         bool wasCall = false;
         /** The entry that poped from the RAS (only valid if a return). */
+#ifdef USE_PCSTATE
         std::unique_ptr<PCStateBase> ras_entry;
+#else
+        Addr ras_entry;
+#endif
+
         /** The RAS index (top of stack pointer) of the instruction */
         unsigned tos = 0;
         /** The RAS corruption detection pointer of the instruction */

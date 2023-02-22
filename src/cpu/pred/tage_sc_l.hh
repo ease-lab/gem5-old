@@ -100,7 +100,8 @@ class TAGE_SC_L_TAGE : public TAGEBase
     void buildTageTables() override;
 
     void calculateIndicesAndTags(
-        ThreadID tid, Addr branch_pc, TAGEBase::BranchInfo* bi) override;
+        ThreadID tid, Addr branch_pc, TAGEBase::BranchInfo* bi,
+                                        bool spec = false) override;
 
     unsigned getUseAltIdx(TAGEBase::BranchInfo* bi, Addr branch_pc) override;
 
@@ -110,11 +111,13 @@ class TAGE_SC_L_TAGE : public TAGEBase
         Addr target) override;
 
     int bindex(Addr pc_in) const override;
-    int gindex(ThreadID tid, Addr pc, int bank) const override;
+    int gindex(ThreadID tid, Addr pc, int bank,
+                                        bool spec = false) const override;
     virtual int gindex_ext(int index, int bank) const = 0;
     int F(int phist, int size, int bank) const override;
 
-    virtual uint16_t gtag(ThreadID tid, Addr pc, int bank) const override = 0;
+    virtual uint16_t gtag(ThreadID tid, Addr pc, int bank,
+                                        bool spec = false) const override = 0;
 
     void squash(ThreadID tid, bool taken, TAGEBase::BranchInfo *bi,
                 Addr target) override;

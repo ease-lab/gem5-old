@@ -123,6 +123,13 @@ class TAGEBase : public SimObject
             comp ^= (comp >> compLength);
             comp &= (1ULL << compLength) - 1;
         }
+
+        void restore(uint8_t * h)
+        {
+            comp ^= h[origLength] << outpoint;
+            auto tmp = (comp & 1) ^ h[0];
+            comp = ( tmp << (compLength-1)) | (comp >> 1);
+        }
     };
 
   public:
@@ -140,6 +147,10 @@ class TAGEBase : public SimObject
     // Primary branch history entry
     struct BranchInfo
     {
+        // Whether or not we speculatively
+        // update the global history.
+        bool modifiedHist;
+        bool dummy;
         int pathHist;
         int ptGhist;
         int hitBank;
@@ -172,7 +183,8 @@ class TAGEBase : public SimObject
         unsigned provider;
 
         BranchInfo(const TAGEBase &tage)
-            : pathHist(0), ptGhist(0),
+            : modifiedHist(false), dummy(false),
+              pathHist(0), ptGhist(0),
               hitBank(0), hitBankIndex(0),
               altBank(0), altBankIndex(0),
               bimodalIndex(0),
@@ -205,6 +217,16 @@ class TAGEBase : public SimObject
      */
     virtual int bindex(Addr pc_in) const;
 
+
+    // /**
+    //  * Computes the index used to access a
+    //  * partially tagged table.
+    //  * @param foldedHist The folded histories to compute the tag from.
+    //  * @param pc The unshifted branch PC.
+    //  * @param bank The partially tagged table to access.
+    //  */
+    // virtual int gindex(FoldedHistory &foldedHist, Addr pc, int bank) const;
+
     /**
      * Computes the index used to access a
      * partially tagged table.
@@ -212,8 +234,11 @@ class TAGEBase : public SimObject
      * global histories to use.
      * @param pc The unshifted branch PC.
      * @param bank The partially tagged table to access.
+     * @param spec Whether to compute the tag from the speculative or the
+     *             non-seculative state.
      */
-    virtual int gindex(ThreadID tid, Addr pc, int bank) const;
+    virtual int gindex(ThreadID tid, Addr pc, int bank,
+                        bool spec = false) const;
 
     /**
      * Utility function to shuffle the path history
@@ -230,8 +255,11 @@ class TAGEBase : public SimObject
      * global histories to use.
      * @param pc The unshifted branch PC.
      * @param bank The partially tagged table to access.
+     * @param spec Whether to compute the tag from the speculative or the
+     *             non-seculative state.
      */
-    virtual uint16_t gtag(ThreadID tid, Addr pc, int bank) const;
+    virtual uint16_t gtag(ThreadID tid, Addr pc, int bank,
+                            bool spec = false) const;
 
     /**
      * Updates a direction counter based on the actual
@@ -270,15 +298,40 @@ class TAGEBase : public SimObject
      */
     void baseUpdate(Addr pc, bool taken, BranchInfo* bi);
 
-   /**
+   /** Global direction history ---------------
     * (Speculatively) updates the global branch history.
     * @param h Reference to pointer to global branch history.
-    * @param dir (Predicted) outcome to update the histories
-    * with.
+    * @param dir (Predicted) outcome to update the histories with.
     * @param tab
     * @param PT Reference to path history.
     */
-    void updateGHist(uint8_t * &h, bool dir, uint8_t * tab, int &PT);
+    void updateGHist(uint8_t * &h, bool dir, uint8_t * tab, int &pt);
+
+    /** Global taken-only history ---------------
+    * (Speculatively) updates the global branch history.
+    * @param h Reference to pointer to global branch history.
+    * @param dir (Predicted) outcome to update the histories with.
+    * @param pc branch address.
+    * @param target target address of a taken branch
+    * @param tab
+    * @param PT Reference to path history.
+    */
+    void updateGHist(uint8_t * &h, bool dir, Addr pc, Addr target,
+                     uint8_t * tab, int &pt);
+
+    /**
+     * Records the current state of the histories to be able to restore it
+     * in case of a mispredicted speculative update.
+     * @param bi Pointer to the branch associated with the state
+     */
+    void recordHistState(ThreadID tid, BranchInfo* bi);
+
+    /**
+     * Restore the state of the histories in case of detecting
+     * a mispredicted speculative update.
+     * @param bi Pointer to the branch associated with the state
+     */
+    void restoreHistState(ThreadID tid, BranchInfo* bi);
 
     /**
      * Update TAGE. Called at execute to repair histories on a misprediction
@@ -296,8 +349,6 @@ class TAGEBase : public SimObject
     * (Speculatively) updates global histories (path and direction).
     * Also recomputes compressed (folded) histories based on the
     * branch direction.
-    * @param tid The thread ID to select the histories
-    * to update.
     * @param branch_pc The unshifted branch PC.
     * @param taken (Predicted) branch direction.
     * @param b Wrapping pointer to BranchInfo (to allow
@@ -354,6 +405,17 @@ class TAGEBase : public SimObject
         ThreadID tid, Addr branch_pc, bool cond_branch, BranchInfo* bi);
 
     /**
+     * TAGE prediction called from TAGE::predict
+     * @param tid The thread ID to select the global
+     * histories to use.
+     * @param branch_pc The unshifted branch PC.
+     * @param cond_branch True if the branch is conditional.
+     * @param bi Pointer to the BranchInfo
+     */
+    bool tageDummyPredict(
+        ThreadID tid, Addr branch_pc, bool cond_branch, BranchInfo* bi, bool speculative = true);
+
+    /**
      * Update the stats
      * @param taken Actual branch outcome
      * @param bi Pointer to information on the prediction
@@ -377,7 +439,7 @@ class TAGEBase : public SimObject
      * all the different history lengths
      */
     virtual void calculateIndicesAndTags(
-        ThreadID tid, Addr branch_pc, BranchInfo* bi);
+        ThreadID tid, Addr branch_pc, BranchInfo* bi, bool spec = false);
 
     /**
      * Calculation of the index for useAltPredForNewlyAllocated
@@ -426,7 +488,9 @@ class TAGEBase : public SimObject
     }
 
     void btbUpdate(ThreadID tid, Addr branch_addr, BranchInfo* &bi);
+    unsigned getGHR(ThreadID tid, bool speculative = true) const;
     unsigned getGHR(ThreadID tid, BranchInfo *bi) const;
+    std::string getGHRStr(ThreadID tid, BranchInfo *bi) const;
     int8_t getCtr(int hitBank, int hitBankIndex) const;
     unsigned getTageCtrBits() const;
     int getPathHist(ThreadID tid) const;
@@ -469,9 +533,16 @@ class TAGEBase : public SimObject
         // Index to most recent branch outcome
         int ptGhist;
 
+        // Index to the most recent commited branch outcome
+        int commitPtGhist;
+
         // Speculative folded histories.
         FoldedHistory *computeIndices;
         FoldedHistory *computeTags[2];
+
+        // Non-speculative folded histories.
+        FoldedHistory *commitComputeIndices;
+        FoldedHistory *commitComputeTags[2];
     };
 
     std::vector<ThreadHistory> threadHistory;
@@ -492,6 +563,17 @@ class TAGEBase : public SimObject
     unsigned numUseAltOnNa;
     unsigned useAltOnNaBits;
     unsigned maxNumAlloc;
+    const bool calcIdxUsePC;
+    const bool calcIdxUsePath;
+    const bool calcTagUseHist;
+
+    /** Use taken only history. */
+    const bool takenOnlyHistory;
+    const bool calcHistUseTarget;
+
+    const bool allowLatePredict;
+    const bool noDummyAllocate;
+
 
     // Tells which tables are active
     // (for the base TAGE implementation all are active)
@@ -518,9 +600,21 @@ class TAGEBase : public SimObject
         statistics::Scalar bimodalProviderWrong;
         statistics::Scalar altMatchProviderWouldHaveHit;
         statistics::Scalar longestMatchProviderWouldHaveHit;
+        statistics::Scalar uResets;
+        statistics::Scalar aliasCollision;
+
+        statistics::Scalar dummyPredictions;
+        statistics::Scalar dummyPredictionsCommitted;
+        statistics::Scalar dummyPredictionsCorrect;
+        statistics::Scalar dummyPredictionsWrong;
+        statistics::Scalar dummyPredictionsLongestWouldHaveHit;
+
 
         statistics::Vector longestMatchProvider;
         statistics::Vector altMatchProvider;
+        statistics::Vector allocations;
+        statistics::Vector ctrUpdates;
+
     } stats;
 };
 

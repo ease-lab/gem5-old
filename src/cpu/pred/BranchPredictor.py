@@ -98,6 +98,9 @@ class IndirectPredictor(SimObject):
     abstract = True
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
+    takenOnlyHistory = Param.Bool(Parent.takenOnlyHistory, "Build the global "
+        "history using taken-only branch target history instead of direction "
+        "history from all branches")
 
 class SimpleIndirectPredictor(IndirectPredictor):
     type = 'SimpleIndirectPredictor'
@@ -151,6 +154,18 @@ class BranchPredictor(SimObject):
     resetEnd = Param.Int(100,"When reset end resetting at this table")
     resetVal = Param.Int(0,"What value to reset to")
 
+    installNotTakenInBTB = Param.Bool(False,
+        "Install all branches, including not taken branches in the BTB.")
+
+    takenOnlyHistory = Param.Bool(False, "Build the global history using "
+        "taken-only branch target history instead of direction history "
+        "from all branches")
+    calcHistUseTarget = Param.Bool(False, "Use the target in the history "
+                                        "calculation")
+
+
+
+
 class PerfectBP(BranchPredictor):
     type = 'PerfectBP'
     cxx_class = 'gem5::branch_prediction::PerfectBP'
@@ -200,6 +215,10 @@ class TAGEBase(SimObject):
     type = 'TAGEBase'
     cxx_class = 'gem5::branch_prediction::TAGEBase'
     cxx_header = "cpu/pred/tage_base.hh"
+    cxx_exports = [
+        PyBindMethod("dump"),
+        PyBindMethod("restore"),
+    ]
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
     instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
@@ -224,7 +243,7 @@ class TAGEBase(SimObject):
             "A large number to track all branch histories(2MEntries default)")
 
     pathHistBits = Param.Unsigned(16, "Path history size")
-    logUResetPeriod = Param.Unsigned(18,
+    logUResetPeriod = Param.Unsigned(28,
         "Log period in number of branches to reset TAGE useful counters")
     numUseAltOnNa = Param.Unsigned(1, "Number of USE_ALT_ON_NA counters")
     initialTCounterValue = Param.Int(1 << 17, "Initial value of tCounter")
@@ -233,12 +252,25 @@ class TAGEBase(SimObject):
     maxNumAlloc = Param.Unsigned(1,
         "Max number of TAGE entries allocted on mispredict")
 
+    calcIdxUsePC = Param.Bool(True, "Use PC in index calculation")
+    calcIdxUsePath = Param.Bool(True, "Use path in index calculation")
+    calcTagUseHist = Param.Bool(True, "Use history in tag calculation")
+
     # List of enabled TAGE tables. If empty, all are enabled
     noSkip = VectorParam.Bool([], "Vector of enabled TAGE tables")
 
     speculativeHistUpdate = Param.Bool(True,
         "Use speculative update for histories")
 
+    takenOnlyHistory = Param.Bool(Parent.takenOnlyHistory, "Build the global "
+        "history using taken-only branch target history instead of direction "
+        "history from all branches")
+    calcHistUseTarget = Param.Bool(Parent.calcHistUseTarget, "Use the target "
+                                    "in the history calculation")
+    allowLatePredict = Param.Bool(False, "Use the target in the history "
+                                        "calculation")
+    noDummyAllocate = Param.Bool(False, "Use the target in the history "
+                                        "calculation")
 # TAGE branch predictor as described in https://www.jilp.org/vol8/v8paper1.pdf
 # The default sizes below are for the 8C-TAGE configuration (63.5 Kbits)
 class TAGE(BranchPredictor):

@@ -152,7 +152,7 @@ class BPredUnit : public SimObject
      */
     virtual void squash(const InstSeqNum &squashed_sn,
                 const PCStateBase &corr_target,
-                bool actually_taken, ThreadID tid);
+                bool actually_taken, ThreadID tid, bool from_commit=true);
 
     void squash(const InstSeqNum &squashed_sn,
                 const PCStateBase &corr_target,
@@ -180,7 +180,18 @@ class BPredUnit : public SimObject
      */
     virtual bool lookup(ThreadID tid, Addr instPC, void * &bp_history) = 0;
 
-     /**
+    /**
+     * Once done with the prediction this function updates the
+     * path and global history.
+     * @param taken Wheather or not the branch was taken
+     * @param bp_history Pointer that will be set to an object that
+     * has the branch predictor state associated with the lookup.
+     */
+    virtual void updateHistories(ThreadID tid, bool taken, Addr target,
+                                bool speculative, void * &bp_history) {}
+
+
+    /**
      * If a branch is not taken, because the BTB address is invalid or missing,
      * this function sets the appropriate counter in the global and local
      * predictors to not taken.
@@ -189,6 +200,8 @@ class BPredUnit : public SimObject
      * has the branch predictor state associated with the lookup.
      */
     virtual void btbUpdate(ThreadID tid, Addr instPC, void * &bp_history) = 0;
+
+    virtual void dummyLookup(ThreadID tid, Addr instPC, void * &bp_history) {};
 
     /**
      * Reset function. Set back all internal state of the direction predictor
@@ -333,13 +346,15 @@ class BPredUnit : public SimObject
             seqNum(other.seqNum), pc(other.pc), bpHistory(other.bpHistory),
             indirectHistory(other.indirectHistory),
             rasHistory(other.rasHistory), tid(other.tid),
-            predTaken(other.predTaken), usedRAS(other.usedRAS),
+            predTaken(other.predTaken), actuallyTaken(other.actuallyTaken),
+            usedRAS(other.usedRAS),
             wasCall(other.wasCall), wasReturn(other.wasReturn),
-            wasIndirect(other.wasIndirect),
+            wasIndirect(other.wasIndirect), wasBTBMiss(other.wasBTBMiss),
             wasPredTakenBTBHit(other.wasPredTakenBTBHit),
             wasPredTakenBTBMiss(other.wasPredTakenBTBMiss),
             wasUncond(other.wasUncond),
-            targetProvider(other.targetProvider),
+            targetProvider(other.targetProvider), resteered(other.resteered),
+            target(other.target), targetPC(other.targetPC),
             type(other.type),
             inst(other.inst)
         {
@@ -381,6 +396,9 @@ class BPredUnit : public SimObject
         /** Whether or not it was predicted taken. */
         bool predTaken;
 
+        /** To record the actual outcome of the branch */
+        bool actuallyTaken = false;
+
         /** Whether or not the RAS was used. */
         bool usedRAS = false;
 
@@ -392,6 +410,9 @@ class BPredUnit : public SimObject
 
         /** Wether this instruction was an indirect branch */
         bool wasIndirect = false;
+
+        /** Was BTB miss at prediction time */
+        bool wasBTBMiss = false;
 
         /** Was predicted taken and hit in BTB */
         bool wasPredTakenBTBHit = false;
@@ -405,10 +426,16 @@ class BPredUnit : public SimObject
         /** Which component provided the target */
         int targetProvider = NO_TARGET;
 
+        /** Resteered */
+        bool resteered = false;
+
+
         /** Target of the branch. First it is predicted, and fixed later
          *  if necessary
          */
         Addr target = MaxAddr;
+
+        const PCStateBase * targetPC = nullptr;
 
         BranchClass type = BranchClass::NoBranch;
 
@@ -443,7 +470,13 @@ class BPredUnit : public SimObject
     const bool requiresBTBHit;
 
     /** Fallback to the BTB prediction in case the RAS is corrupted. */
-    const unsigned fallbackBTB;
+    const bool fallbackBTB;
+
+    /** Install all branches, including not taken branches in the BTB. */
+    const bool installNotTakenInBTB;
+
+    /** Use taken only history. */
+    const bool takenOnlyHistory;
 
 
     /**
@@ -480,6 +513,8 @@ class BPredUnit : public SimObject
         statistics::Vector2d dirPredTakenType;
         statistics::Vector2d dirPredNotTakenType;
 
+        /** Stat for branches squashed by branch type (BranchType) */
+        statistics::Vector2d earlyResteerType;
         /** Stat for branches squashed by branch type (BranchType) */
         statistics::Vector2d squashType;
         /** Stat for branches mispredicted by branch type (BranchType) */

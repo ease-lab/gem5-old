@@ -89,11 +89,14 @@ class TAGE: public BPredUnit
 
     // Base class methods.
     void uncondBranch(ThreadID tid, Addr br_pc, void* &bp_history) override;
-    bool lookup(ThreadID tid, Addr branch_addr, void* &bp_history) override;
+    bool lookup(ThreadID tid, Addr branch_addr, void * &bp_history) override;
+    void dummyLookup(ThreadID tid, Addr branch_addr, void * &bp_history) override;
     void btbUpdate(ThreadID tid, Addr branch_addr, void* &bp_history) override;
     void update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
                 bool squashed, const StaticInstPtr & inst,
                 Addr corrTarget) override;
+    void updateHistories(ThreadID tid, bool taken, Addr target,
+                          bool speculative, void * &bp_history) override;
     virtual void squash(ThreadID tid, void *bp_history) override;
     virtual void reset(uint start = 0, uint end = 100, uint val = 0) override;
 };

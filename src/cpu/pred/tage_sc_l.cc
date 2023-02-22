@@ -126,7 +126,7 @@ TAGE_SC_L_TAGE::buildTageTables()
 
 void
 TAGE_SC_L_TAGE::calculateIndicesAndTags(
-    ThreadID tid, Addr pc, TAGEBase::BranchInfo* bi)
+    ThreadID tid, Addr pc, TAGEBase::BranchInfo* bi, bool spec)
 {
     // computes the table addresses and the partial tags
 
@@ -177,7 +177,7 @@ TAGE_SC_L_TAGE::getUseAltIdx(TAGEBase::BranchInfo* bi, Addr branch_pc)
 }
 
 int
-TAGE_SC_L_TAGE::gindex(ThreadID tid, Addr pc, int bank) const
+TAGE_SC_L_TAGE::gindex(ThreadID tid, Addr pc, int bank, bool spec) const
 {
     int index;
     int hlen = (histLengths[bank] > pathHistBits) ? pathHistBits :
