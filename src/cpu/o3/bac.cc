@@ -65,12 +65,10 @@ namespace o3
 BAC::BAC(CPU *_cpu, const BaseO3CPUParams &params)
     :
     preFetchPredHist(params.numThreads),
-
-    globalFTSeqNum(0),
-
     cpu(_cpu),
     bpu(params.branchPred),
     wroteToTimeBuffer(false),
+    decoupledFrontEnd(params.decoupledFrontEnd),
     fetchToBacDelay(params.fetchToBacDelay),
     decodeToFetchDelay(params.decodeToFetchDelay),
     renameToFetchDelay(params.renameToFetchDelay),
@@ -110,7 +108,7 @@ BAC::name() const {
 void
 BAC::regProbePoints()
 {
-    ppFTQInsert = new ProbePointArg<DynInstPtr>(cpu->getProbeManager(),
+    ppFTQInsert = new ProbePointArg<FetchTargetPtr>(cpu->getProbeManager(),
                                                         "FTQInsert");
 }
 
@@ -223,6 +221,7 @@ BAC::drainSanityCheck() const
 
     for (ThreadID i = 0; i < numThreads; ++i) {
         assert(bacStatus[i] == Idle || stalls[i].drain);
+        assert(ftq->isEmpty(i));
     }
 
     bpu->drainSanityCheck();
@@ -236,10 +235,7 @@ BAC::isDrained() const
      */
     for (ThreadID i = 0; i < numThreads; ++i) {
         // // Verify FTQs are drained
-        // if (!ftq[i].empty())
-        //     return false;
-
-        if (!preFetchPredHist[i].empty())
+        if (!ftq->isEmpty(i))
             return false;
 
         // Return false if not idle or drain stalled
@@ -311,12 +307,6 @@ BAC::checkStall(ThreadID tid) const
 
     if (stalls[tid].fetch) {
         DPRINTF(BAC,"[tid:%i] Fetch stall detected.\n",tid);
-        ret_val = true;
-    }
-
-    if (stalls[tid].drain) {
-        assert(cpu->isDraining());
-        DPRINTF(BAC,"[tid:%i] Drain stall detected.\n",tid);
         ret_val = true;
     }
 
@@ -394,8 +384,9 @@ BAC::checkSignalsAndUpdate(ThreadID tid)
 
                 bpu->squash(fromCommit->commitInfo[tid].doneSeqNum,
                             *fromCommit->commitInfo[tid].pc,
-                             fromCommit->commitInfo[tid].branchTaken, tid);
+                             fromCommit->commitInfo[tid].branchTaken, tid, true);
                 stats.branchMisspredict++;
+                stats.squashBranchCommit++;
         } else {
             bpu->squash(fromCommit->commitInfo[tid].doneSeqNum, tid);
             if (fromCommit->commitInfo[tid].mispredictInst) {
@@ -437,7 +428,7 @@ BAC::checkSignalsAndUpdate(ThreadID tid)
             //         fromDecode->decodeInfo[tid].mispredictInst->pcState());
             bpu->squash(fromDecode->decodeInfo[tid].doneSeqNum,
                     *fromDecode->decodeInfo[tid].nextPC,
-                    fromDecode->decodeInfo[tid].branchTaken, tid);
+                    fromDecode->decodeInfo[tid].branchTaken, tid, false);
             stats.branchMisspredict++;
         } else {
             bpu->squash(fromDecode->decodeInfo[tid].doneSeqNum,
@@ -455,10 +446,22 @@ BAC::checkSignalsAndUpdate(ThreadID tid)
                 *fromFetch->fetchInfo[tid].nextPC);
 
         // Squash unless we're already squashing
+        squashBpuHistories(tid);
         squash(*fromFetch->fetchInfo[tid].nextPC, tid);
         return true;
     }
 
+    // Check stalls
+    if (stalls[tid].drain) {
+        assert(cpu->isDraining());
+        DPRINTF(BAC,"[tid:%i] Drain stall detected.\n",tid);
+        // Squash BPU histories and disable the FTQ.
+        squashBpuHistories(tid);
+        ftq->squash(tid);
+
+        bacStatus[tid] = Idle;
+        return true;
+    }
 
 
     if (checkStall(tid)) {
@@ -474,6 +477,20 @@ BAC::checkSignalsAndUpdate(ThreadID tid)
         // We should not end up here.
         // assert(false);
         bacStatus[tid] = Idle;
+        return true;
+    }
+
+    // Check if the FTQ got blocked or unblocked
+    if ((bacStatus[tid] == Running) && ftq->isBlocked(tid)) {
+
+        DPRINTF(BAC, "[tid:%i] FTQ is blocked\n", tid);
+        bacStatus[tid] = FTQBlocked;
+        return true;
+    }
+    if ((bacStatus[tid] == FTQBlocked) && !ftq->isBlocked(tid)) {
+
+        DPRINTF(BAC, "[tid:%i] FTQ not blocked anymore -> Running\n", tid);
+        bacStatus[tid] = Running;
         return true;
     }
 
@@ -494,8 +511,19 @@ BAC::checkSignalsAndUpdate(ThreadID tid)
         return true;
     }
 
+    // Now all stall/squash conditions are checked.
+    // Attempt to run the BAC if not already running.
+    if (ftq->isValid(tid) && bacStatus[tid] == Idle) {
+        DPRINTF(BAC, "[tid:%i] Attempt to run\n", tid);
+
+        // We should not end up here.
+        // assert(false);
+        bacStatus[tid] = Running;
+        return true;
+    }
+
     // If we've reached this point, we have not gotten any signals that
-    // cause decode to change its status.  Decode remains the same as before.
+    // cause BAC to change its status.  BAC remains the same as before.
     return false;
 }
 
@@ -563,8 +591,9 @@ BAC::tick()
     //Check stall and squash signals.
     while (threads != end) {
         ThreadID tid = *threads++;
-#ifdef FDIP
-        DPRINTF(BAC,"Processing [tid:%i]\n",tid);
+
+if (decoupledFrontEnd) { // #ifdef FDIP
+        // DPRINTF(BAC,"Processing [tid:%i]\n",tid);
         status_change |= checkSignalsAndUpdate(tid);
 
 
@@ -573,20 +602,19 @@ BAC::tick()
             generateFetchTargets(tid, status_change);
             activity = true;
         } else {
-            DPRINTF(BAC, "FTQ Inactive\n");
+            // DPRINTF(BAC, "FTQ Inactive\n");
         }
 
         profileCycle(tid);
 
-#else
+} else { // #ifdef FDIP
     if (bacStatus[tid] != Idle) {
         bacStatus[tid] = Idle;
         status_change = true;
-    }
-#endif
-    }
 
-
+    }
+} // #ifdef FDIP
+    }
 
     if (status_change) {
         updateBACStatus();
@@ -604,8 +632,9 @@ BAC::tick()
 FetchTargetPtr
 BAC::newFetchTarget(ThreadID tid, const PCStateBase &start_pc)
 {
-    auto ft = std::make_shared<FetchTarget>(tid, start_pc,
-                                         getAndIncrementFTSeq());
+    auto ft = std::make_shared<FetchTarget>(cpu->thread[tid],
+                                            start_pc,
+                                            cpu->getAndIncrementFTSeq());
 
     DPRINTF(BAC, "Create new FT:[fn:%llu]\n", ft->ftNum());
     return ft;
@@ -641,24 +670,25 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
     bool predict_taken = false;
     unsigned numAddrSearched = 0;
     // unsigned addrDistance = 4;
-    // unsigned inst_width = 1;
+    unsigned instSize = 1;
     // InstSeqNum seqNum;
-    Addr curAddr;
+    // Addr curAddr;
 
     // The current PC.
     PCStateBase &this_pc = *pc[tid];
-    // std::unique_ptr<PCStateBase> old_pc(this_pc.clone());
 
 
-    DPRINTF(Fetch, "PC = %s, sz:%i ptr:%x\n",
+    DPRINTF(BAC, "PC = %s, sz:%i ptr:%x\n",
                     this_pc, this_pc.as<X86ISA::PCState>().size(),
                     &this_pc);
 
     // Create two temporal branches that will be used fot the branch
     // predictor to search each individual address.
-    BpuPCStatePtr search_pc = std::make_unique<BpuPCState>();
+    // BpuPCStatePtr search_pc = std::make_unique<BpuPCState>();
     // BpuPCStatePtr search_pc_tmp = std::make_unique<BpuPCState>();
-    search_pc->update(this_pc);
+    // search_pc->set(this_pc.instAddr());
+    Addr curAddr = this_pc.instAddr();
+
     // search_pc_tmp->update(this_pc);
 
     // // BasicBlockPtr curFT = basicBlockProduce[tid];
@@ -697,42 +727,38 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
     // seqNum = getAndIncrementFTSeq();
     while (numAddrSearched < fetchTargetWidth) {
 
-        // Start by creating a new sequence number
-        // seqNum = cpu->getAndIncrementInstSeq();
-        curAddr = search_pc->instAddr();
-
-        // search_pc_tmp->update(*search_pc);
+        // Lookup the current PC in the BTB
+        // curAddr = search_pc->instAddr();
 
         // Check if the current search address can be found in the BTB
         // indicating the end of the branch.
         branchFound = bpu->BTBValid(curAddr, tid);
+        numAddrSearched++;
 
         // If its a branch stop searching
         if (branchFound) {
             break;
         }
 
-        // Not a branch instruction
-        // - Add the sequence number to the basic block
-        // - Add always two sequence numbers
-        // - Advance the PC.
-        // - Continue searching.
-        //
-        // curFT->addSeqNum(seqNum);
-        // curFT->addSeqNum(cpu->getAndIncrementInstSeq());
-        search_pc->advance();
+        // DPRINTF(BAC, "[tid:%i] [ft:%llu] No branch at addr: %#x\n",
+        //                 tid, curFT->ftNum(), curAddr);
 
-        // this_pc.advance();
-        numAddrSearched++;
+        // If we exceed the maximum search width stop searching
+        if (numAddrSearched >= fetchTargetWidth) {
+            break;
+        }
 
-        // DPRINTF(BAC, "[tid:%i] [sn:%llu] No branch instruction PC %#x "
-        //                 "Next PC: %#x\n",
-        //                 tid, seqNum, curAddr, search_pc->instAddr());
+        // Continue searching.
+        curAddr += instSize;
     }
 
     // Update the current PC to point to the last instruction
     // in the fetch target
-    set(this_pc, *search_pc);
+    // set(this_pc, *search_pc);
+    this_pc.set(curAddr);
+    std::unique_ptr<PCStateBase> next_pc(this_pc.clone());
+
+
     // Depending on the branch prediction we might need
     // std::unique_ptr<PCStateBase> next_pc(this_pc.clone());
 
@@ -743,6 +769,8 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
 
     // Search stopped either by a branch found in instruction stream
     // or the maximum search width per cycle was reached.
+    StaticInstPtr staticInst = nullptr;
+
 
     if (branchFound) {
 
@@ -752,8 +780,11 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
         //   returned from the BTB.
         // - Predict the branch direction as well as the branch target.
         // - Finalize the BB and insert it into the FTQ.
-        StaticInstPtr staticInst = bpu->BTBLookupInst(this_pc,tid);
+        staticInst = bpu->BTBLookupInst(this_pc,tid);
         assert(staticInst);
+
+        DPRINTF(Branch, "[tid:%i] [sn:%llu] inst sz:%i\n", tid,
+                        curFT->ftNum(), staticInst->size());
 
         // // Create dynamic instruction for branch here:
         // DynInstPtr inst = buildInst(tid, staticInst, nullptr, this_pc,
@@ -762,7 +793,7 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
 
         // Now predict the direction. Note the BP will advance
         // the PC to the next instruction.
-        predict_taken = predict(staticInst, curFT, *search_pc, tid);
+        predict_taken = predict(staticInst, curFT, *next_pc, tid);
 
         // DPRINTF(BAC, "[tid:%i] [sn:%llu] Branch found at PC %#x "
         //         "predicted: %s, target: %s\n",
@@ -772,12 +803,17 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
         if (predict_taken) {
             DPRINTF(BAC, "[tid:%i] [fn:%llu] Branch at PC %s "
                     "predicted to be taken to %s: sz:%i\n",
-                    tid, curFT->ftNum(), this_pc, *search_pc,
-                    search_pc->as<X86ISA::PCState>().size());
+                    tid, curFT->ftNum(), this_pc, *next_pc,
+                    next_pc->as<X86ISA::PCState>().size());
+
+            // DPRINTF(BAC, "[tid:%i] [ft:%llu] Branch at PC %llx "
+            //         "predicted to be taken to %s\n",
+            //         tid, curFT->ftNum(), curAddr, this_pc);
+
         } else {
-            DPRINTF(BAC, "[tid:%i] [fn:%llu] Branch at PC %s "
+            DPRINTF(BAC, "[tid:%i] [ft:%llu] Branch at PC %s "
                     "predicted to be not taken\n",
-                    tid, curFT->ftNum(), this_pc);
+                    tid, curFT->ftNum(), *next_pc);
         }
 
 
@@ -787,6 +823,9 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
         if (predict_taken) {
             ++stats.predTakenBranches;
         }
+
+
+
 
         // // Finalize BB and insert in FTQ.
         // DPRINTF(BAC, "[tid:%i] [sn:%llu] BB:%#x end with PC:%#x. Size:%ib "
@@ -802,7 +841,9 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
 
         // Not a branch therefore we will continue the next FT at the
         // next address
-        search_pc->advance();
+        // search_pc->advance();
+        next_pc->set(curAddr + instSize);
+        // TODO: maybe change this to set(cur_pc + inst size)
 
     }
 
@@ -818,12 +859,17 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
 
 
 
-    // Finish fetch target
+    // Complete the fetch target if
+    // - a branch is found
+    // - or the maximum fetch bandwidth is reached.
     curFT->addTerminal(this_pc, curFT->ftNum(), branchFound,
-                        predict_taken, *search_pc);
+                        predict_taken, *next_pc);
 
     ftq->insert(tid, curFT);
     wroteToTimeBuffer = true;
+
+    // Notify the prefetcher.
+    ppFTQInsert->notify(curFT);
 
     // ftq[tid].push_back(curFT);
     // basicBlockProduce[tid] = NULL;
@@ -834,15 +880,33 @@ BAC::generateFetchTargets(ThreadID tid, bool &status_change)
         status_change = true;
     }
 
+
+
+    // In x86 there are branches within uOps. Those branches jump always
+    // to itself. Only predict the first instance and continue with the
+    // next address/instruction/fetch target. In case the decoder findes
+    // more branches in this instruction we squash the FTQ.
+    if (staticInst && !staticInst->isLastMicroop()) {
+        stats.branchesNotLastuOp++;
+        // The target is always to itself no matter if its taken or not.
+        assert(this_pc.instAddr() == curAddr);
+        DPRINTF(BAC, "Branch detected which is not the last uOp %s. "
+                    "Continue with next address.\n", this_pc);
+        // search_pc->set(this_pc.instAddr() + staticInst->size());
+        this_pc.set(curAddr + staticInst->size());
+    }
+
+
     DPRINTF(BAC, "[tid:%i] [fn:%llu] %i addresses searched. "
-                "Branch found:%i. Continue with PC:%s, sz:%i in next cycle\n",
-                tid, curFT->ftNum(), numAddrSearched, branchFound,
-                *search_pc, search_pc->as<X86ISA::PCState>().size());
+                "Branch found:%i. Continue with PC:%s in next cycle\n",
+                tid, curFT->ftNum(), numAddrSearched, branchFound, *next_pc);
 
     stats.ftSizeDist.sample(numAddrSearched);
 
+
+
     // Finally set the BPU PC to the next FT in the next cycle
-    set(this_pc, *search_pc);
+    set(this_pc, *next_pc);
 
     ftq->dumpFTQ(tid);
 
@@ -1241,7 +1305,7 @@ bool
 BAC::predict(const DynInstPtr &inst, const InstSeqNum &seqNum,
                    PCStateBase &pc, ThreadID tid)
 {
-    ppFTQInsert->notify(inst);
+    // ppFTQInsert->notify(inst);
     return bpu->predict(inst->staticInst, inst->seqNum, pc, tid);
 }
 
@@ -1254,10 +1318,12 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
 {
 
     assert(ft->ftNum() == ftq->readHead(tid)->ftNum());
-
-
     BPredUnit::BranchClass brType = getBranchClass(inst);
 
+
+
+    stats.postUpdate++;
+    stats.postUpdateType[brType]++;
     /** After pre-decode we know if an instruction
      * was a branch as well as the target of direct branches.
      * Hence, we can resteer unconditional direct branches.
@@ -1267,12 +1333,15 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
     bool can_resteer = (inst->isDirectCtrl() && inst->isUncondCtrl())
                         || (bpu->ras && inst->isReturn()) ? true : false;
 
+    // bool can_resteer = false;
+
 
     DPRINTF(Branch, "[tid:%i] Update pre-decode [ftn:%llu] => [sn:%llu] "
-                    "PC:%#x, %s, can resteer:%i, "
+                    "PC:%#x, %s, can resteer:%i, last uOp%i "
                     "FT[br:%i, taken:%i, end:%#x]\n"
                     , tid, ft->ftNum(), seqNum,
-                    pc.instAddr(), bpu->toStr(brType),
+                    pc.instAddr(), bpu->toStr(brType), can_resteer,
+                    inst->isLastMicroop(),
                     ft->hasBranch(), ft->predtaken(), ft->endAddress());
 
 
@@ -1304,18 +1373,75 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
 
 
 
+    // if (!inst->isLastMicroop()) {
 
+    // }
 
 
 
     bool resteer = false;
+    bool squash = false;
     BPredUnit::PredictorHistory* hist = nullptr;
 
+
+
+    // There is a special case for Microcode_ROM when the branch
+    // is not the same as predicted. In that case revert everything.
+    // The squashing will delete the history and we can make a fresh
+    // prediction
+    if (!inst->isLastMicroop()) {
+        DPRINTF(Branch, "[tid:%i] Branch is not last uOp\n", tid);
+        assert(hist == nullptr);
+
+        stats.postBranchesNotLastuOp++;
+        // resteer = true;
+        // We need to squash all previously made predctions.
+
+        // bacStatus[tid] = Blocked;
+
+
+
+
+
+        // stats.resteerNotLastuOp++;
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     /** Check if (1) for this fetch target a branch was
-      * predicted and (2) if yes if the branches match earch other.
-      * Only then we have a valid history already.
+      * predicted and (2) if yes if the branches match each other.
+      * Only then we should have a valid history already.
+      * Caveat:
+      * Complex instructions can have several branches all associated with
+      * The same PC. In that case we use the history for the first instance.
+      * If there is another branch or instance the history is already use
+      * Furthermore, we need to squash.
       */
-    if (ft->hasBranch() && (ft->endAddress() == pc.instAddr())) {
+    if (ft->hasBranch() && (ft->endAddress() == pc.instAddr())
+        && ft->bpu_history != nullptr) {
+    // if (ft->hasBranch() && (ft->endAddress() == pc.instAddr())
+    //     && inst->isLastMicroop()) {
         assert(ft->bpu_history != nullptr);
 
         // Pop the history from the FTQ to move it later to the
@@ -1326,7 +1452,10 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
         DPRINTF(Branch, "[tid:%i] Pop history from FTQ: "
                     "PC:%#x. taken:%i, target:%#x\n", tid,
                     hist->pc, hist->predTaken, hist->target);
-        // Check if we need/can to resteer
+
+        // Check whether we need/can to resteer
+        // Note: The actual resteer will be triggered after decoding.
+        // but we know it already.
         if (!hist->predTaken && can_resteer) {
             resteer = true;
         }
@@ -1339,6 +1468,34 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
         }
     }
 
+    // For complex instructions it can happen that several branches with
+    // different types exists in the same instruction. If the branch type
+    // does not match with the type of the prediction history its invalid.
+    // The squashing will delete the history and we can make a fresh
+    // prediction
+    if (hist && (hist->type != brType)) {
+        DPRINTF(Branch, "Branch types dont match. Delete history\n", tid);
+
+        // assert(!inst->isLastMicroop());
+
+        ft->bpu_history = static_cast<void*>(hist);
+        hist = nullptr;
+        // resteer = true;
+        squash = true;
+        stats.resteerTypeMissmatch++;
+    }
+
+    // If for complex instruction we encounter a second two or more branches
+    // the history is already used since we only predict the first instance.
+    // In that case we squash the FTQ and block it until
+    // the full instruction is decoded.
+    if (!inst->isLastMicroop() && (hist == nullptr)) {
+
+        DPRINTF(Branch, "No history for complex instruction found. \n");
+        squash = true;
+        stats.resteerMultiBranchInst++;
+    }
+
 
     // Do the resteering now if needed. This is bascially going over all
     // fetch targets and reverting all predictions made.
@@ -1347,15 +1504,21 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
     // squashing by tansition the state: -> squashing -> running
     // If there is no history yet we can revert all predictions
     // otherwise we revert all but the head.
-    if (resteer) {
+    if (squash) {
         squashBpuHistories(tid);
         /** Invalidate the FTQ. We then need to wait for a resteer signal */
-        ftq->invalidate(tid);
-        bacStatus[tid] = Idle;
+        ftq->block(tid);
+        // bacStatus[tid] = FTQBlocked;
     }
 
+    bool target_already_set = false;
+    // For the corner case of complex instruction with two or more instances
+    // we squashed right away and perform a normal prediction.
+    if (!inst->isLastMicroop() && (hist == nullptr)) {
 
-
+        bpu->predict(inst, ft->ftNum(), pc, tid, hist);
+        target_already_set = true;
+    }
 
 
     // if (hist == preFetchPredHist[tid].begin()) {
@@ -1408,6 +1571,7 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
                 "[tid:%i] [sn:%llu] No branch history. "
                 "Create pred. history PC %s\n",
                 tid, seqNum, pc);
+        stats.noHistType[brType]++;
         // Create a dummy PC with the current one
         // we dont care what the BP is predicting as
         // we fix it anyway in a moment.
@@ -1427,24 +1591,44 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
         if (inst->isUncondCtrl()) {
             DPRINTF(Branch, "[tid:%i] [sn:%llu] Unconditional control\n",
                 tid,seqNum);
+
+            // TODO: This is not good implemented.
             // Tell the BP there was an unconditional branch.
             bpu->uncondBranch(tid, pc.instAddr(), hist->bpHistory);
+            // bpu->updateHistories(tid, false, MaxAddr, true, hist->bpHistory);
+
+            // Revert the prediction right away because it was a
+            // BTB miss in the first place.
+            // The actual squash and resteer will be happen after the
+            // decode stage.
+            // bpu->btbUpdate(tid, pc.instAddr(), hist->bpHistory);
+            //             DPRINTF(Branch, "[tid:%i] [sn:%llu] btbUpdate "
+            //                     "called for %s\n", tid, seqNum, pc);
+
+            hist->wasPredTakenBTBMiss = true;
+
         } else {
             // ++stats.condPredicted;
             // We can only resteer unconditional branches.
-            // but we make a dummy prediction and delete change it to not
-            // taken right away.
-            bpu->lookup(tid, pc.instAddr(), hist->bpHistory);
-            bpu->btbUpdate(tid, pc.instAddr(), hist->bpHistory);
+            // For conditional branches we make a dummy prediction
+            // assume Not-taken
+            // bpu->lookup(tid, pc.instAddr(), hist->bpHistory);
+            bpu->dummyLookup(tid, pc.instAddr(), hist->bpHistory);
+            // bpu->updateHistories(tid, false, MaxAddr, true, hist->bpHistory);
+            // bpu->btbUpdate(tid, pc.instAddr(), hist->bpHistory);
         }
+        bpu->updateHistories(tid, false, MaxAddr, true, hist->bpHistory);
+
+        hist->wasBTBMiss = true;
+        hist->predTaken = false;
 
         /** A special case are indirect calls. For those we do not have
          * a target so we cannot resteer. But we need to push the address
          * on the stack.
          */
         if (bpu->ras && inst->isCall() && inst->isIndirectCtrl()) {
-            assert(!resteer);
-            bpu->ras->push(tid, pc, hist->rasHistory);
+            // assert(!resteer);
+            // bpu->ras->push(tid, pc, hist->rasHistory);
             hist->wasCall = true;
 
             DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s was "
@@ -1454,12 +1638,64 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
 
     }
 
+
+
+
     assert(hist != nullptr);
     DPRINTF(Branch, "[tid:%i] [sn:%llu] Move history to main buffer after\n",
                     tid, seqNum);
     hist->inst = inst;
+    hist->type = brType;
     hist->seqNum = seqNum;
     bpu->predHist[tid].push_front(hist);
+
+
+
+
+    // We can fix the RAS
+    if (bpu->ras && inst->isReturn()) {
+        hist->wasReturn = true;
+    }
+    // Record calls in the RAS.
+    if (bpu->ras && inst->isCall()) {
+        hist->wasCall = true;
+    }
+
+
+
+    if (resteer) {
+        /** This branch will trigger an early resteer in the decode
+         * stage
+         */
+        hist->resteered = true;
+        stats.resteeredType[brType]++;
+    }
+
+
+
+
+    // Finally update the PC if not already done.
+    if (!target_already_set) {
+        if (hist->predTaken) {
+            // assert(ft->readPredTarg().instAddr() == hist->target);
+DPRINTF(Branch, "Set PC:%s, targetH:%s, targetFT:%s\n", pc, *(hist->targetPC), ft->readPredTarg());
+            // pc.set(hist->target);
+            set(pc, ft->readPredTarg());
+            // pc.set(ft->readPredTarg().instAddr());
+
+        } else {
+            inst->advancePC(pc);
+        }
+    }
+
+    DPRINTF(Branch, "[tid:%i] [sn:%llu] hist->ins %i inst:%i, next PC:%s\n",
+                    tid, hist->seqNum, hist->inst->size(), inst->size(), pc);
+
+
+
+    return hist->predTaken;
+    // TODO: remove the remaining bits
+
 
 
     // We are done if we don't need to resteer.
@@ -1468,51 +1704,59 @@ BAC::updatePostFetch(PCStateBase &pc, const FetchTargetPtr &ft,
     }
 
 
-    /** Early resteering. */
+
+
     std::unique_ptr<PCStateBase> target(pc.clone());
 
     // We can fix the RAS
     if (bpu->ras && inst->isReturn()) {
         hist->wasReturn = true;
 
-        // If it's a function return call, then look up the address
-        // in the RAS.
-        const PCStateBase *ras_top = bpu->ras->pop(tid, hist->rasHistory);
-        if (ras_top) {
-            set(target, inst->buildRetPC(pc, *ras_top));
-            // inst->buildPC()
-            hist->usedRAS = true;
+        // // If it's a function return call, then look up the address
+        // // in the RAS.
+        // const PCStateBase *ras_top = bpu->ras->pop(tid, hist->rasHistory);
+        // if (ras_top) {
+        //     set(target, inst->buildRetPC(pc, *ras_top));
+        //     // inst->buildPC()
+        //     hist->usedRAS = true;
 
-            DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
-                "return, RAS predicted target: %s\n",
-                tid, seqNum, pc, *target);
-        }
+        //     DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+        //         "return, RAS predicted target: %s\n",
+        //         tid, seqNum, pc, *target);
+        // }
     }
 
     // Record calls in the RAS.
     if (bpu->ras && inst->isCall()) {
 
-        bpu->ras->push(tid, pc, hist->rasHistory);
+        // bpu->ras->push(tid, pc, hist->rasHistory);
         hist->wasCall = true;
 
-        DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s was "
-                "a call, adding to the RAS\n",
-                tid, seqNum, pc);
+        // DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s was "
+        //         "a call, adding to the RAS\n",
+        //         tid, seqNum, pc);
     }
 
-    // For returns we have the target.
-    // Now we need to get it for the direct branches.
-    if (inst->isDirectCtrl()) {
-        set(target, *(inst->branchTarget(pc)));
-    }
+    // // // For returns we have the target.
+    // // // Now we need to get it for the direct branches.
+    // if (inst->isDirectCtrl()) {
+    //     set(target, *(inst->branchTarget(pc)));
+    // }
+    // // if (!hist->predTaken) {
+    // //     inst->advancePC(*target);
+    // // }
 
     DPRINTF(Branch, "[tid:%i] [sn:%llu] Post fetch correction: "
             "Resteered PC:%s %s target:%s\n",
                 tid, seqNum, pc, toStr(brType), *target);
 
-    hist->target = target->instAddr();
-    hist->predTaken = true;
-    set(pc, *target);
+    // hist->target = target->instAddr();
+
+
+
+
+    // // TODO::
+    // set(pc, *target);
 
 
     // predHist[tid].push_front(hist);
@@ -1566,10 +1810,31 @@ BAC::BACStats::BACStats(o3::CPU *cpu, BAC *bac)
             "Number of branches that BAC encountered"),
     ADD_STAT(predTakenBranches, statistics::units::Count::get(),
             "Number of branches that BAC predicted taken."),
+    ADD_STAT(branchesNotLastuOp, statistics::units::Count::get(),
+             "Number of branches that fetch encountered which are not the "
+             "last uOp within a macrooperation. Jump to itself."),
     ADD_STAT(branchMisspredict, statistics::units::Count::get(),
             "Number of branches that BAC has predicted taken"),
     ADD_STAT(noBranchMisspredict, statistics::units::Count::get(),
             "Number of branches that BAC has predicted taken"),
+    ADD_STAT(squashBranchDecode, statistics::units::Count::get(),
+            "Number of branches squashed from decode"),
+    ADD_STAT(squashBranchCommit, statistics::units::Count::get(),
+            "Number of branches squashed from decode"),
+    ADD_STAT(postUpdate, statistics::units::Count::get(),
+            "Number of branches that are post updated"),
+    ADD_STAT(postUpdateType, statistics::units::Count::get(),
+            "Number of branches that are post updated"),
+    ADD_STAT(postBranchesNotLastuOp, statistics::units::Count::get(),
+            "Number of branches that are post updated"),
+    ADD_STAT(noHistType, statistics::units::Count::get(),
+            "Number and type of branches that where undetected by the BTB"),
+    ADD_STAT(resteeredType, statistics::units::Count::get(),
+            "Number and type of branches that will trigger a FE resteer."),
+    ADD_STAT(resteerTypeMissmatch, statistics::units::Count::get(),
+            "Number resteered branches where the branch type miss match"),
+    ADD_STAT(resteerMultiBranchInst, statistics::units::Count::get(),
+            "Number resteered branches because its not the last branch."),
     ADD_STAT(ftSizeDist, statistics::units::Count::get(),
              "Number of bytes per fetch target")
 {
@@ -1577,9 +1842,27 @@ BAC::BACStats::BACStats(o3::CPU *cpu, BAC *bac)
 
     ftSizeDist
         .init(/* base value */ 0,
-            /* last value */ bac->fetchTargetWidth,
-            /* bucket size */ 1)
+              /* last value */ bac->fetchTargetWidth,
+              /* bucket size */ 4)
         .flags(statistics::pdf);
+
+    postUpdateType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+    noHistType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+    resteeredType
+        .init(enums::Num_BranchClass)
+        .flags(total | pdf);
+
+
+    for (int i = 0; i < enums::Num_BranchClass; i++) {
+        postUpdateType.subname(i, enums::BranchClassStrings[i]);
+        noHistType.subname(i, enums::BranchClassStrings[i]);
+        resteeredType.subname(i, enums::BranchClassStrings[i]);
+
+    }
 }
 
 } // namespace branch_prediction

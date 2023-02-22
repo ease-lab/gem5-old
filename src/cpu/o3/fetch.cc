@@ -89,6 +89,7 @@ Fetch::Fetch(CPU *_cpu, const BaseO3CPUParams &params)
       bac(nullptr),
       wasICacheMiss(false), accessDepth(0), wasHitOnPf(false),
       mark_one_as_miss(params.mark_one_as_miss),
+      decoupledFrontEnd(params.decoupledFrontEnd),
       decodeToFetchDelay(params.decodeToFetchDelay),
       renameToFetchDelay(params.renameToFetchDelay),
       iewToFetchDelay(params.iewToFetchDelay),
@@ -180,6 +181,9 @@ Fetch::FetchStatGroup::FetchStatGroup(CPU *cpu, Fetch *fetch)
              "Number of instructions fetch has processed"),
     ADD_STAT(branches, statistics::units::Count::get(),
              "Number of branches that fetch encountered"),
+    ADD_STAT(branchesNotLastuOp, statistics::units::Count::get(),
+             "Number of branches that fetch encountered which are not the "
+             "last uOp within a macrooperation. Jump to itself."),
     ADD_STAT(predictedBranches, statistics::units::Count::get(),
              "Number of branches that fetch has predicted taken"),
     ADD_STAT(branchMisspredict, statistics::units::Count::get(),
@@ -659,6 +663,8 @@ Fetch::getInstrFromFT(FetchTargetPtr &ft, StaticInstPtr staticInst,
     // Addr npc = this_pc.advance()
     // Addr pc_addr = this_pc.advance();
 
+
+
     DPRINTF(Fetch, "[tid:%i] Fetch from %s PC:%#x. last uOp:%i. FTQ sz:%i\n",
             tid, ft->print(), *pc[tid], last_uop, ftq->size(tid));
 
@@ -814,10 +820,17 @@ Fetch::getInstrFromFT(FetchTargetPtr &ft, StaticInstPtr staticInst,
         //     can_resteer = true;
         // }
 
+        // TODO remove!
         bool was_pred_taken = false;
-        if (reached_end && ft->isTerminalBranch(this_pc.instAddr())) {
+        // if (reached_end && ft->isTerminalBranch(this_pc.instAddr())) {
+        //     was_pred_taken = ft->taken;
+        // }
+
+        // Get the prediction we made for this branch.
+        if (ft->isTerminalBranch(this_pc.instAddr())) {
             was_pred_taken = ft->taken;
         }
+
 
 
 
@@ -837,33 +850,105 @@ Fetch::getInstrFromFT(FetchTargetPtr &ft, StaticInstPtr staticInst,
             ++fetchStats.predictedBranches;
         }
 
-        if (pred_taken) {
-            if (was_pred_taken) {
-
-                // No post fetch correction keep the predicted target
-                next_pc.set(ft->readPredTarg().instAddr());
-                // set(next_pc, ft->readPredTarg());
-
-                DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
-                    "no resteer. predTarget:%s, sz:%i\n",
-                    tid, inst->seqNum, inst->pcState().instAddr(),
-                    next_pc, next_pc.as<X86ISA::PCState>().size());
-            } else {
-
-                // Post fetch correction. The BPU already resteered the
-                // direction. Resteer the BAC.
-                DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
-                        "-> resteered to %s\n",
-                        tid, inst->seqNum, inst->pcState().instAddr(),
-                        next_pc);
-
-                bacResteer(next_pc, tid);
-            }
-        } else {
-            assert(!was_pred_taken);
-            // Remain taken.
-            inst->staticInst->advancePC(next_pc);
+        if (inst->isLastMicroop()) {
+            fetchStats.branchesNotLastuOp++;
         }
+
+
+
+        // if (pred_taken) {
+        //     DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
+        //         "no resteer. predTarget:%s, sz:%i\n",
+        //         tid, inst->seqNum, inst->pcState().instAddr(),
+        //         next_pc, next_pc.as<X86ISA::PCState>().size());
+
+        // } else {
+
+        //     // assert(!was_pred_taken);
+        //     // Remain not taken.
+        //     inst->staticInst->advancePC(next_pc);
+
+        //     // This is a special corner case for Microrom instructions.
+        //     // If the branch type doesn't match
+        //     if (was_pred_taken) {
+        //         DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
+        //                 " BP history brocken. -> resteer to %s\n",
+        //                 tid, inst->seqNum, inst->pcState().instAddr(),
+        //                 next_pc);
+
+        //         bacResteer(next_pc, tid);
+        //     }
+        // }
+
+
+
+
+
+
+        // // The branch operation is typically the last uOp in an instruction
+        // // More complex instructions are handled separately
+        // if (inst->isLastMicroop()) {
+
+        // if (pred_taken) {
+        //     if (was_pred_taken) {
+
+        //         // No post fetch correction keep the predicted target
+        //         next_pc.set(ft->readPredTarg().instAddr());
+        //         // set(next_pc, ft->readPredTarg());
+
+        //         DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
+        //             "no resteer. predTarget:%s, sz:%i\n",
+        //             tid, inst->seqNum, inst->pcState().instAddr(),
+        //             next_pc, next_pc.as<X86ISA::PCState>().size());
+        //     } else {
+
+        //         // Post fetch correction. The BPU already resteered the
+        //         // direction. Resteer the BAC.
+        //         DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
+        //                 "-> resteered to %s\n",
+        //                 tid, inst->seqNum, inst->pcState().instAddr(),
+        //                 next_pc);
+
+        //         // TODO we should not reach this point
+        //         assert(false);
+
+        //         bacResteer(next_pc, tid);
+        //     }
+        // } else {
+
+        //     // assert(!was_pred_taken);
+        //     // Remain not taken.
+        //     inst->staticInst->advancePC(next_pc);
+
+        //     // This is a special corner case for Microrom instructions.
+        //     // If the branch type doesn't match
+        //     if (was_pred_taken) {
+        //         DPRINTF(Fetch, "[tid:%i] [sn:%llu] Post Fetch PC: %#x "
+        //                 " BP history brocken. -> resteer to %s\n",
+        //                 tid, inst->seqNum, inst->pcState().instAddr(),
+        //                 next_pc);
+
+        //         bacResteer(next_pc, tid);
+        //     }
+        // }
+
+        // } else {
+
+        // // This is corner case for x86 where we have complicated instructions
+        // // with several branches. Since gem5 does not use uPC for predictions
+        // // we block the BAC until the instruction is fully decoded.
+        // // TODO: optimization we can continue until we decode a second
+        // // branch only then we need resteer the FTQ.
+
+        //     fetchStats.branchesNotLastuOp++;
+
+
+        // }
+
+
+
+
+
         // else {
         //     DPRINTF(BAC, "[tid:%i] [sn:%llu] Branch at PC %#x "
         //             "predicted to be not taken\n",
@@ -876,11 +961,10 @@ Fetch::getInstrFromFT(FetchTargetPtr &ft, StaticInstPtr staticInst,
         inst->setPredControl(true);
 
 
-        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch at PC %#x "
-                "predicted %s. Go to: %s\n",
-                tid, inst->seqNum,
-                pred_taken ? "taken" : "not taken",
-                inst->pcState().instAddr(), next_pc);
+        DPRINTF(Fetch, "[tid:%i] [sn:%llu] Branch predicted: %s. "
+                "Go to: %s, wasPred taken%i\n",
+                tid, inst->seqNum, pred_taken ? "taken" : "not taken",
+                next_pc, was_pred_taken);
 
     } else {
 
@@ -898,18 +982,20 @@ Fetch::getInstrFromFT(FetchTargetPtr &ft, StaticInstPtr staticInst,
 
     // Check if we are done with the current fetch target.
     // In that case remove it.
+    // Also in case post-fetch update has invalidated the
+    // FTQ we also remove the fetch target.
     // Note we do not pop it here. This will be done at the end of each cycle.
-    if (reached_end) {
+    if (reached_end || !ftq->isValid(tid)) {
         DPRINTF(Fetch, "Done with %s.\n", ft->print());
         ft = nullptr;
     }
     return inst;
 }
 
-#ifdef FDIP
 bool
 Fetch::ftqReady(ThreadID tid, bool &status_change)
 {
+    if (!decoupledFrontEnd) return true;
     // If the FTQ is empty wait unit its filled upis available.
     // Need at least two cycles for now.
     if (!ftq->isHeadReady(tid)) {
@@ -920,9 +1006,7 @@ Fetch::ftqReady(ThreadID tid, bool &status_change)
     }
     return true;
 }
-#else
-bool Fetch::ftqReady(ThreadID tid, bool &status_change) {return true;}
-#endif
+
 
 
 
@@ -1112,13 +1196,9 @@ Fetch::finishTranslation(const Fault &fault, const RequestPtr &mem_req)
 
         DPRINTF(Fetch, "[tid:%i] Translation faulted, building noop.\n", tid);
         // We will use a nop in ordier to carry the fault.
-// #ifdef FDIP
-//         DynInstPtr instruction = buildInst(tid, nopStaticInstPtr, nullptr,
-//                                         fetch_pc, fetch_pc, 0, true, true);
-// #else
+
         DynInstPtr instruction = buildInst(tid, nopStaticInstPtr, nullptr,
                                         fetch_pc, fetch_pc, false);
-// #endif //FDIP
 
         instruction->setNotAnInst();
 
@@ -1445,7 +1525,9 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
                fromCommit->commitInfo[tid].squashInst, tid);
 
 
-#ifndef FDIP
+
+if (!decoupledFrontEnd) { // #ifndef FDIP
+
         // If it was a branch mispredict on a control instruction, update the
         // branch predictor with that instruction, otherwise just kill the
         // invalid state we generated in after sequence number
@@ -1475,15 +1557,22 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
             }
             fetchStats.noBranchMisspredict++;
         }
-#endif //FDIP
+
+} // #endif //FDIP
+
+
 
         return true;
     } else if (fromCommit->commitInfo[tid].doneSeqNum) {
-#ifndef FDIP
+
+
+if (!decoupledFrontEnd) { // #ifndef FDIP
+
         // Update the branch predictor if it wasn't a squashed instruction
         // that was broadcasted.
         bac->update(fromCommit->commitInfo[tid].doneSeqNum, tid);
-#endif //FDIP
+
+} // #endif //FDIP
     }
 
     // Check squash signals from decode.
@@ -1491,7 +1580,7 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
         DPRINTF(Fetch, "[tid:%i] Squashing instructions due to squash "
                 "from decode.\n",tid);
 
-#ifndef FDIP
+if (!decoupledFrontEnd) { // #ifndef FDIP
         // Update the branch predictor.
         if (fromDecode->decodeInfo[tid].branchMispredict) {
             // bac->squash(fromDecode->decodeInfo[tid].doneSeqNum,
@@ -1506,7 +1595,7 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
             bac->squash(fromDecode->decodeInfo[tid].doneSeqNum,
                               tid);
         }
-#endif //FDIP
+} // #endif //FDIP
 
         if (fetchStatus[tid] != Squashing) {
 
@@ -1523,7 +1612,7 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
     }
 
     // Update FTQ status first.
-#ifdef FDIP
+if (decoupledFrontEnd) { // #ifdef FDIP
 
     if (checkStall(tid) &&
         fetchStatus[tid] != IcacheWaitResponse &&
@@ -1563,7 +1652,8 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
     // If we've reached this point, we have not gotten any signals that
     // cause fetch to change its status.  Fetch remains the same as before.
     return false;
-#else
+
+} else { // #ifdef FDIP
 
     if (checkStall(tid) &&
         fetchStatus[tid] != IcacheWaitResponse &&
@@ -1591,7 +1681,7 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
     }
 
     return false;
-#endif
+} // #ifdef FDIP
 }
 
 ////////////////
@@ -1866,14 +1956,17 @@ Fetch::fetch(bool &status_change)
         return;
     }
 
-    DPRINTF(Fetch, "Attempting to fetch from [tid:%i]\n", tid);
 
     // BasicBlockPtr curBB = getCurrentFetchTarget(tid, status_change);
     if (!ftqReady(tid, status_change)) {
+        DPRINTF(Fetch, "FTQ not ready [tid:%i]\n", tid);
+
         // No fetch target. We don't know what to fetch.
         ++fetchStats.ftqStallCycles;
         return;
     }
+    DPRINTF(Fetch, "Attempting to fetch from [tid:%i]\n", tid);
+
 
     // The current PC.
     PCStateBase &this_pc = *pc[tid];
@@ -1886,10 +1979,13 @@ Fetch::fetch(bool &status_change)
                     this_pc, this_pc.as<X86ISA::PCState>().size(),
                     &this_pc);
 
-#ifdef FDIP
-    assert(ftqReady(tid,status_change));
 
     FetchTargetPtr curFT = ftq->readHead(tid);
+
+if (decoupledFrontEnd) { // #ifdef FDIP
+    assert(ftqReady(tid,status_change));
+
+
     // bool inFT = ftq->isInHead(tid, this_pc.instAddr());
     // bool inFT = curFT->inRange(this_pc.instAddr());
 
@@ -1900,10 +1996,7 @@ Fetch::fetch(bool &status_change)
         ++fetchStats.ftqStallCycles;
         return;
     }
-
-#else
-    const bool inFT = true;
-#endif
+} // #ifdef FDIP
 
     // If returning from the delay of a cache miss, then update the status
     // to running, otherwise do the cache access.  Possibly move this up
@@ -1998,12 +2091,12 @@ Fetch::fetch(bool &status_change)
         fetchAddr = (this_pc.instAddr() + pcOffset) & pc_mask;
         Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
 
-#ifdef FDIP
+if (decoupledFrontEnd) { // #ifdef FDIP
         // inFT = ftq->isInHead(tid, this_pc.instAddr());
-        if (!curFT || !curFT->inRange(this_pc.instAddr())) {
+        if (!ftq->isValid(tid) || !curFT || !curFT->inRange(this_pc.instAddr())) {
             break;
         }
-#endif
+} // #ifdef FDIP
 
         DPRINTF(Fetch, "N:%i, needM:%i, inRom:%i, cM:%i, ready%i\n",
                     numInst, needMem, inRom, curMacroop, dec_ptr->instReady());
@@ -2038,9 +2131,7 @@ Fetch::fetch(bool &status_change)
         // Extract as many instructions and/or microops as we can from
         // the memory we've processed so far.
         do {
-#ifdef FDIP
-        assert(curFT);
-#endif
+
             DPRINTF(Fetch, "PC:%s,sz:%i, N:%i, needM:%i, inRom:%i, cM:%i, ready%i\n",
                     this_pc, this_pc.as<X86ISA::PCState>().size(),
                     numInst, needMem, inRom, curMacroop, dec_ptr->instReady());
@@ -2051,6 +2142,8 @@ Fetch::fetch(bool &status_change)
 
                     // Increment stat of fetched instructions.
                     ++fetchStats.insts;
+                    DPRINTF(Fetch, "[tid:%i] Decoded %s, size %i\n",
+                        tid, staticInst->disassemble(this_pc.instAddr()), staticInst->size());
 
                     if (staticInst->isMacroop()) {
                         curMacroop = staticInst;
@@ -2063,6 +2156,8 @@ Fetch::fetch(bool &status_change)
                     break;
                 }
             }
+
+
             // Whether we're moving to a new macroop because we're at the
             // end of the current one, or the branch predictor incorrectly
             // thinks we are...
@@ -2075,14 +2170,19 @@ Fetch::fetch(bool &status_change)
                     staticInst = curMacroop->fetchMicroop(this_pc.microPC());
                 }
                 newMacro |= staticInst->isLastMicroop();
+                if (curMacroop)
+                    staticInst->size(curMacroop->size());
             }
+            DPRINTF(Fetch, "[tid:%i] Decoded %s, size %i\n",
+                        tid, staticInst->disassemble(this_pc.instAddr()), staticInst->size());
 
+            DynInstPtr instruction = nullptr;
 
-#ifdef FDIP
+if (decoupledFrontEnd) { // #ifdef FDIP
 ///////////////////////////////
             predictedBranch |= this_pc.branching();
 
-            DynInstPtr instruction = getInstrFromFT(curFT, staticInst, curMacroop,
+            instruction = getInstrFromFT(curFT, staticInst, curMacroop,
                                             this_pc, *next_pc);
 
             // At this point we should always get a new instruction
@@ -2097,9 +2197,9 @@ Fetch::fetch(bool &status_change)
 
             predictedBranch |= instruction->readPredTaken();
 
-#else
+} else { // #ifdef FDIP
 ///////////////////////
-            DynInstPtr instruction = buildInst(
+            instruction = buildInst(
                     tid, staticInst, curMacroop, this_pc, *next_pc, true);
 
             set(next_pc, this_pc);
@@ -2111,7 +2211,8 @@ Fetch::fetch(bool &status_change)
             // predictedBranch |= searchBTBAndUpdateNextPC(instruction, *next_pc);
 
 /////////////////////
-#endif
+} // #ifdef FDIP
+
             ppFetch->notify(instruction);
             numInst++;
 
@@ -2143,13 +2244,13 @@ Fetch::fetch(bool &status_change)
                 curMacroop = NULL;
             }
 
-#ifdef FDIP
+if (decoupledFrontEnd) { // #ifdef FDIP
             // inFT = ftq->isInHead(tid, this_pc.instAddr());
             // Check if the PC exceed the fetch target.
             if (curFT && !curFT->inRange(this_pc.instAddr())) {
                 curFT = nullptr;
             }
-#endif
+} // #ifdef FDIP
 
 
             if (instruction->isQuiesce()) {
@@ -2177,23 +2278,27 @@ Fetch::fetch(bool &status_change)
     if (predictedBranch) {
         DPRINTF(Fetch, "[tid:%i] Done fetching, predicted branch "
                 "instruction encountered.\n", tid);
-    } else if (!curFT) {
-        DPRINTF(Fetch, "[tid:%i] Done fetching, reached end of fetch "
-                "target.\n", tid);
     } else if (numInst >= fetchWidth) {
         DPRINTF(Fetch, "[tid:%i] Done fetching, reached fetch bandwidth "
                 "for this cycle.\n", tid);
     } else if (blkOffset >= fetchBufferSize) {
-        DPRINTF(Fetch, "[tid:%i] Done fetching, reached the end of the"
+        DPRINTF(Fetch, "[tid:%i] Done fetching, reached the end "
                 "fetch buffer.\n", tid);
+    } else if (!curFT) {
+        DPRINTF(Fetch, "[tid:%i] Done fetching, reached end of fetch "
+                "target.\n", tid);
     }
 
-#ifdef FDIP
+if (decoupledFrontEnd) { // #ifdef FDIP
     if (!curFT) {
         DPRINTF(Fetch, "Done with FT. Pop from FTQ.\n");
-        ftq->updateHead(tid);
+        if (!ftq->updateHead(tid)) {
+            // The update was not successful. The BPU predicted something
+            // wrong. Squash the FTQ.
+            bacResteer(this_pc, tid);
+        }
     }
-#endif
+} // #ifdef FDIP
 
     macroop[tid] = curMacroop;
     fetchOffset[tid] = pcOffset;
@@ -2209,9 +2314,9 @@ Fetch::fetch(bool &status_change)
     issuePipelinedIfetch[tid] = fetchBufferBlockPC != fetchBufferPC[tid] &&
         fetchStatus[tid] != IcacheWaitResponse &&
         fetchStatus[tid] != ItlbWait &&
-#ifdef FDIP
-        fetchStatus[tid] != FTQEmpty &&
-#endif
+
+        (decoupledFrontEnd && (fetchStatus[tid] != FTQEmpty)) &&
+
         fetchStatus[tid] != IcacheWaitRetry &&
         fetchStatus[tid] != QuiescePending &&
         !curMacroop;

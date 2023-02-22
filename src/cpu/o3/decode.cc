@@ -709,18 +709,49 @@ Decode::decodeInsts(ThreadID tid)
         // Or fetch predict a instruction as no control it actually is
         // a control instruction.
         if (inst->readPredControl() != inst->isControl()) {
-            DPRINTF(Decode,
-                    "[tid:%i] [sn:%llu] "
-                    "Control mispredict: Pred:%s, actual:%s\n",
+            DPRINTF(Decode, "[tid:%i] [sn:%llu] "
+                    "Control mispredict: Pred:%s, actual:%s, "
+                    "uncond:%i, cond:%i, predTaken%i\n",
                     tid, inst->seqNum,
                     inst->readPredControl() ? "control" : "no control",
-                    inst->isControl() ? "control" : "no control");
+                    inst->isControl() ? "control" : "no control",
+                    inst->isUncondCtrl(), inst->isCondCtrl(),
+                    inst->readPredTaken());
 
             ++stats.controlMispred;
-            inst->setResteered(true);
+
             // Might want to set some sort of boolean and just do
             // a check at the end
             squash(inst, true, inst->threadNumber);
+
+            inst->setResteered(true);
+
+
+            // if (inst->isDirectCtrl() &&
+            //     (inst->isUncondCtrl() || inst->readPredTaken()))
+
+            if (inst->isUncondCtrl())
+            //    || inst->isReturn())
+            // {
+            // if (inst->isDirectCtrl() && inst->isUncondCtrl())
+            {
+                ++stats.branchResolved;
+
+                std::unique_ptr<PCStateBase> target = inst->branchTarget();
+                ++stats.branchMispred;
+
+                // Might want to set some sort of boolean and just do
+                // a check at the end
+                // squash(inst, false, inst->threadNumber);
+
+                DPRINTF(Decode,
+                        "[tid:%i] [sn:%llu] "
+                        "Updating target to: %s\n",
+                        tid, inst->seqNum,*target);
+                //The micro pc after an instruction level branch should be 0
+                inst->setPredTarg(*target);
+                inst->setResteered(true);
+            }
 
             break;
         }
@@ -748,8 +779,8 @@ Decode::decodeInsts(ThreadID tid)
 
                 DPRINTF(Decode,
                         "[tid:%i] [sn:%llu] "
-                        "Updating predictions: Wrong predicted target: %s \
-                        PredPC: %s\n",
+                        "Updating predictions: Wrong predicted target: %s "
+                        "PredPC: %s\n",
                         tid, inst->seqNum, inst->readPredTarg(), *target);
                 //The micro pc after an instruction level branch should be 0
                 inst->setPredTarg(*target);

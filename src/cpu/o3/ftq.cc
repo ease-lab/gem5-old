@@ -35,8 +35,8 @@
 #include "cpu/o3/dyn_inst.hh"
 #include "cpu/o3/limits.hh"
 #include "debug/Fetch.hh"
-// #include "debug/FTQ.hh"
-#include "debug/BAC.hh"
+#include "debug/FTQ.hh"
+// #include "debug/BAC.hh"
 #include "params/BaseO3CPU.hh"
 
 namespace gem5
@@ -47,8 +47,10 @@ namespace o3
 
 
 /** Fetch Target Methods */
-FetchTarget::FetchTarget(ThreadID _tid, const PCStateBase &_start_pc, InstSeqNum seqNum)
-    : tid(_tid), ftSeqNum(seqNum),
+FetchTarget::FetchTarget(ThreadState *_ts,
+                         const PCStateBase &_start_pc,
+                         InstSeqNum _seqNum)
+    : thread(_ts), ftSeqNum(_seqNum),
       bpu_history(nullptr), taken(false)
 {
     set(startPC , _start_pc);
@@ -61,6 +63,21 @@ FetchTarget::FetchTarget(ThreadID _tid, const PCStateBase &_start_pc, InstSeqNum
 //     terminalBranch = inst;
 //     endAddress = inst->pcState().instAddr();
 // }
+
+
+
+
+gem5::ThreadContext*
+FetchTarget::getTC() const
+{
+    return thread->getTC();
+}
+
+ThreadID
+FetchTarget::getTid()
+{
+    return thread->threadId();
+}
 
 void
 FetchTarget::addTerminal(const PCStateBase &br_pc,InstSeqNum seq,
@@ -219,7 +236,7 @@ void
 FTQ::dumpFTQ(ThreadID tid) {
     int i = 0;
     for (auto& ft : ftq[tid]) {
-        DPRINTF(BAC, "FTQ[tid:%i][%i]: %s.\n", tid, i, ft->print());
+        DPRINTF(FTQ, "FTQ[tid:%i][%i]: %s.\n", tid, i, ft->print());
         i++;
     }
 }
@@ -230,23 +247,39 @@ FTQ::insert(ThreadID tid, FetchTargetPtr fetchTarget)
     numFetchTargetsInFTQ++;
     ftq[tid].push_back(fetchTarget);
 
-    DPRINTF(BAC, "Insert %s in FTQ[T:%i]. sz:%i\n",
+    DPRINTF(FTQ, "Insert %s in FTQ[T:%i]. size FTQ:%i\n",
                     fetchTarget->print(), tid, ftq[tid].size());
 
     stats.writes++;
 }
 
 
-void
+bool
 FTQ::updateHead(ThreadID tid)
 {
-    DPRINTF(BAC, "Pop FT:[fn%llu] in FTQ[T:%i]. sz:%i\n",
-                    ftq[tid].front()->ftNum(),
-                    tid, ftq[tid].size()-1);
+    if (ftq[tid].front()->bpu_history != nullptr) {
+        DPRINTF(FTQ, "Pop FT:[fn%llu] failed. Still contains BP history.\n",
+                    ftq[tid].front()->ftNum());
+        ftqStatus[tid] = Invalid;
+        return false;
+    }
+
+    bool ret_val = true;
+    // TODO make this more efficient
+    // Once the head of the FTQ gets updated and
+    // the FTQ got blocked by a complex instruction resteere
+    // we unblock by squashing
+    if (ftqStatus[tid] == Blocked) {
+        DPRINTF(FTQ, "Pop FT:[fn%llu] unblocks FTQ. Require squash.\n",
+                    ftq[tid].front()->ftNum());
+        ftqStatus[tid] = Invalid;
+        ret_val = false;
+    }
 
     numFetchTargetsInFTQ--;
     ftq[tid].pop_front();
     stats.reads++;
+    return ret_val;
 }
 
 
@@ -285,6 +318,19 @@ FTQ::isValid(ThreadID tid)
     return ftqStatus[tid] != Invalid;
 }
 
+bool
+FTQ::isBlocked(ThreadID tid)
+{
+    return ftqStatus[tid] == Blocked;
+}
+
+void
+FTQ::block(ThreadID tid)
+{
+    ftqStatus[tid] = Blocked;
+}
+
+
 unsigned
 FTQ::numFreeEntries(ThreadID tid)
 {
@@ -301,7 +347,7 @@ FTQ::size(ThreadID tid)
 bool
 FTQ::isFull(ThreadID tid)
 {
-    return ftq[tid].size() == maxEntries[tid];
+    return ftq[tid].size() >= maxEntries[tid];
 }
 
 bool

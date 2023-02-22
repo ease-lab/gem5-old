@@ -81,7 +81,9 @@ class BAC
         Idle,
         Running,
         Squashing,
-        FTQFull
+        Blocked,
+        FTQFull,
+        FTQBlocked
     };
 
     // enum FTQStatus
@@ -101,7 +103,7 @@ class BAC
     // FTQStatus ftqStatus[MaxThreads];
 
   public:
-    ProbePointArg<DynInstPtr> *ppFTQInsert;
+    ProbePointArg<FetchTargetPtr> *ppFTQInsert;
 
 
     // /**
@@ -363,9 +365,6 @@ class BAC
     //
 
   private:
-    /** Unique sequence number for fetch targets */
-    InstSeqNum globalFTSeqNum;
-    InstSeqNum getAndIncrementFTSeq() { return globalFTSeqNum++; }
 
     FetchTargetPtr newFetchTarget(ThreadID tid, const PCStateBase &start_pc);
 
@@ -507,6 +506,9 @@ class BAC
     /** Tracks which stages are telling the ftq to stall. */
     Stalls stalls[MaxThreads];
 
+    /** Enables the decoupled front-end */
+    const bool decoupledFrontEnd;
+
     /** Fetch to BAC delay. */
     const Cycles fetchToBacDelay;
 
@@ -559,10 +561,30 @@ class BAC
       statistics::Scalar branches;
       /** Total number of branches predicted taken. */
       statistics::Scalar predTakenBranches;
+      /** Total number of fetched branches. */
+      statistics::Scalar branchesNotLastuOp;
 
       /** Stat for total number of misspredicted instructions. */
       statistics::Scalar branchMisspredict;
       statistics::Scalar noBranchMisspredict;
+
+      /** Stat for total number of misspredicted instructions. */
+      statistics::Scalar squashBranchDecode;
+      statistics::Scalar squashBranchCommit;
+
+      /** Number of post updates */
+      statistics::Scalar postUpdate;
+      statistics::Vector postUpdateType;
+      /** Total number of fetched branches. */
+      statistics::Scalar postBranchesNotLastuOp;
+      /** Surprising branches*/
+      statistics::Vector noHistType;
+
+      /** Stat for branches that get resteered */
+      statistics::Vector resteeredType;
+      statistics::Scalar resteerTypeMissmatch;
+      statistics::Scalar resteerMultiBranchInst;
+
 
       /** Distribution of number of bytes per fetch target. */
       statistics::Distribution ftSizeDist;

@@ -490,6 +490,7 @@ class Fetch
     bool wasICacheMiss;
     int accessDepth;
     bool wasHitOnPf;
+
     const bool mark_one_as_miss;
 
     /** Tracks how many instructions has been fetched this cycle. */
@@ -505,23 +506,26 @@ class Fetch
     /** Tracks which stages are telling fetch to stall. */
     Stalls stalls[MaxThreads];
 
+    /** Enables the decoupled front-end */
+    const bool decoupledFrontEnd;
+
     /** Decode to fetch delay. */
-    Cycles decodeToFetchDelay;
+    const Cycles decodeToFetchDelay;
 
     /** Rename to fetch delay. */
-    Cycles renameToFetchDelay;
+    const Cycles renameToFetchDelay;
 
     /** IEW to fetch delay. */
-    Cycles iewToFetchDelay;
+    const Cycles iewToFetchDelay;
 
     /** Commit to fetch delay. */
-    Cycles commitToFetchDelay;
+    const Cycles commitToFetchDelay;
 
     /** The width of fetch in instructions. */
-    unsigned fetchWidth;
+    const unsigned fetchWidth;
 
     /** The width of decode in instructions. */
-    unsigned decodeWidth;
+    const unsigned decodeWidth;
 
     /** Is the cache blocked?  If so no threads can access it. */
     bool cacheBlocked;
@@ -607,6 +611,8 @@ class Fetch
         statistics::Scalar insts;
         /** Total number of fetched branches. */
         statistics::Scalar branches;
+        /** Total number of fetched branches. */
+        statistics::Scalar branchesNotLastuOp;
         /** Stat for total number of predicted branches. */
         statistics::Scalar predictedBranches;
         /** Stat for total number of misspredicted instructions. */

@@ -113,7 +113,7 @@ CPU::CPU(const BaseO3CPUParams &params)
                   params.backComSize + params.forwardComSize,
                   params.activity),
 
-      globalSeqNum(1),
+      globalSeqNum(1), globalFTSeqNum(1),
       system(params.system),
       lastRunningCycle(curCycle()),
       frontendStall(false), backendStall(false), commitStall(false),

@@ -37,6 +37,7 @@
 #include "arch/generic/pcstate.hh"
 #include "base/statistics.hh"
 #include "base/types.hh"
+#include "cpu/o3/thread_state.hh"
 #include "config/the_isa.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/o3/dyn_inst_ptr.hh"
@@ -57,10 +58,17 @@ class CPU;
 
 struct DerivO3CPUParams;
 
+// Fetch target sequence type. Basically the same as the instruction sequence
+// number but since the fetch target is generated before instructions.
+typedef InstSeqNum FTSeqNum;
+
+
+/** The fetch target class. */
 class FetchTarget
 {
   public:
-    FetchTarget(ThreadID _tid, const PCStateBase &_start_pc, InstSeqNum seqNum);
+    FetchTarget(ThreadState *_ts, const PCStateBase &_start_pc,
+                FTSeqNum _seqNum);
     // ~FetchTarget();
   private:
     /** Start address of the fetch target */
@@ -75,11 +83,11 @@ class FetchTarget
      *  Only valid when the ft ends with branch. */
     Addr _pred_addr;
 
-    /** The thread id. */
-    const ThreadID tid;
+    /** Pointer to the thread state. */
+    ThreadState *thread;
 
     /* Fetch targets sequence number */
-    const InstSeqNum ftSeqNum;
+    const FTSeqNum ftSeqNum;
 
 
   public:
@@ -108,11 +116,13 @@ class FetchTarget
         return addr > endAddress();
     }
 
+    /** Returns the thread context. */
+    gem5::ThreadContext *getTC() const;
 
+    /** Returns the thread ID. */
+    ThreadID getTid();
 
-    ThreadID getTid() { return tid; }
-
-    InstSeqNum ftNum() { return ftSeqNum; }
+    FTSeqNum ftNum() { return ftSeqNum; }
 
 
     /** ancore point to attach a branch predictor history.
@@ -180,7 +190,8 @@ class FTQ
     {
         Invalid,
         Valid,
-        Full
+        Full,
+        Blocked
     };
 
   private:
@@ -270,8 +281,12 @@ class FTQ
     /** Is the head entry ready for the fetch stage. */
     bool isHeadReady(ThreadID tid);
 
-    /** Updates the head fetch target once its fully processed */
-    void updateHead(ThreadID tid);
+    /** Updates the head fetch target once its fully processed
+     * @return Wheather or not the update was successful.
+     *         In case there is still a branch history attached
+     * to the head fetch target the FTQ goes into invalid state.
+    */
+    bool updateHead(ThreadID tid);
 
 
 
@@ -322,6 +337,8 @@ class FTQ
     /** Check if the FTQ is invalid and requires squash. */
     bool isValid(ThreadID tid);
 
+
+
     /** Checks if the FTQ is still in the process of squashing instructions.
      *  @retval Whether or not the FTQ is done squashing.
      */
@@ -332,6 +349,15 @@ class FTQ
      *  any thread.
      */
     bool isDoneSquashing();
+
+    /** This will block the FTQ */
+    void block(ThreadID tid);
+
+    /** This will block the FTQ */
+    void unblock(ThreadID tid);
+
+    /** Check if the FTQ is blocked. */
+    bool isBlocked(ThreadID tid);
 
     /** Reset the FTQ state */
     void resetState();
