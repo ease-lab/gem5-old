@@ -47,7 +47,7 @@ class SimpleBTB : public BranchTargetBuffer
   public:
     SimpleBTB(const SimpleBTBParams &params);
 
-    void reset() override;
+    void memInvalidate() override;
     const PCStateBase *lookup(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
     bool valid(ThreadID tid, Addr instPC,

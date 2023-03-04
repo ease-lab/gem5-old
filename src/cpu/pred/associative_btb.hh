@@ -34,6 +34,7 @@
 #include "config/the_isa.hh"
 #include "cpu/pred/btb.hh"
 #include "mem/cache/prefetch/associative_set.hh"
+#include "mem/stack_dist_calc.hh"
 #include "params/AssociativeBTB.hh"
 
 namespace gem5
@@ -47,8 +48,8 @@ class AssociativeBTB : public BranchTargetBuffer
   public:
     AssociativeBTB(const AssociativeBTBParams &params);
 
-    void reset() override;
-    const PCStateBase *lookup(ThreadID tid, Addr instPC,
+    virtual void memInvalidate() override;
+    virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
     bool valid(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
@@ -57,13 +58,7 @@ class AssociativeBTB : public BranchTargetBuffer
                            StaticInstPtr inst = nullptr) override;
     const StaticInstPtr lookupInst(ThreadID tid, Addr instPC) override;
     void incorrectTarget(Addr inst_pc,
-                          BranchClass type = BranchClass::NoBranch) override
-    {
-      stats.mispredict++;
-      if (type != BranchClass::NoBranch) {
-        stats.mispredictType[type]++;
-      }
-      auto it = seenAddr.find(inst_pc);
+                          BranchClass type = BranchClass::NoBranch) override;
 
   private:
 
@@ -84,6 +79,8 @@ class AssociativeBTB : public BranchTargetBuffer
         unsigned accesses;
 
         StaticInstPtr inst;
+        /** Use for eventual prefetcher */
+        bool prefetched;
     };
 
 
@@ -91,11 +88,20 @@ class AssociativeBTB : public BranchTargetBuffer
      *  @param inst_PC The branch to look up.
      *  @return Returns the index into the BTB.
      */
-    inline uint64_t getIndex(ThreadID tid, Addr instPC);
+    uint64_t getIndex(ThreadID tid, Addr instPC);
+
+    /** Internal update call */
+    void updateEntry(BTBEntry* &entry, ThreadID tid, Addr instPC,
+                    const PCStateBase &target, BranchClass type,
+                    StaticInstPtr inst, unsigned inst_size);
+
+    virtual void hitOnPrefetch(BTBEntry* entry);
+    virtual void unusedPrefetch(BTBEntry* entry);
 
 
     /** The actual BTB. */
-    AssociativeSet<BTBEntry> btb;
+    AssociativeSet<BTBEntry>* btb;
+    AssociativeSet<BTBEntry> entries;
 
     /** The number of entries in the BTB. */
     const unsigned numEntries;
@@ -105,6 +111,13 @@ class AssociativeBTB : public BranchTargetBuffer
 
     /** The number of tag bits per entry. */
     const unsigned tagBits;
+    const bool compressedTags;
+
+    const uint64_t numSets;
+    const uint64_t setShift;
+    const uint64_t setMask;
+    const uint64_t tagShift;
+
 
     /** Number of bits to shift PC when calculating index. */
     uint64_t instShiftAmt;
@@ -112,11 +125,33 @@ class AssociativeBTB : public BranchTargetBuffer
     /** The number of BTB index bits and mask. */
     uint64_t idxBits;
     uint64_t idxMask;
+
+    /** Stack distance of meta data */
+    StackDistCalc sdcalc;
+    /**
+     * Function to calculate the stack distance statistics for the record
+     * accesses.
+     */
+    void calcStackDistance(Addr addr);
+
     struct AssociativeBTBStats : public statistics::Group
     {
-        AssociativeBTBStats(statistics::Group *parent);
+        AssociativeBTBStats(AssociativeBTB *parent);
         // STATS
         statistics::SparseHistogram accesses;
+        // Hit stack distance histograms
+        statistics::Histogram hitSDlinHist;
+        /** Number of times we have a conflict. Tag hit but PC is different */
+        statistics::Scalar conflict;
+
+        /** The number of times a prefetch/predecoded entry is useful. */
+        statistics::Scalar useful;
+        /** The number of times a prefetch/predecoded entry is evicted w/o
+         * reference. */
+        statistics::Scalar unused;
+
+        statistics::Formula accuracy;
+        statistics::Formula coverage;
     } assocStats;
 
 };

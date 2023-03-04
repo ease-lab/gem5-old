@@ -37,7 +37,8 @@
 #include "cpu/static_inst.hh"
 #include "enums/BranchClass.hh"
 #include "params/BranchTargetBuffer.hh"
-#include "sim/sim_object.hh"
+#include "sim/clocked_object.hh"
+
 
 namespace gem5
 {
@@ -45,16 +46,15 @@ namespace gem5
 namespace branch_prediction
 {
 
-class BranchTargetBuffer : public SimObject
+class BranchTargetBuffer : public ClockedObject
 {
-
   public:
     typedef BranchTargetBufferParams Params;
     typedef enums::BranchClass BranchClass;
 
     BranchTargetBuffer(const Params &params);
 
-    virtual void reset() = 0;
+    virtual void memInvalidate() override = 0;
 
     /** Looks up an address in the BTB. Must call valid() first on the address.
      *  @param inst_PC The address of the branch to look up.
@@ -98,6 +98,7 @@ class BranchTargetBuffer : public SimObject
       }
     }
 
+  protected:
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
 

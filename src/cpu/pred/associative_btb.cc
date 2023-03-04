@@ -43,43 +43,48 @@ namespace branch_prediction
 
 AssociativeBTB::AssociativeBTB(const AssociativeBTBParams &p)
     : BranchTargetBuffer(p),
-        btb(p.assoc, p.numEntries, p.indexing_policy,
+        btb(nullptr),
+        entries(p.assoc, p.numEntries, p.indexing_policy,
             p.replacement_policy),
         numEntries(p.numEntries),
         assoc(p.assoc),
-        tagBits(p.tagBits),
+        tagBits(p.tagBits), compressedTags(tagBits < 36),
+        numSets(numEntries/assoc),
+        setShift(0), setMask(numSets-1),
+        tagShift(floorLog2(numSets)),
         instShiftAmt(p.instShiftAmt),
         assocStats(this)
 {
-    if (!isPowerOf2(numEntries)) {
-        fatal("BTB entries is not a power of 2!");
-    }
-    if (!isPowerOf2(assoc)) {
-        fatal("BTB associativity is not a power of 2!");
-    }
+    btb = &entries;
 
     // The number of entries is divided into n ways.
-    uint64_t setBits = floorLog2(numEntries/assoc);
+    const uint64_t numSets = numEntries/assoc;
+    uint64_t setBits = floorLog2(numSets);
+
+    if (!isPowerOf2(numSets)) {
+        fatal("Number of sets is not a power of 2!");
+    }
 
     idxBits = tagBits + setBits;
     idxMask = (idxBits < 64) ? (1ULL << idxBits) - 1 : (uint64_t)(-1);
 
     DPRINTF(BTB, "BTB: Creating BTB object. entries:%i, assoc:%i, "
-                 "tagBits:%i, idx mask:%x\n",
-                 numEntries, assoc, tagBits, idxMask);
+                "tagBits:%i/comp:%i, idx mask:%x, numSets:%i\n",
+                numEntries, assoc, tagBits, compressedTags, idxMask, numSets);
 }
 
+
 void
-AssociativeBTB::reset()
+AssociativeBTB::memInvalidate()
 {
     DPRINTF(BTB, "BTB: Invalidate all entries\n");
 
-    for (auto &entry : btb) {
+    for (auto &entry : *btb) {
         entry.invalidate();
     }
+    seenAddr.clear();
 }
 
-inline
 uint64_t
 AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
 {
@@ -96,18 +101,36 @@ AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
      * The TID will be appended as MSB to the index
      */
     // ((instPC >> instShiftAmt) ^ (uint64_t(tid) << idxBits)) & idxMask;
-    return (instPC >> instShiftAmt) & idxMask;
+
+    uint64_t idx = (instPC >> instShiftAmt);
+
+    if (compressedTags) {
+        /* For compressed tags the lower 8bit of the tag remain the original
+         * the upper bits of the PC are hased together to form the upper
+         * 8 bits of the tag.
+         */
+        uint64_t tag = (idx >> tagShift);
+
+        uint64_t upper = (tag>>16) ^ (tag>>24) ^ (tag>>32)
+                                   ^ (tag>>40) ^ (tag>>48);
+        tag ^= upper << 8;
+        idx = (tag << tagShift) | (idx & setMask);
+    }
+
+    // uint64_t set = (idx >> setShift) & setMask;
+    // uint64_t tag = (idx >> tagShift);
+    return idx & idxMask;
 }
 
 bool
 AssociativeBTB::valid(ThreadID tid, Addr instPC, BranchClass type)
 {
     uint64_t idx = getIndex(tid, instPC);
-    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
+    BTBEntry * entry = btb->findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
-                     __func__, instPC, idx);
+        // DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
+        //              __func__, instPC, idx);
         return true;
     }
 
@@ -127,14 +150,22 @@ AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
 
 
     uint64_t idx = getIndex(tid, instPC);
-    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
+    BTBEntry * entry = btb->findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
-                     __func__, instPC, idx);
+        // DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
+        //              __func__, instPC, idx);
+        if (entry->prefetched) {
+            hitOnPrefetch(entry);
+        }
+
+        // PC is different -> conflict hit.
+        if (entry->pc != instPC) {
+            assocStats.conflict++;
+        }
 
         entry->accesses++;
-        btb.accessEntry(entry);
+        btb->accessEntry(entry);
         return entry->target;
     }
     stats.misses++;
@@ -148,10 +179,10 @@ const StaticInstPtr
 AssociativeBTB::lookupInst(ThreadID tid, Addr instPC)
 {
     uint64_t idx = getIndex(tid, instPC);
-    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
+    BTBEntry * entry = btb->findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
+        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x\n",
                      __func__, instPC, idx);
 
         // The access was done earlier so it should not be necessary right?
@@ -162,9 +193,36 @@ AssociativeBTB::lookupInst(ThreadID tid, Addr instPC)
 }
 
 void
+AssociativeBTB::incorrectTarget(Addr inst_pc, BranchClass type)
+{
+    stats.mispredict++;
+    if (type != BranchClass::NoBranch) {
+    stats.mispredictType[type]++;
+    }
+    auto it = seenAddr.find(inst_pc);
+    if (it == seenAddr.end()) {
+        stats.missesComp++;
+        seenAddr.insert(inst_pc);
+    }
+}
+
+
+void
 AssociativeBTB::update(ThreadID tid, Addr instPC,
                     const PCStateBase &target,
-                    BranchClass type, StaticInstPtr inst)
+                    BranchClass type, StaticInstPtr inst,
+                    unsigned inst_size)
+{
+    uint64_t idx = getIndex(tid, instPC);
+    BTBEntry * entry = btb->findEntry(idx, /* unused */ false);
+
+    updateEntry(entry, tid, instPC, target, type, inst, inst_size);
+}
+
+void
+AssociativeBTB::updateEntry(BTBEntry* &entry, ThreadID tid, Addr instPC,
+                    const PCStateBase &target, BranchClass type,
+                    StaticInstPtr inst, unsigned inst_size)
 {
     stats.updates++;
     if (type != BranchClass::NoBranch) {
@@ -172,42 +230,115 @@ AssociativeBTB::update(ThreadID tid, Addr instPC,
     }
 
     uint64_t idx = getIndex(tid, instPC);
-    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
         DPRINTF(BTB, "BTB::%s: Updated existing entry. PC:%#x, idx:%#x \n",
                      __func__, instPC, idx);
-        btb.accessEntry(entry);
+        btb->accessEntry(entry);
+        entry->accesses++;
+        if (entry->pc != instPC)
+            assocStats.conflict++;
+
     } else {
-        DPRINTF(BTB, "BTB::%s: Replay entry. PC:%#x, idx:%#x \n",
-                     __func__, instPC, idx);
+        uint64_t set = (idx >> setShift) & setMask;
+        DPRINTF(BTB, "BTB::%s: Replace entry. PC:%#x, idx:%#x, set:%i\n",
+                     __func__, instPC, idx, set);
         stats.evictions++;
-        entry = btb.findVictim(idx);
+        entry = btb->findVictim(idx);
         assert(entry != nullptr);
-        btb.insertEntry(idx, false, entry);
+        btb->insertEntry(idx, false, entry);
+        seenAddr.insert(instPC);
+
+        // Measure the number of accesses.
+        assocStats.accesses.sample(entry->accesses == 0 ? 0
+                                : floorLog2(entry->accesses));
+        entry->accesses = 0;
     }
 
-    assocStats.accesses.sample(entry->accesses == 0 ? 1
-                                : floorLog2(entry->accesses));
+    // assert(!entry->prefetched);
+    // Check for prefetches
+    if (entry->prefetched)
+        unusedPrefetch(entry);
+
+
     entry->pc = instPC;
     entry->tid = tid;
     set(entry->target, &target);
     entry->inst = inst;
-    entry->accesses = 0;
+    entry->inst_size = inst_size;
+
+    calcStackDistance(instPC);
     // entry->target = &target;
+}
+
+void
+AssociativeBTB::hitOnPrefetch(BTBEntry* entry)
+{
+    assocStats.useful++;
+    entry->prefetched = false;
+}
+
+void
+AssociativeBTB::unusedPrefetch(BTBEntry* entry)
+{
+    assocStats.unused++;
+    entry->prefetched = false;
+}
+
+
+void
+AssociativeBTB::calcStackDistance(Addr addr)
+{
+  // Align the address to a cache line size
+  // const Addr aligned_addr(roundDown(pkt_info.addr, lineSize));
+//   const Addr aligned_addr(addr);
+
+  // Calculate the stack distance
+  const uint64_t sd(sdcalc.calcStackDistAndUpdate(addr).first);
+  if (sd == StackDistCalc::Infinity) {
+      // stats.infiniteSD++;
+      return;
+  }
+
+//   Sample the stack distance of the address in lin and log bins
+//   assocStats.hitSDlogHist.sample(sd ? floorLog2(sd) : 0);
+  assocStats.hitSDlinHist.sample(sd);
+
+
 }
 
 
 AssociativeBTB::AssociativeBTBStats::AssociativeBTBStats(
-                                                statistics::Group *parent)
+                                                AssociativeBTB *parent)
     : statistics::Group(parent),
     ADD_STAT(accesses, statistics::units::Count::get(),
-             "number of prefetch candidates identified")
+             "number of prefetch candidates identified"),
+    ADD_STAT(hitSDlinHist, statistics::units::Ratio::get(),
+             "Hit stack distance linear distribution"),
+    ADD_STAT(conflict, statistics::units::Ratio::get(),
+             "Number of conflicts. Tag hit but PC different."),
+    ADD_STAT(useful, statistics::units::Ratio::get(),
+             "Useful prefeched / pre-decoded BTB entries"),
+    ADD_STAT(unused, statistics::units::Ratio::get(),
+             "Unused prefetched / pre-decoded BTB entries"),
+    ADD_STAT(accuracy, statistics::units::Count::get(),
+            "accuracy of the BTB prefetcher / pre-decoder"),
+    ADD_STAT(coverage, statistics::units::Count::get(),
+            "coverage brought by the BTB prefetcher / pre-decoder")
 {
     using namespace statistics;
     accesses
         .init(16)
         .flags(pdf);
+    hitSDlinHist
+        .init(16)
+        .flags(pdf);
+
+    accuracy.flags(total);
+    accuracy = useful / (useful+unused);
+
+    coverage.flags(total);
+    coverage = useful / (useful + parent->stats.mispredict);
 }
 
 

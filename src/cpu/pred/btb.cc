@@ -35,7 +35,7 @@ namespace branch_prediction
 {
 
 BranchTargetBuffer::BranchTargetBuffer(const Params &params)
-    : SimObject(params),
+    : ClockedObject(params),
       numThreads(params.numThreads),
       stats(this)
 {

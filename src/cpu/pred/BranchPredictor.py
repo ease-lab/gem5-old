@@ -55,7 +55,7 @@ class ReturnAddrStack(SimObject):
                                     "enabled no entry will returned when "
                                     "the stack was corrupted.")
 
-class BranchTargetBuffer(SimObject):
+class BranchTargetBuffer(ClockedObject):
     type = 'BranchTargetBuffer'
     cxx_class = 'gem5::branch_prediction::BranchTargetBuffer'
     cxx_header = "cpu/pred/btb.hh"
@@ -77,6 +77,9 @@ class AssociativeBTB(BranchTargetBuffer):
     type = 'AssociativeBTB'
     cxx_class = 'gem5::branch_prediction::AssociativeBTB'
     cxx_header = "cpu/pred/associative_btb.hh"
+    cxx_exports = [
+        PyBindMethod("memInvalidate"),
+    ]
 
     numEntries = Param.MemorySize("4096", "Number of entries of BTB entries")
     assoc = Param.Unsigned(8, "Associativity of the BTB")
@@ -90,6 +93,105 @@ class AssociativeBTB(BranchTargetBuffer):
     tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
     instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
                         "Number of bits to shift instructions by")
+
+
+
+class PredecoderBTB(AssociativeBTB):
+    type = 'PredecoderBTB'
+    cxx_class = 'gem5::branch_prediction::PredecoderBTB'
+    cxx_header = "cpu/pred/predecoder_btb.hh"
+    cxx_exports = [
+        PyBindMethod("regProbeListeners"),
+        PyBindMethod("addListeners"),
+    ]
+
+    block_size = Param.Int(64, "Block size in bytes")
+
+    cache = Param.BaseCache(NULL,"Cache to predecode from.")
+    cpu = Param.BaseCPU(NULL,"CPU to listen from.")
+
+    only_prefetch_fill = Param.Bool(True,
+        "Fill btb only on caches line brought in by a prefetch")
+
+    decode_queue_enable = Param.Bool(True, "Enable the decode queue")
+    decode_queue_size = Param.Unsigned(15,
+                "Number of entries in the decode queue")
+    decode_queue_cycles = Param.Cycles(4,
+                "Cycles that it takes to decode a cache line.")
+
+    install_conditional = Param.Bool(False,
+            "Fill the BTB with conditional branches")
+    taken_pred_size = Param.Unsigned(0, "Number of 'taken' predictor entries. "
+                "0 disables a predictor for insertion.")
+
+    disable_predecode  = Param.Bool(False, "Disable the predecoder. ")
+
+    def __init__(self, **kwargs):
+        super(PredecoderBTB, self).__init__(**kwargs)
+        self._cache = None
+        self._cpu = None
+
+    def addListeners(self, cache, cpu):
+        self._cache = cache
+        self._cpu = cpu
+
+    # Override the normal SimObject::regProbeListeners method and
+    # register deferred event handlers.
+    def regProbeListeners(self):
+        self.getCCObject().addListeners(
+                self._cache.getCCObject(),
+                self._cpu.getCCObject())
+        self.getCCObject().regProbeListeners()
+
+
+
+class PrefetchBTB(AssociativeBTB):
+    type = 'PrefetchBTB'
+    cxx_class = 'gem5::branch_prediction::PrefetchBTB'
+    cxx_header = "cpu/pred/prefetch_btb.hh"
+    cxx_exports = [
+        PyBindMethod("regProbeListeners"),
+        PyBindMethod("addListeners"),
+        PyBindMethod("startRecord"),
+        PyBindMethod("stopRecord"),
+        PyBindMethod("startReplay"),
+        PyBindMethod("stopReplay"),
+    ]
+
+    block_size = Param.Int(64, "Block size in bytes")
+
+    only_prefetch_fill = Param.Bool(True,
+        "Fill btb only on caches line brought in by a prefetch")
+
+    queue_enable = Param.Bool(True, "Enable the decode queue")
+    queue_size = Param.Unsigned(15,
+                "Number of entries in the decode queue")
+    delay = Param.Cycles(4,
+                "Cycles that it takes to decode a cache line.")
+
+    install_conditional = Param.Bool(False,
+            "Fill the BTB with conditional branches")
+
+    size_long_tgt = Param.Unsigned(15,"Bit size for long targets (incl. sign)")
+    size_short_tgt = Param.Unsigned(15, "Bit size for short targets")
+    size_full_pc = Param.Unsigned(15, "Bit size for the full PC")
+    size_delta_pc = Param.Unsigned(15, "Bit size for the delta PC")
+
+    delta_pctgt_threshold = Param.Unsigned(15,
+                "Entries can be written compressed to memory if the target "
+                "is close. Specify the threshold in bits")
+    delta_tgtpc_threshold = Param.Unsigned(15,
+                "Entries can be written compressed to memory if the target "
+                "is close. Specify the threshold in bits")
+
+    throttle_factor = Param.Percent(20, "Precent of BTB entries that are "
+                        "filled by not yet used prefetches. Once this "
+                        "fraction is reached the prefetcher is paused until "
+                        "prefetches are referenced or evicted.")
+
+    mem_if = Param.RecReplyMemInterface(NULL, "Memory interface to "
+                        "read and write records")
+
 
 class IndirectPredictor(SimObject):
     type = 'IndirectPredictor'
