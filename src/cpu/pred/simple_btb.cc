@@ -66,7 +66,7 @@ SimpleBTB::SimpleBTB(const SimpleBTBParams &p)
 }
 
 void
-SimpleBTB::reset()
+SimpleBTB::memInvalidate()
 {
     for (unsigned i = 0; i < numEntries; ++i) {
         btb[i].valid = false;
@@ -146,9 +146,8 @@ SimpleBTB::update(ThreadID tid, Addr instPC,
 
     assert(btb_idx < numEntries);
 
-    stats.updates++;
     if (type != BranchClass::NoBranch) {
-        stats.updateType[type]++;
+        stats.updates[type]++;
     }
 
     btb[btb_idx].tid = tid;

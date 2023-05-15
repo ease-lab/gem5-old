@@ -35,10 +35,17 @@ namespace branch_prediction
 {
 
 BranchTargetBuffer::BranchTargetBuffer(const Params &params)
-    : SimObject(params),
+    : ClockedObject(params),
       numThreads(params.numThreads),
       stats(this)
 {
+}
+
+const StaticInstPtr
+BranchTargetBuffer::lookupInst(ThreadID tid, Addr instPC)
+{
+    panic("Not implemented for this BTB");
+    return nullptr;
 }
 
 BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
@@ -56,16 +63,10 @@ BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
                misses / lookups),
       ADD_STAT(updates, statistics::units::Count::get(),
                "Number of BTB updates"),
-      ADD_STAT(updateType, statistics::units::Count::get(),
-               "Number of BTB updates per branch type"),
-      ADD_STAT(evictions, statistics::units::Count::get(),
-               "Number of BTB evictions"),
-      ADD_STAT(evictionType, statistics::units::Count::get(),
-               "Number of BTB evictions per branch type"),
       ADD_STAT(mispredict, statistics::units::Count::get(),
                "Number of BTB mispredicts"),
-      ADD_STAT(mispredictType, statistics::units::Count::get(),
-               "Number of BTB mispredicts per branch type")
+      ADD_STAT(evictions, statistics::units::Count::get(),
+               "Number of BTB evictions")
 {
     using namespace statistics;
     missRatio.precision(6);
@@ -77,24 +78,19 @@ BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
         .init(enums::Num_BranchClass)
         .flags(total | pdf);
 
-    updateType
+    updates
         .init(enums::Num_BranchClass)
         .flags(total | pdf);
 
-    evictionType
-        .init(enums::Num_BranchClass)
-        .flags(total | pdf);
-
-    mispredictType
+    mispredict
         .init(enums::Num_BranchClass)
         .flags(total | pdf);
 
     for (int i = 0; i < enums::Num_BranchClass; i++) {
         lookupType.subname(i, enums::BranchClassStrings[i]);
         missType.subname(i, enums::BranchClassStrings[i]);
-        updateType.subname(i, enums::BranchClassStrings[i]);
-        evictionType.subname(i, enums::BranchClassStrings[i]);
-        mispredictType.subname(i, enums::BranchClassStrings[i]);
+        updates.subname(i, enums::BranchClassStrings[i]);
+        mispredict.subname(i, enums::BranchClassStrings[i]);
     }
 }
 

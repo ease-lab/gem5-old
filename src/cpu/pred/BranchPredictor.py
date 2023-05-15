@@ -25,10 +25,11 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-from m5.SimObject import SimObject
+from m5.SimObject import *
 from m5.params import *
 from m5.proxy import *
 
+from m5.objects.ClockedObject import ClockedObject
 from m5.objects.IndexingPolicies import *
 from m5.objects.ReplacementPolicies import *
 
@@ -53,7 +54,7 @@ class ReturnAddrStack(SimObject):
                                     "enabled no entry will returned when "
                                     "the stack was corrupted.")
 
-class BranchTargetBuffer(SimObject):
+class BranchTargetBuffer(ClockedObject):
     type = 'BranchTargetBuffer'
     cxx_class = 'gem5::branch_prediction::BranchTargetBuffer'
     cxx_header = "cpu/pred/btb.hh"
@@ -86,6 +87,8 @@ class AssociativeBTB(BranchTargetBuffer):
         "Replacement policy of the table")
 
     tagBits = Param.Unsigned(16, "Size of the BTB tags, in bits")
+    useTagCompression = Param.Bool(False, "Use a tag compression function as"
+                "described in https://ieeexplore.ieee.org/document/9528930")
     instShiftAmt = Param.Unsigned(Parent.instShiftAmt,
                         "Number of bits to shift instructions by")
 

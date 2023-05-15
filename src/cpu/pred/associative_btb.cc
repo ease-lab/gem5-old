@@ -33,8 +33,6 @@
 #include "debug/BTB.hh"
 #include "mem/cache/prefetch/associative_set_impl.hh"
 
-// #include "mem/cache/replacement_policies/base.hh"
-
 namespace gem5
 {
 
@@ -44,41 +42,42 @@ namespace branch_prediction
 AssociativeBTB::AssociativeBTB(const AssociativeBTBParams &p)
     : BranchTargetBuffer(p),
         btb(p.assoc, p.numEntries, p.indexing_policy,
-            p.replacement_policy),
+                p.replacement_policy),
         numEntries(p.numEntries),
         assoc(p.assoc),
-        tagBits(p.tagBits),
-        instShiftAmt(p.instShiftAmt)
+        tagBits(p.tagBits), compressedTags(p.useTagCompression),
+        numSets(numEntries/assoc),
+        setShift(0), setMask(numSets-1),
+        tagShift(floorLog2(numSets)),
+        instShiftAmt(p.instShiftAmt),
+        assocStats(this)
 {
-    if (!isPowerOf2(numEntries)) {
-        fatal("BTB entries is not a power of 2!");
-    }
-    if (!isPowerOf2(assoc)) {
-        fatal("BTB associativity is not a power of 2!");
-    }
-
     // The number of entries is divided into n ways.
-    uint64_t setBits = floorLog2(numEntries/assoc);
+    const uint64_t numSets = numEntries/assoc;
+    uint64_t setBits = floorLog2(numSets);
+
+    if (!isPowerOf2(numSets)) {
+        fatal("Number of sets is not a power of 2!");
+    }
 
     idxBits = tagBits + setBits;
     idxMask = (idxBits < 64) ? (1ULL << idxBits) - 1 : (uint64_t)(-1);
 
     DPRINTF(BTB, "BTB: Creating BTB object. entries:%i, assoc:%i, "
-                 "tagBits:%i, idx mask:%x\n",
-                 numEntries, assoc, tagBits, idxMask);
+                "tagBits:%i/comp:%i, idx mask:%x, numSets:%i\n",
+                numEntries, assoc, tagBits, compressedTags, idxMask, numSets);
 }
 
 void
-AssociativeBTB::reset()
+AssociativeBTB::memInvalidate()
 {
     DPRINTF(BTB, "BTB: Invalidate all entries\n");
 
-    for (auto entry : btb) {
+    for (auto &entry : btb) {
         entry.invalidate();
     }
 }
 
-inline
 uint64_t
 AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
 {
@@ -94,8 +93,22 @@ AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
      *
      * The TID will be appended as MSB to the index
      */
-    // ((instPC >> instShiftAmt) ^ (uint64_t(tid) << idxBits)) & idxMask;
-    return (instPC >> instShiftAmt) & idxMask;
+    uint64_t idx = (instPC >> instShiftAmt);
+
+    if (compressedTags) {
+        /* For compressed tags the lower 8bit of the tag remain the original
+         * the upper bits of the PC are hased together to form the upper
+         * 8 bits of the tag.
+         * Details https://ieeexplore.ieee.org/document/9528930
+         */
+        uint64_t tag = (idx >> tagShift);
+
+        uint64_t upper = (tag>>16) ^ (tag>>24) ^ (tag>>32)
+                                   ^ (tag>>40) ^ (tag>>48);
+        tag ^= upper << 8;
+        idx = (tag << tagShift) | (idx & setMask);
+    }
+    return idx & idxMask;
 }
 
 bool
@@ -105,11 +118,8 @@ AssociativeBTB::valid(ThreadID tid, Addr instPC, BranchClass type)
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
-                     __func__, instPC, idx);
         return true;
     }
-
     return false;
 }
 
@@ -129,9 +139,12 @@ AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
-                     __func__, instPC, idx);
+        // PC is different -> conflict hit.
+        if (entry->pc != instPC) {
+            assocStats.conflict++;
+        }
 
+        entry->accesses++;
         btb.accessEntry(entry);
         return entry->target;
     }
@@ -149,11 +162,6 @@ AssociativeBTB::lookupInst(ThreadID tid, Addr instPC)
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
-        DPRINTF(BTB, "BTB::%s: hit PC: %#x, idx:%#x \n",
-                     __func__, instPC, idx);
-
-        // The access was done earlier so it should not be necessary right?
-        // btb.accessEntry(entry);
         return entry->inst;
     }
     return nullptr;
@@ -164,32 +172,67 @@ AssociativeBTB::update(ThreadID tid, Addr instPC,
                     const PCStateBase &target,
                     BranchClass type, StaticInstPtr inst)
 {
-    stats.updates++;
+    uint64_t idx = getIndex(tid, instPC);
+    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
+
+    updateEntry(entry, tid, instPC, target, type, inst);
+}
+
+void
+AssociativeBTB::updateEntry(BTBEntry* &entry, ThreadID tid, Addr instPC,
+                    const PCStateBase &target, BranchClass type,
+                    StaticInstPtr inst)
+{
     if (type != BranchClass::NoBranch) {
-        stats.updateType[type]++;
+        stats.updates[type]++;
     }
 
     uint64_t idx = getIndex(tid, instPC);
-    BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
 
     if (entry != nullptr && entry->tid == tid) {
         DPRINTF(BTB, "BTB::%s: Updated existing entry. PC:%#x, idx:%#x \n",
                      __func__, instPC, idx);
         btb.accessEntry(entry);
+        entry->accesses++;
+        if (entry->pc != instPC)
+            assocStats.conflict++;
+
     } else {
-        DPRINTF(BTB, "BTB::%s: Replay entry. PC:%#x, idx:%#x \n",
-                     __func__, instPC, idx);
+        uint64_t set = (idx >> setShift) & setMask;
+        DPRINTF(BTB, "BTB::%s: Replace entry. PC:%#x, idx:%#x, set:%i\n",
+                     __func__, instPC, idx, set);
         stats.evictions++;
         entry = btb.findVictim(idx);
         assert(entry != nullptr);
         btb.insertEntry(idx, false, entry);
+
+        // Measure the number of accesses.
+        assocStats.accesses.sample(entry->accesses == 0 ? 0
+                                : floorLog2(entry->accesses));
+        entry->accesses = 0;
     }
 
+    entry->pc = instPC;
     entry->tid = tid;
     set(entry->target, &target);
     entry->inst = inst;
-    // entry->target = &target;
 }
+
+
+AssociativeBTB::AssociativeBTBStats::AssociativeBTBStats(
+                                                AssociativeBTB *parent)
+    : statistics::Group(parent),
+    ADD_STAT(accesses, statistics::units::Count::get(),
+             "number of prefetch candidates identified"),
+    ADD_STAT(conflict, statistics::units::Ratio::get(),
+             "Number of conflicts. Tag hit but PC different.")
+{
+    using namespace statistics;
+    accesses
+        .init(8)
+        .flags(pdf);
+}
+
 
 } // namespace branch_prediction
 } // namespace gem5

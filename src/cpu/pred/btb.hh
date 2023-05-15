@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2004-2005 The Regents of The University of Michigan
- * All rights reserved.
+ * Copyright (c) 2022-2023 The University of Edinburgh
+ * All rights reserved
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,11 +32,10 @@
 
 #include "arch/generic/pcstate.hh"
 #include "base/statistics.hh"
-#include "config/the_isa.hh"
+#include "cpu/pred/branch_type.hh"
 #include "cpu/static_inst.hh"
-#include "enums/BranchClass.hh"
 #include "params/BranchTargetBuffer.hh"
-#include "sim/sim_object.hh"
+#include "sim/clocked_object.hh"
 
 namespace gem5
 {
@@ -44,31 +43,15 @@ namespace gem5
 namespace branch_prediction
 {
 
-class BranchTargetBuffer : public SimObject
+class BranchTargetBuffer : public ClockedObject
 {
-  private:
-    struct BTBEntry
-    {
-        /** The entry's tag. */
-        Addr tag = 0;
-
-        /** The entry's target. */
-        std::unique_ptr<PCStateBase> target;
-
-        /** The entry's thread id. */
-        ThreadID tid;
-
-        /** Whether or not the entry is valid. */
-        bool valid = false;
-    };
-
   public:
     typedef BranchTargetBufferParams Params;
     typedef enums::BranchClass BranchClass;
 
     BranchTargetBuffer(const Params &params);
 
-    virtual void reset() = 0;
+    virtual void memInvalidate() override = 0;
 
     /** Looks up an address in the BTB. Must call valid() first on the address.
      *  @param inst_PC The address of the branch to look up.
@@ -76,6 +59,13 @@ class BranchTargetBuffer : public SimObject
      */
     virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
                             BranchClass type = BranchClass::NoBranch) = 0;
+
+    /** Looks up an address in the BTB and return the instruction
+     * information if existant. May not be supported in all BTBs.
+     *  @param inst_PC The address of the branch to look up.
+     *  @return Returns the target of the branch.
+     */
+    virtual const StaticInstPtr lookupInst(ThreadID tid, Addr instPC);
 
     /** Checks if a branch is in the BTB.
      *  @param inst_PC The address of the branch to look up.
@@ -96,14 +86,15 @@ class BranchTargetBuffer : public SimObject
 
     /** Update BTB statistics
      */
-    virtual void incorrectTarget(BranchClass type = BranchClass::NoBranch)
+    virtual void incorrectTarget(Addr inst_pc,
+                                  BranchClass type = BranchClass::NoBranch)
     {
-      stats.mispredict++;
       if (type != BranchClass::NoBranch) {
-        stats.mispredictType[type]++;
+        stats.mispredict[type]++;
       }
     }
 
+  protected:
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
 
@@ -120,54 +111,15 @@ class BranchTargetBuffer : public SimObject
         /** Stat for number for the ratio between BTB misses and lookups. */
         statistics::Formula missRatio;
         /** Stat for number of BTB updates. */
-        statistics::Scalar updates;
-        statistics::Vector updateType;
-        /** Stat for number of BTB updates. */
-        statistics::Scalar evictions;
-        statistics::Vector evictionType;
+        statistics::Vector updates;
         /** Stat for number BTB mispredictions.
          * No target found or target wrong */
-        statistics::Scalar mispredict;
-        statistics::Vector mispredictType;
+        statistics::Vector mispredict;
+        /** Stat for number of BTB updates. */
+        statistics::Scalar evictions;
 
     } stats;
 
-  private:
-    /** Returns the index into the BTB, based on the branch's PC.
-     *  @param inst_PC The branch to look up.
-     *  @return Returns the index into the BTB.
-     */
-    inline unsigned getIndex(Addr instPC, ThreadID tid);
-
-    /** Returns the tag bits of a given address.
-     *  @param inst_PC The branch's address.
-     *  @return Returns the tag bits.
-     */
-    inline Addr getTag(Addr instPC);
-
-    /** The actual BTB. */
-    std::vector<BTBEntry> btb;
-
-    /** The number of entries in the BTB. */
-    unsigned numEntries;
-
-    /** The index mask. */
-    unsigned idxMask;
-
-    /** The number of tag bits per entry. */
-    unsigned tagBits;
-
-    /** The tag mask. */
-    unsigned tagMask;
-
-    /** Number of bits to shift PC when calculating index. */
-    unsigned instShiftAmt;
-
-    /** Number of bits to shift PC when calculating tag. */
-    unsigned tagShiftAmt;
-
-    /** Log2 NumThreads used for hashing threadid */
-    unsigned log2NumThreads;
 };
 
 } // namespace branch_prediction

@@ -31,7 +31,6 @@
 
 #include "base/logging.hh"
 #include "base/types.hh"
-#include "config/the_isa.hh"
 #include "cpu/pred/btb.hh"
 #include "mem/cache/prefetch/associative_set.hh"
 #include "params/AssociativeBTB.hh"
@@ -47,22 +46,26 @@ class AssociativeBTB : public BranchTargetBuffer
   public:
     AssociativeBTB(const AssociativeBTBParams &params);
 
-    void reset() override;
-    const PCStateBase *lookup(ThreadID tid, Addr instPC,
+    virtual void memInvalidate() override;
+    virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
-    bool valid(ThreadID tid, Addr instPC,
+    virtual bool valid(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
-    void update(ThreadID tid, Addr instPC, const PCStateBase &target_pc,
-                           BranchClass type = BranchClass::NoBranch,
-                           StaticInstPtr inst = nullptr) override;
+    virtual void update(ThreadID tid, Addr instPC,
+                        const PCStateBase &target_pc,
+                        BranchClass type = BranchClass::NoBranch,
+                        StaticInstPtr inst = nullptr) override;
     const StaticInstPtr lookupInst(ThreadID tid, Addr instPC) override;
 
-  private:
+  protected:
 
     struct BTBEntry : public TaggedEntry
     {
+        BTBEntry()
+            : pc(MaxAddr), target(nullptr), tid(0), valid(false),
+              accesses(0), inst(nullptr) {}
         /** The entry's tag. */
-        Addr tag = 0;
+        Addr pc = 0;
 
         /** The entry's target. */
         PCStateBase * target;
@@ -71,7 +74,9 @@ class AssociativeBTB : public BranchTargetBuffer
         ThreadID tid;
 
         /** Whether or not the entry is valid. */
-        bool valid = false;
+        bool valid;
+
+        unsigned accesses;
 
         StaticInstPtr inst;
     };
@@ -81,8 +86,12 @@ class AssociativeBTB : public BranchTargetBuffer
      *  @param inst_PC The branch to look up.
      *  @return Returns the index into the BTB.
      */
-    inline uint64_t getIndex(ThreadID tid, Addr instPC);
+    uint64_t getIndex(ThreadID tid, Addr instPC);
 
+    /** Internal update call */
+    void updateEntry(BTBEntry* &entry, ThreadID tid, Addr instPC,
+                    const PCStateBase &target, BranchClass type,
+                    StaticInstPtr inst);
 
     /** The actual BTB. */
     AssociativeSet<BTBEntry> btb;
@@ -95,6 +104,14 @@ class AssociativeBTB : public BranchTargetBuffer
 
     /** The number of tag bits per entry. */
     const unsigned tagBits;
+    /** Use a tag compression function. */
+    const bool compressedTags;
+
+    const uint64_t numSets;
+    const uint64_t setShift;
+    const uint64_t setMask;
+    const uint64_t tagShift;
+
 
     /** Number of bits to shift PC when calculating index. */
     uint64_t instShiftAmt;
@@ -102,6 +119,17 @@ class AssociativeBTB : public BranchTargetBuffer
     /** The number of BTB index bits and mask. */
     uint64_t idxBits;
     uint64_t idxMask;
+
+
+    struct AssociativeBTBStats : public statistics::Group
+    {
+        AssociativeBTBStats(AssociativeBTB *parent);
+        // STATS
+        statistics::SparseHistogram accesses;
+        /** Number of times we have a conflict. Tag hit but PC is different */
+        statistics::Scalar conflict;
+    } assocStats;
+
 };
 
 } // namespace branch_prediction

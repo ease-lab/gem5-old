@@ -663,10 +663,9 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                         corr_target, tid);
                 }
             } else {
-                btb->incorrectTarget(hist_it->type);
+                btb->incorrectTarget(hist_it->pc, hist_it->type);
                 ++stats.BTBMispredicted;
             }
-
 
 
 

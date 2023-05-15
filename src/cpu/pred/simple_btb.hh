@@ -32,7 +32,6 @@
 
 #include "base/logging.hh"
 #include "base/types.hh"
-#include "config/the_isa.hh"
 #include "cpu/pred/btb.hh"
 #include "params/SimpleBTB.hh"
 
@@ -47,7 +46,7 @@ class SimpleBTB : public BranchTargetBuffer
   public:
     SimpleBTB(const SimpleBTBParams &params);
 
-    void reset() override;
+    void memInvalidate() override;
     const PCStateBase *lookup(ThreadID tid, Addr instPC,
                            BranchClass type = BranchClass::NoBranch) override;
     bool valid(ThreadID tid, Addr instPC,
