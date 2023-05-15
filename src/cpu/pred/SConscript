@@ -28,8 +28,6 @@
 
 Import('*')
 
-if env['CONF']['TARGET_ISA'] == 'null':
-    Return()
 
 SimObject('BranchPredictor.py',
     sim_objects=[
@@ -55,7 +53,7 @@ Source('simple_indirect.cc')
 Source('indirect.cc')
 Source('ras.cc')
 Source('tournament.cc')
-Source ('bi_mode.cc')
+Source('bi_mode.cc')
 Source('tage_base.cc')
 Source('tage.cc')
 Source('loop_predictor.cc')

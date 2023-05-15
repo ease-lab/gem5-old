@@ -149,10 +149,6 @@ class BPredUnit : public SimObject
                 StaticInstPtr inst, const PCStateBase &pc);
 
   protected:
-    void regProbePoints() override;
-
-    // @todo: Rename this function.
-    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
     /**
      * @param bp_history Pointer to the history object.  The predictor
@@ -184,7 +180,7 @@ class BPredUnit : public SimObject
      * @param inst_PC The PC to look up.
      * @return Whether the BTB contains the given PC.
      */
-    bool BTBValid(Addr instPC) { return BTB.valid(instPC, 0); }
+    bool BTBValid(Addr instPC) { return btb->valid(instPC, 0); }
 
     /**
      * Looks up a given PC in the BTB to get the predicted target. The PC may
@@ -196,7 +192,7 @@ class BPredUnit : public SimObject
     const PCStateBase *
     BTBLookup(Addr inst_pc)
     {
-        return BTB.lookup(inst_pc, 0);
+        return btb->lookup(inst_pc, 0);
     }
 
     /**

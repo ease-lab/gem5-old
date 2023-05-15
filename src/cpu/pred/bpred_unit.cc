@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2012, 2014 ARM Limited
- * Copyright (c) 2010 The University of Edinburgh
+ * Copyright (c) 2010,2022-2023 The University of Edinburgh
  * Copyright (c) 2012 Mark D. Hill and David A. Wood
  * All rights reserved
  *
@@ -58,15 +58,13 @@ namespace branch_prediction
 BPredUnit::BPredUnit(const Params &params)
     : SimObject(params),
       numThreads(params.numThreads),
+      fallbackBTB(params.fallbackBTB),
       predHist(numThreads),
       btb(params.BTB),
       ras(params.RAS),
       iPred(params.indirectBranchPred),
       stats(this,this),
-      instShiftAmt(params.instShiftAmt),
-      resetBTB(params.resetBTB),
-      resetStart(params.resetStart),
-      resetEnd(params.resetEnd)
+      instShiftAmt(params.instShiftAmt)
 {
 }
 
@@ -175,9 +173,9 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     }
 
     const bool orig_pred_taken = pred_taken;
-    if (iPred) {
-        iPred->genIndirectInfo(tid, indirect_history);
-    }
+    // if (iPred) {
+    //     iPred->genIndirectInfo(tid, indirect_history);
+    // }
 
     DPRINTF(Branch,
             "[tid:%i] [sn:%llu] Creating prediction history for PC %s\n",
@@ -248,9 +246,14 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                 predict_record.wasIndirect = true;
                 ++stats.indirectLookups;
                 //Consult indirect predictor on indirect control
-                if (iPred->lookup(pc.instAddr(), *target, tid)) {
+                const PCStateBase *itarget = iPred->lookup(tid, seqNum,
+                                                pc.instAddr(),
+                                        predict_record.indirectHistory);
+
+                if (itarget) {
                     // Indirect predictor hit
                     ++stats.indirectHits;
+                    set(target, *itarget);
                     DPRINTF(Branch,
                             "[tid:%i] [sn:%llu] Instruction %s predicted "
                             "indirect target is %s\n",
@@ -273,8 +276,6 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                     // }
                     inst->advancePC(*target);
                 }
-                iPred->recordIndirect(pc.instAddr(), target->instAddr(),
-                        seqNum, tid);
             } else {
 
                 // ++stats.BTBLookups;
@@ -329,7 +330,9 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
         // the new information
         // Note also that we use orig_pred_taken instead of pred_taken in
         // as this is the actual outcome of the direction prediction
-        iPred->updateDirectionInfo(tid, orig_pred_taken);
+        iPred->update(tid, seqNum, predict_record.pc, false, pred_taken,
+                      *target, brType, predict_record.indirectHistory);
+
     }
 
     predHist[tid].push_front(predict_record);
@@ -388,7 +391,7 @@ BPredUnit::update(const InstSeqNum &done_sn, ThreadID tid)
                     hist_it->target);
 
         if (iPred) {
-            iPred->commit(done_sn, tid, hist_it->indirectHistory);
+            iPred->commit(tid, done_sn, hist_it->indirectHistory);
         }
 
         if (ras) {
@@ -410,9 +413,9 @@ BPredUnit::squash(const InstSeqNum &squashed_sn, ThreadID tid)
 {
     History &pred_hist = predHist[tid];
 
-    if (iPred) {
-        iPred->squash(squashed_sn, tid);
-    }
+    // if (iPred) {
+    //     iPred->squash(squashed_sn, tid);
+    // }
 
     while (!pred_hist.empty() &&
            pred_hist.front().seqNum > squashed_sn) {
@@ -436,7 +439,8 @@ BPredUnit::squash(const InstSeqNum &squashed_sn, ThreadID tid)
         // This call should delete the bpHistory.
         squash(tid, pred_hist.front().bpHistory);
         if (iPred) {
-            iPred->deleteIndirectInfo(tid, pred_hist.front().indirectHistory);
+            iPred->squash(tid, pred_hist.front().seqNum,
+                          pred_hist.front().indirectHistory);
         }
 
         DPRINTF(Branch, "[tid:%i] [squash sn:%llu] "
@@ -611,8 +615,9 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
                corr_target.instAddr());
 
         if (iPred) {
-            iPred->changeDirectionPrediction(tid,
-                pred_hist.front().indirectHistory, actually_taken);
+            iPred->update(tid, squashed_sn, (*hist_it).pc,
+                            true, actually_taken, corr_target,
+                            (*hist_it).type, (*hist_it).indirectHistory);
         }
 
 
@@ -657,11 +662,11 @@ BPredUnit::squash(const InstSeqNum &squashed_sn,
 
             if (hist_it->wasIndirect) {
                 ++stats.indirectMispredicted;
-                if (iPred) {
-                    iPred->recordTarget(
-                        hist_it->seqNum, pred_hist.front().indirectHistory,
-                        corr_target, tid);
-                }
+                // if (iPred) {
+                //     iPred->recordTarget(
+                //         hist_it->seqNum, pred_hist.front().indirectHistory,
+                //         corr_target, tid);
+                // }
             } else {
                 btb->incorrectTarget(hist_it->pc, hist_it->type);
                 ++stats.BTBMispredicted;
