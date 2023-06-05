@@ -48,11 +48,11 @@ class SimpleBTB : public BranchTargetBuffer
 
     void memInvalidate() override;
     const PCStateBase *lookup(ThreadID tid, Addr instPC,
-                           BranchClass type = BranchClass::NoBranch) override;
+                           BranchType type = BranchType::NoBranch) override;
     bool valid(ThreadID tid, Addr instPC,
-                           BranchClass type = BranchClass::NoBranch) override;
+                           BranchType type = BranchType::NoBranch) override;
     void update(ThreadID tid, Addr instPC, const PCStateBase &target_pc,
-                           BranchClass type = BranchClass::NoBranch,
+                           BranchType type = BranchType::NoBranch,
                            StaticInstPtr inst = nullptr) override;
 
 

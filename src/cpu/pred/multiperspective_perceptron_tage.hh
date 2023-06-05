@@ -234,14 +234,15 @@ class MultiperspectivePerceptronTAGE : public MultiperspectivePerceptron
 
     void init() override;
 
-    bool lookup(ThreadID tid, Addr instPC, void * &bp_history) override;
+    bool lookup(ThreadID tid, Addr instPC, void * &bpHistory) override;
 
     void update(ThreadID tid, Addr instPC, bool taken,
-            void *bp_history, bool squashed,
+            void * &bpHistory, bool squashed,
             const StaticInstPtr & inst,
             Addr corrTarget) override;
-    void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) override;
-    void squash(ThreadID tid, void *bp_history) override;
+    void updateHistories(ThreadID tid, Addr pc, bool uncond, bool taken,
+                         Addr target,  void * &bpHistory) override;
+    void squash(ThreadID tid, void * &bpHistory) override;
 
 };
 

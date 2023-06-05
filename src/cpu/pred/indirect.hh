@@ -87,7 +87,7 @@ class IndirectPredictor : public SimObject
      */
     virtual void update(ThreadID tid, InstSeqNum sn, Addr pc, bool squash,
                         bool taken, const PCStateBase& target,
-                        BranchClass brType, void * &iHistory) = 0;
+                        BranchType brType, void * &iHistory) = 0;
 
     /**
      * Squashes a branch. If the branch modified the history

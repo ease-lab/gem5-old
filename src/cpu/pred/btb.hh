@@ -47,7 +47,7 @@ class BranchTargetBuffer : public ClockedObject
 {
   public:
     typedef BranchTargetBufferParams Params;
-    typedef enums::BranchClass BranchClass;
+    typedef enums::BranchType BranchType;
 
     BranchTargetBuffer(const Params &params);
 
@@ -58,7 +58,7 @@ class BranchTargetBuffer : public ClockedObject
      *  @return Returns the target of the branch.
      */
     virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
-                            BranchClass type = BranchClass::NoBranch) = 0;
+                            BranchType type = BranchType::NoBranch) = 0;
 
     /** Looks up an address in the BTB and return the instruction
      * information if existant. May not be supported in all BTBs.
@@ -73,7 +73,7 @@ class BranchTargetBuffer : public ClockedObject
      *  @return Whether or not the branch exists in the BTB.
      */
     virtual bool valid(ThreadID tid, Addr instPC,
-                            BranchClass type = BranchClass::NoBranch) = 0;
+                            BranchType type = BranchType::NoBranch) = 0;
 
     /** Updates the BTB with the target of a branch.
      *  @param inst_pc The address of the branch being updated.
@@ -81,15 +81,15 @@ class BranchTargetBuffer : public ClockedObject
      */
     virtual void update(ThreadID tid, Addr inst_pc,
                           const PCStateBase &target_pc,
-                          BranchClass type = BranchClass::NoBranch,
+                          BranchType type = BranchType::NoBranch,
                           StaticInstPtr inst = nullptr) = 0;
 
     /** Update BTB statistics
      */
     virtual void incorrectTarget(Addr inst_pc,
-                                  BranchClass type = BranchClass::NoBranch)
+                                  BranchType type = BranchType::NoBranch)
     {
-      if (type != BranchClass::NoBranch) {
+      if (type != BranchType::NoBranch) {
         stats.mispredict[type]++;
       }
     }

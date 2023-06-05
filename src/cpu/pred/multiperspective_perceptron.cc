@@ -547,14 +547,23 @@ MultiperspectivePerceptron::train(ThreadID tid, MPPBranchInfo &bi, bool taken)
     }
 }
 
+
 void
-MultiperspectivePerceptron::uncondBranch(ThreadID tid, Addr pc,
-                                         void * &bp_history)
+MultiperspectivePerceptron::updateHistories(ThreadID tid, Addr pc,
+                    bool uncond, bool taken, Addr target, void * &bpHistory)
 {
+    assert(uncond || bpHistory);
+
+    // For perceptron there is no speculative history correction.
+    // Conditional branches are done.
+    if (!uncond)
+        return;
+
+    // For uncondition branches create branch info.
     MPPBranchInfo *bi = new MPPBranchInfo(pc, pcshift, false);
     std::vector<unsigned int> &ghist_words = threadData[tid]->ghist_words;
 
-    bp_history = (void *)bi;
+    bpHistory = (void *)bi;
     unsigned short int pc2 = pc >> 2;
     bool ab = !(pc & (1<<pcbit));
     for (int i = 0; i < ghist_length / blockSize + 1; i += 1) {
@@ -572,10 +581,10 @@ MultiperspectivePerceptron::uncondBranch(ThreadID tid, Addr pc,
 
 bool
 MultiperspectivePerceptron::lookup(ThreadID tid, Addr instPC,
-                                   void * &bp_history)
+                                   void * &bpHistory)
 {
     MPPBranchInfo *bi = new MPPBranchInfo(instPC, pcshift, true);
-    bp_history = (void *)bi;
+    bpHistory = (void *)bi;
 
     bool use_static = false;
 
@@ -614,19 +623,19 @@ MultiperspectivePerceptron::lookup(ThreadID tid, Addr instPC,
 
 void
 MultiperspectivePerceptron::update(ThreadID tid, Addr instPC, bool taken,
-                                   void *bp_history, bool squashed,
+                                   void * &bpHistory, bool squashed,
                                    const StaticInstPtr & inst,
                                    Addr corrTarget)
 {
-    assert(bp_history);
-    MPPBranchInfo *bi = static_cast<MPPBranchInfo*>(bp_history);
+    assert(bpHistory);
+    MPPBranchInfo *bi = static_cast<MPPBranchInfo*>(bpHistory);
     if (squashed) {
         //delete bi;
         return;
     }
 
     if (bi->isUnconditional()) {
-        delete bi;
+        delete bi; bpHistory = nullptr;
         return;
     }
 
@@ -812,21 +821,15 @@ MultiperspectivePerceptron::update(ThreadID tid, Addr instPC, bool taken,
     // update last ghist bit, used to index filter
     threadData[tid]->last_ghist_bit = taken;
 
-    delete bi;
+    delete bi; bpHistory = nullptr;
 }
 
 void
-MultiperspectivePerceptron::btbUpdate(ThreadID tid, Addr branch_pc,
-                                      void* &bp_history)
+MultiperspectivePerceptron::squash(ThreadID tid, void * &bpHistory)
 {
-}
-
-void
-MultiperspectivePerceptron::squash(ThreadID tid, void *bp_history)
-{
-    assert(bp_history);
-    MPPBranchInfo *bi = static_cast<MPPBranchInfo*>(bp_history);
-    delete bi;
+    assert(bpHistory);
+    MPPBranchInfo *bi = static_cast<MPPBranchInfo*>(bpHistory);
+    delete bi; bpHistory = nullptr;
 }
 
 } // namespace branch_prediction

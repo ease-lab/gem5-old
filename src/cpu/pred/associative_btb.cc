@@ -112,7 +112,7 @@ AssociativeBTB::getIndex(ThreadID tid, Addr instPC)
 }
 
 bool
-AssociativeBTB::valid(ThreadID tid, Addr instPC, BranchClass type)
+AssociativeBTB::valid(ThreadID tid, Addr instPC, BranchType type)
 {
     uint64_t idx = getIndex(tid, instPC);
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
@@ -127,10 +127,10 @@ AssociativeBTB::valid(ThreadID tid, Addr instPC, BranchClass type)
 // address is valid, and also the address.  For now will just use addr = 0 to
 // represent invalid entry.
 const PCStateBase *
-AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
+AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchType type)
 {
     stats.lookups++;
-    if (type != BranchClass::NoBranch) {
+    if (type != BranchType::NoBranch) {
         stats.lookupType[type]++;
     }
 
@@ -149,7 +149,7 @@ AssociativeBTB::lookup(ThreadID tid, Addr instPC, BranchClass type)
         return entry->target;
     }
     stats.misses++;
-    if (type != BranchClass::NoBranch) {
+    if (type != BranchType::NoBranch) {
         stats.missType[type]++;
     }
     return nullptr;
@@ -170,7 +170,7 @@ AssociativeBTB::lookupInst(ThreadID tid, Addr instPC)
 void
 AssociativeBTB::update(ThreadID tid, Addr instPC,
                     const PCStateBase &target,
-                    BranchClass type, StaticInstPtr inst)
+                    BranchType type, StaticInstPtr inst)
 {
     uint64_t idx = getIndex(tid, instPC);
     BTBEntry * entry = btb.findEntry(idx, /* unused */ false);
@@ -180,10 +180,10 @@ AssociativeBTB::update(ThreadID tid, Addr instPC,
 
 void
 AssociativeBTB::updateEntry(BTBEntry* &entry, ThreadID tid, Addr instPC,
-                    const PCStateBase &target, BranchClass type,
+                    const PCStateBase &target, BranchType type,
                     StaticInstPtr inst)
 {
-    if (type != BranchClass::NoBranch) {
+    if (type != BranchType::NoBranch) {
         stats.updates[type]++;
     }
 

@@ -94,12 +94,12 @@ LTAGE::predict(ThreadID tid, Addr branch_pc, bool cond_branch, void* &b)
 
 // PREDICTOR UPDATE
 void
-LTAGE::update(ThreadID tid, Addr branch_pc, bool taken, void* bp_history,
+LTAGE::update(ThreadID tid, Addr branch_pc, bool taken, void* &bpHistory,
               bool squashed, const StaticInstPtr & inst, Addr corrTarget)
 {
-    assert(bp_history);
+    assert(bpHistory);
 
-    LTageBranchInfo* bi = static_cast<LTageBranchInfo*>(bp_history);
+    LTageBranchInfo* bi = static_cast<LTageBranchInfo*>(bpHistory);
 
     if (squashed) {
         if (tage->isSpeculativeUpdateEnabled()) {
@@ -132,19 +132,19 @@ LTAGE::update(ThreadID tid, Addr branch_pc, bool taken, void* bp_history,
     tage->updateHistories(tid, branch_pc, taken, bi->tageBranchInfo, false,
                           inst, corrTarget);
 
-    delete bi;
+    delete bi; bpHistory = nullptr;
 }
 
 void
-LTAGE::squash(ThreadID tid, void *bp_history)
+LTAGE::squash(ThreadID tid, void * &bpHistory)
 {
-    LTageBranchInfo* bi = (LTageBranchInfo*)(bp_history);
+    LTageBranchInfo* bi = (LTageBranchInfo*)(bpHistory);
 
     if (bi->tageBranchInfo->condBranch) {
         loopPredictor->squash(tid, bi->lpBranchInfo);
     }
 
-    TAGE::squash(tid, bp_history);
+    TAGE::squash(tid, bpHistory);
 }
 
 } // namespace branch_prediction

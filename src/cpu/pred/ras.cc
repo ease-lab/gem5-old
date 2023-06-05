@@ -262,7 +262,7 @@ ReturnAddrStack::squash(ThreadID tid, void * &ras_history)
     }
     DPRINTF(RAS, "[%s]\n", addrStacks[tid].print(10));
     // DPRINTF(RAS, "RAS: Delete hist:%#x\n", history);
-    delete history;
+    delete history; ras_history = nullptr;
 }
 
 void
@@ -315,7 +315,7 @@ ReturnAddrStack::commit(ThreadID tid, bool taken, Addr corrTarget,
                 __func__, !history->mispredict,
                 history->ras_entry->instAddr(), tid);
     }
-    delete history;
+    delete history; ras_history = nullptr;
 }
 
 

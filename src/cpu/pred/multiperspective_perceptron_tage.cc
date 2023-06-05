@@ -516,12 +516,12 @@ MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid,
 
 bool
 MultiperspectivePerceptronTAGE::lookup(ThreadID tid, Addr instPC,
-                                   void * &bp_history)
+                                   void * &bpHistory)
 {
     MPPTAGEBranchInfo *bi =
         new MPPTAGEBranchInfo(instPC, pcshift, true, *tage, *loopPredictor,
                               *statisticalCorrector);
-    bp_history = (void *)bi;
+    bpHistory = (void *)bi;
     bool pred_taken = tage->tagePredict(tid, instPC, true, bi->tageBranchInfo);
 
     pred_taken = loopPredictor->loopPredict(tid, instPC, true,
@@ -589,12 +589,12 @@ MPP_StatisticalCorrector::condBranchUpdate(ThreadID tid, Addr branch_pc,
 
 void
 MultiperspectivePerceptronTAGE::update(ThreadID tid, Addr instPC, bool taken,
-                                   void *bp_history, bool squashed,
+                                   void * &bpHistory, bool squashed,
                                    const StaticInstPtr & inst,
                                    Addr corrTarget)
 {
-    assert(bp_history);
-    MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo*>(bp_history);
+    assert(bpHistory);
+    MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo*>(bpHistory);
 
     if (squashed) {
         if (tage->isSpeculativeUpdateEnabled()) {
@@ -664,25 +664,32 @@ MultiperspectivePerceptronTAGE::update(ThreadID tid, Addr instPC, bool taken,
                                   false, inst, corrTarget);
         }
     }
-    delete bi;
+    delete bi; bpHistory = nullptr;
 }
 
 void
-MultiperspectivePerceptronTAGE::uncondBranch(ThreadID tid, Addr pc,
-                                             void * &bp_history)
+MultiperspectivePerceptronTAGE::updateHistories(ThreadID tid, Addr pc,
+                                            bool uncond, bool taken,
+                                            Addr target, void * &bpHistory)
 {
+    assert(uncond || bpHistory);
+
+    // For perceptron there is no speculative history correction.
+    // Conditional branches are done.
+    if (!uncond) return;
+
     MPPTAGEBranchInfo *bi =
         new MPPTAGEBranchInfo(pc, pcshift, false, *tage, *loopPredictor,
                               *statisticalCorrector);
-    bp_history = (void *) bi;
+    bpHistory = (void *) bi;
 }
 
 void
-MultiperspectivePerceptronTAGE::squash(ThreadID tid, void *bp_history)
+MultiperspectivePerceptronTAGE::squash(ThreadID tid, void * &bpHistory)
 {
-    assert(bp_history);
-    MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo*>(bp_history);
-    delete bi;
+    assert(bpHistory);
+    MPPTAGEBranchInfo *bi = static_cast<MPPTAGEBranchInfo*>(bpHistory);
+    delete bi; bpHistory = nullptr;
 }
 
 } // namespace branch_prediction

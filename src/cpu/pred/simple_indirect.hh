@@ -56,7 +56,7 @@ class SimpleIndirectPredictor : public IndirectPredictor
                                 Addr pc, void * &iHistory) override;
     void update(ThreadID tid, InstSeqNum sn, Addr pc, bool squash,
                 bool taken, const PCStateBase& target,
-                BranchClass brType, void * &iHistory) override;
+                BranchType brType, void * &iHistory) override;
     void squash(ThreadID tid, InstSeqNum sn, void * &iHistory) override;
     void commit(ThreadID tid, InstSeqNum sn, void * &iHistory) override;
 
@@ -170,9 +170,9 @@ class SimpleIndirectPredictor : public IndirectPredictor
     inline Addr getSetIndex(Addr br_addr, ThreadID tid);
     inline Addr getTag(Addr br_addr);
 
-    inline bool isIndirectNoReturn(BranchClass type) {
-        return (type == BranchClass::CallIndirect) ||
-               (type == BranchClass::IndirectUncond);
+    inline bool isIndirectNoReturn(BranchType type) {
+        return (type == BranchType::CallIndirect) ||
+               (type == BranchType::IndirectUncond);
     }
 
   protected:

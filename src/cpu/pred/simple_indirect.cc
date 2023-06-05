@@ -119,7 +119,7 @@ SimpleIndirectPredictor::lookup(ThreadID tid, InstSeqNum sn,
 void
 SimpleIndirectPredictor::update(ThreadID tid, InstSeqNum sn, Addr pc,
                            bool squash, bool taken, const PCStateBase& target,
-                           BranchClass brType, void * &iHistory)
+                           BranchType brType, void * &iHistory)
 {
     // If there is no history we did not use the indirect predictor yet.
     // Create one
@@ -212,7 +212,7 @@ SimpleIndirectPredictor::squash(ThreadID tid, InstSeqNum sn, void * &iHistory)
         }
     }
 
-    delete history;
+    delete history; iHistory = nullptr;
 }
 
 
@@ -227,7 +227,7 @@ SimpleIndirectPredictor::commit(ThreadID tid, InstSeqNum sn, void * &iHistory)
             sn, history->pcAddr, history->ghr,
             threadInfo[tid].pathHist.size());
 
-    delete history;
+    delete history; iHistory = nullptr;
 
     /** Delete histories if the history grows to much */
     while (threadInfo[tid].pathHist.size()

@@ -410,12 +410,12 @@ TAGE_SC_L::predict(ThreadID tid, Addr branch_pc, bool cond_branch, void* &b)
 }
 
 void
-TAGE_SC_L::update(ThreadID tid, Addr branch_pc, bool taken, void *bp_history,
+TAGE_SC_L::update(ThreadID tid, Addr branch_pc, bool taken, void * &bpHistory,
         bool squashed, const StaticInstPtr & inst, Addr corrTarget)
 {
-    assert(bp_history);
+    assert(bpHistory);
 
-    TageSCLBranchInfo* bi = static_cast<TageSCLBranchInfo*>(bp_history);
+    TageSCLBranchInfo* bi = static_cast<TageSCLBranchInfo*>(bpHistory);
     TAGE_SC_L_TAGE::BranchInfo* tage_bi =
         static_cast<TAGE_SC_L_TAGE::BranchInfo *>(bi->tageBranchInfo);
 
@@ -462,7 +462,7 @@ TAGE_SC_L::update(ThreadID tid, Addr branch_pc, bool taken, void *bp_history,
                               inst, corrTarget);
     }
 
-    delete bi;
+    delete bi; bpHistory = nullptr;
 }
 
 } // namespace branch_prediction

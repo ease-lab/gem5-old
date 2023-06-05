@@ -48,12 +48,12 @@ class AssociativeBTB : public BranchTargetBuffer
 
     virtual void memInvalidate() override;
     virtual const PCStateBase *lookup(ThreadID tid, Addr instPC,
-                           BranchClass type = BranchClass::NoBranch) override;
+                           BranchType type = BranchType::NoBranch) override;
     virtual bool valid(ThreadID tid, Addr instPC,
-                           BranchClass type = BranchClass::NoBranch) override;
+                           BranchType type = BranchType::NoBranch) override;
     virtual void update(ThreadID tid, Addr instPC,
                         const PCStateBase &target_pc,
-                        BranchClass type = BranchClass::NoBranch,
+                        BranchType type = BranchType::NoBranch,
                         StaticInstPtr inst = nullptr) override;
     const StaticInstPtr lookupInst(ThreadID tid, Addr instPC) override;
 
@@ -90,7 +90,7 @@ class AssociativeBTB : public BranchTargetBuffer
 
     /** Internal update call */
     void updateEntry(BTBEntry* &entry, ThreadID tid, Addr instPC,
-                    const PCStateBase &target, BranchClass type,
+                    const PCStateBase &target, BranchType type,
                     StaticInstPtr inst);
 
     /** The actual BTB. */

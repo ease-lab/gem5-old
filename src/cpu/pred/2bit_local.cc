@@ -67,15 +67,15 @@ LocalBP::LocalBP(const LocalBPParams &params)
 }
 
 void
-LocalBP::btbUpdate(ThreadID tid, Addr branch_addr, void * &bp_history)
+LocalBP::updateHistories(ThreadID tid, Addr pc, bool uncond,
+                         bool taken, Addr target, void * &bpHistory)
 {
-// Place holder for a function that is called to update predictor history when
-// a BTB entry is invalid or not found.
+// Place holder for a function that is called to update predictor history
 }
 
 
 bool
-LocalBP::lookup(ThreadID tid, Addr branch_addr, void * &bp_history)
+LocalBP::lookup(ThreadID tid, Addr branch_addr, void * &bpHistory)
 {
     bool taken;
     unsigned local_predictor_idx = getLocalIndex(branch_addr);
@@ -94,10 +94,10 @@ LocalBP::lookup(ThreadID tid, Addr branch_addr, void * &bp_history)
 }
 
 void
-LocalBP::update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
+LocalBP::update(ThreadID tid, Addr branch_addr, bool taken, void * &bpHistory,
                 bool squashed, const StaticInstPtr & inst, Addr corrTarget)
 {
-    assert(bp_history == NULL);
+    assert(bpHistory == NULL);
     unsigned local_predictor_idx;
 
     // No state to restore, and we do not update on the wrong
@@ -135,10 +135,6 @@ LocalBP::getLocalIndex(Addr &branch_addr)
     return (branch_addr >> instShiftAmt) & indexMask;
 }
 
-void
-LocalBP::uncondBranch(ThreadID tid, Addr pc, void *&bp_history)
-{
-}
 
 } // namespace branch_prediction
 } // namespace gem5

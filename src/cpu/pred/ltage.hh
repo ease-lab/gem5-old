@@ -69,8 +69,8 @@ class LTAGE : public TAGE
     LTAGE(const LTAGEParams &params);
 
     // Base class methods.
-    void squash(ThreadID tid, void *bp_history) override;
-    void update(ThreadID tid, Addr branch_addr, bool taken, void *bp_history,
+    void squash(ThreadID tid, void * &bpHistory) override;
+    void update(ThreadID tid, Addr branch_addr, bool taken, void * &bpHistory,
                 bool squashed, const StaticInstPtr & inst,
                 Addr corrTarget) override;
 
@@ -97,7 +97,7 @@ class LTAGE : public TAGE
 
         virtual ~LTageBranchInfo()
         {
-            delete lpBranchInfo;
+            delete lpBranchInfo; lpBranchInfo = nullptr;
         }
     };
 

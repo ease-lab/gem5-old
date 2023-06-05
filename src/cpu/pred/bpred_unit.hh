@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2011-2012, 2014 ARM Limited
- * Copyright (c) 2010 The University of Edinburgh
+ * Copyright (c) 2010,2022-2023 The University of Edinburgh
  * All rights reserved
  *
  * The license below extends only to copyright in the software and shall
@@ -47,11 +47,12 @@
 #include "base/statistics.hh"
 #include "base/types.hh"
 #include "cpu/inst_seq.hh"
+#include "cpu/pred/branch_type.hh"
 #include "cpu/pred/btb.hh"
 #include "cpu/pred/indirect.hh"
 #include "cpu/pred/ras.hh"
 #include "cpu/static_inst.hh"
-#include "enums/BranchClass.hh"
+#include "enums/TargetProvider.hh"
 #include "params/BranchPredictor.hh"
 #include "sim/probe/pmu.hh"
 #include "sim/sim_object.hh"
@@ -62,32 +63,19 @@ namespace gem5
 namespace branch_prediction
 {
 
-  // enum BranchType {
-  //   NoBranch = 0,
-  //   Call,
-  //   CallCond,
-  //   CallUncond,
-  //   Return,
-  //   Direct,
-  //   DirectCond,
-  //   DirectUncond,
-  //   Indirect,
-  //   IndirectCond,
-  //   IndirectUncond,
-  //   NumBranchType
-  // };
-
-
 /**
  * Basically a wrapper class to hold both the branch predictor
  * and the BTB.
  */
 class BPredUnit : public SimObject
 {
-
-  public:
     typedef BranchPredictorParams Params;
-    typedef enums::BranchClass BranchClass;
+    typedef enums::TargetProvider TargetProvider;
+
+    /** Branch Predictor Unit (BPU) interface functions */
+  public:
+
+
 
     /**
      * @param params The params object, that has the size of the BP and BTB.
@@ -109,9 +97,6 @@ class BPredUnit : public SimObject
      */
     bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                  PCStateBase &pc, ThreadID tid);
-
-    // @todo: Rename this function.
-    virtual void uncondBranch(ThreadID tid, Addr pc, void * &bp_history) = 0;
 
     /**
      * Tells the branch predictor to commit any updates until the given
@@ -138,49 +123,83 @@ class BPredUnit : public SimObject
      * @param actually_taken The correct branch direction.
      * @param tid The thread id.
      * @param inst The static instruction that caused the misprediction
+     * @param from_commit Indicate whether the squash is comming from commit
+     *              or from decode. Its optional and used for statistics.
      */
     void squash(const InstSeqNum &squashed_sn,
                 const PCStateBase &corr_target,
-                bool actually_taken, ThreadID tid);
-
-    void squash(const InstSeqNum &squashed_sn,
-                const PCStateBase &corr_target,
-                bool actually_taken, ThreadID tid,
-                StaticInstPtr inst, const PCStateBase &pc);
+                bool actually_taken, ThreadID tid, bool from_commit=true);
 
   protected:
 
-    /**
-     * @param bp_history Pointer to the history object.  The predictor
-     * will need to update any state and delete the object.
-     */
-    virtual void squash(ThreadID tid, void *bp_history) = 0;
+    /** *******************************************************
+     * Interface functions to the conditional branch predictor
+     *
+    */
 
     /**
-     * Looks up a given PC in the BP to see if it is taken or not taken.
-     * @param inst_PC The PC to look up.
-     * @param bp_history Pointer that will be set to an object that
+     * Looks up a given conditional branch PC of in the BP to see if it
+     * is taken or not taken.
+     * @param PC The PC to look up.
+     * @param bpHistory Pointer that will be set to an object that
      * has the branch predictor state associated with the lookup.
      * @return Whether the branch is taken or not taken.
      */
-    virtual bool lookup(ThreadID tid, Addr instPC, void * &bp_history) = 0;
+    virtual bool lookup(ThreadID tid, Addr pc, void * &bpHistory) = 0;
 
-     /**
-     * If a branch is not taken, because the BTB address is invalid or missing,
-     * this function sets the appropriate counter in the global and local
-     * predictors to not taken.
-     * @param inst_PC The PC to look up the local predictor.
-     * @param bp_history Pointer that will be set to an object that
+    /**
+     * Once done with the prediction this function updates the
+     * path and global history. All branches call this function
+     * including unconditional once.
+     * @param PC The branch's PC that will be updated.
+     * @param uncond Wheather or not this branch is an unconditional branch.
+     * @param taken Whether or not the branch was taken
+     * @param target The final target of branch. Some modern
+     * predictors use the target in their history.
+     * @param bpHistory Pointer that will be set to an object that
      * has the branch predictor state associated with the lookup.
      */
-    virtual void btbUpdate(ThreadID tid, Addr instPC, void * &bp_history) = 0;
+    virtual void updateHistories(ThreadID tid, Addr pc, bool uncond,
+                            bool taken, Addr target, void * &bpHistory) = 0;
+
+    /**
+     * @param bpHistory Pointer to the history object.  The predictor
+     * will need to update any state and delete the object.
+     */
+    virtual void squash(ThreadID tid, void * &bpHistory) = 0;
+
+
+    /**
+     * Updates the BP with taken/not taken information.
+     * @param PC The branch's PC that will be updated.
+     * @param taken Whether the branch was taken or not taken.
+     * @param bpHistory Pointer to the branch predictor state that is
+     * associated with the branch lookup that is being updated.
+     * @param squashed Set to true when this function is called during a
+     * squash operation.
+     * @param inst Static instruction information
+     * @param corrTarget The resolved target of the branch (only needed
+     * for squashed branches)
+     * @todo Make this update flexible enough to handle a global predictor.
+     */
+    virtual void update(ThreadID tid, Addr pc, bool taken,
+                   void * &bpHistory, bool squashed,
+                   const StaticInstPtr &inst, Addr corrTarget) = 0;
+
 
     /**
      * Looks up a given PC in the BTB to see if a matching entry exists.
      * @param inst_PC The PC to look up.
      * @return Whether the BTB contains the given PC.
      */
-    bool BTBValid(Addr instPC) { return btb->valid(instPC, 0); }
+    bool BTBValid(ThreadID tid, Addr instPC)
+    {
+        return btb->valid(tid, instPC);
+    }
+    bool BTBValid(ThreadID tid, PCStateBase &instPC)
+    {
+        return BTBValid(tid, instPC.instAddr());
+    }
 
     /**
      * Looks up a given PC in the BTB to get the predicted target. The PC may
@@ -190,9 +209,9 @@ class BPredUnit : public SimObject
      * @return The address of the target of the branch.
      */
     const PCStateBase *
-    BTBLookup(Addr inst_pc)
+    BTBLookup(ThreadID tid, PCStateBase &instPC)
     {
-        return btb->lookup(inst_pc, 0);
+        return btb->lookup(tid, instPC.instAddr());
     }
 
     /**
@@ -206,90 +225,57 @@ class BPredUnit : public SimObject
      * @return The static instruction info of the given PC if existant.
      */
     const StaticInstPtr
-    BTBLookupInst(Addr instPC, ThreadID tid)
+    BTBLookupInst(ThreadID tid, Addr instPC)
     {
         return btb->lookupInst(tid, instPC);
     }
     const StaticInstPtr
-    BTBLookupInst(PCStateBase &instPC, ThreadID tid)
+    BTBLookupInst(ThreadID tid, PCStateBase &instPC)
     {
-        return BTBLookupInst(instPC.instAddr(), tid);
+        return BTBLookupInst(tid, instPC.instAddr());
+    }
+
+    void BTBUpdate(ThreadID tid, Addr instPC, PCStateBase& target)
+    {
+        return btb->update(tid, instPC, target);
     }
 
 
 
-    /**
-     * Updates the BP with taken/not taken information.
-     * @param inst_PC The branch's PC that will be updated.
-     * @param taken Whether the branch was taken or not taken.
-     * @param bp_history Pointer to the branch predictor state that is
-     * associated with the branch lookup that is being updated.
-     * @param squashed Set to true when this function is called during a
-     * squash operation.
-     * @param inst Static instruction information
-     * @param corrTarget The resolved target of the branch (only needed
-     * for squashed branches)
-     * @todo Make this update flexible enough to handle a global predictor.
-     */
-    virtual void update(ThreadID tid, Addr instPC, bool taken,
-                   void *bp_history, bool squashed,
-                   const StaticInstPtr &inst, Addr corrTarget) = 0;
-    // /**
-    //  * Updates the BTB with the target of a branch.
-    //  * @param inst_PC The branch's PC that will be updated.
-    //  * @param target_PC The branch's target that will be added to the BTB.
-    //  */
-    // void
-    // BTBUpdate(Addr instPC, const PCStateBase &target)
-    // {
-    //     btb->update(0, instPC, target);
-    // }
-    BranchClass getBranchClass(StaticInstPtr inst);
-
-    std::string toStr(BranchClass type) const
-    {
-        return std::string(enums::BranchClassStrings[type]);
-    }
 
     void dump();
 
 
 
   private:
+
     struct PredictorHistory
     {
         /**
          * Makes a predictor history struct that contains any
          * information needed to update the predictor, BTB, and RAS.
          */
-        PredictorHistory(const InstSeqNum &seq_num, Addr instPC,
-                         bool pred_taken, void *bp_history,
-                         void *indirect_history, void *ras_history,
-                         ThreadID _tid, BranchClass type,
+        PredictorHistory(ThreadID _tid, InstSeqNum sn, Addr _pc,
                          const StaticInstPtr & inst)
-            : seqNum(seq_num), pc(instPC), bpHistory(bp_history),
-              indirectHistory(indirect_history), rasHistory(ras_history),
-              tid(_tid), predTaken(pred_taken), type(type), inst(inst)
-        {}
+            : seqNum(sn), tid(_tid), pc(_pc),
+              inst(inst), type(getBranchType(inst)),
+              call(inst->isCall()), uncond(inst->isUncondCtrl()),
+              predTaken(false), actuallyTaken(false), condPred(false),
+              btbHit(false), targetProvider(TargetProvider::NoTarget),
+              resteered(false), mispredict(false), target(nullptr),
+              bpHistory(nullptr),
+              indirectHistory(nullptr), rasHistory(nullptr)
+        { }
 
-        PredictorHistory(const PredictorHistory &other) :
-            seqNum(other.seqNum), pc(other.pc), bpHistory(other.bpHistory),
-            indirectHistory(other.indirectHistory),
-            rasHistory(other.rasHistory), tid(other.tid),
-            predTaken(other.predTaken), usedRAS(other.usedRAS),
-            wasCall(other.wasCall), wasReturn(other.wasReturn),
-            wasIndirect(other.wasIndirect),
-            wasPredTakenBTBHit(other.wasPredTakenBTBHit),
-            wasPredTakenBTBMiss(other.wasPredTakenBTBMiss),
-            wasUncond(other.wasUncond),
-            target(other.target),
-            // targetProvider(targetProvider),
-            type(other.type),
-            inst(other.inst)
+        ~PredictorHistory()
         {
+            assert(bpHistory == nullptr);
+            assert(indirectHistory == nullptr);
+            assert(rasHistory == nullptr);
         }
 
-
+        PredictorHistory (const PredictorHistory&) = delete;
+        PredictorHistory& operator= (const PredictorHistory&) = delete;
 
         bool
         operator==(const PredictorHistory &entry) const
@@ -298,14 +284,55 @@ class BPredUnit : public SimObject
         }
 
         /** The sequence number for the predictor history entry. */
-        InstSeqNum seqNum;
+        const InstSeqNum seqNum;
+
+        /** The thread id. */
+        const ThreadID tid;
 
         /** The PC associated with the sequence number. */
-        Addr pc;
+        const Addr pc;
 
-        /** Pointer to the history object passed back from the branch
-         * predictor.  It is used to update or restore state of the
-         * branch predictor.
+        /** The branch instrction */
+        const StaticInstPtr inst;
+
+        /** The type of the branch */
+        const BranchType type;
+
+        /** Whether or not the instruction was a call. */
+        const bool call;
+
+        /** Was unconditional control */
+        const bool uncond;
+
+        /** Whether or not it was predicted taken. */
+        bool predTaken;
+
+        /** To record the actual outcome of the branch */
+        bool actuallyTaken;
+
+        /** The prediction of the conditional predictor */
+        bool condPred;
+
+        /** Was BTB hit at prediction time */
+        bool btbHit;
+
+        /** Which component provided the target */
+        TargetProvider targetProvider;
+
+        /** Resteered */
+        bool resteered;
+
+        /** The branch was corrected hence was mispredicted. */
+        bool mispredict;
+
+        /** The predicted target */
+        std::unique_ptr<PCStateBase> target;
+
+        /**
+         * Pointer to the history objects passed back from the branch
+         * predictor subcomponents.
+         * It is used to update or restore state.
+         * Respectively for conditional, indirect and RAS.
          */
         void *bpHistory = nullptr;
 
@@ -313,54 +340,46 @@ class BPredUnit : public SimObject
 
         void *rasHistory = nullptr;
 
-        /** The thread id. */
-        ThreadID tid;
-
-        /** Whether or not it was predicted taken. */
-        bool predTaken;
-
-        /** Whether or not the RAS was used. */
-        bool usedRAS = false;
-
-        /** Whether or not the instruction was a call. */
-        bool wasCall = false;
-
-        /** Whether or not the instruction was a return. */
-        bool wasReturn = false;
-
-        /** Wether this instruction was an indirect branch */
-        bool wasIndirect = false;
-
-        /** Was predicted taken and hit in BTB */
-        bool wasPredTakenBTBHit = false;
-
-        /** Was predicted taken but miss in BTB */
-        bool wasPredTakenBTBMiss = false;
-
-        /** Was unconditional control */
-        bool wasUncond = false;
-
-        /** Target of the branch. First it is predicted, and fixed later
-         *  if necessary
-         */
-        Addr target = MaxAddr;
-
-        BranchClass type = BranchClass::NoBranch;
-
-        /** The branch instrction */
-        const StaticInstPtr inst;
     };
 
-    typedef std::deque<PredictorHistory> History;
+    typedef std::deque<PredictorHistory*> History;
 
-  public:
+
+    /**
+     * Internal prediction function.
+    */
+    bool predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
+               PCStateBase &pc, ThreadID tid, PredictorHistory* &bpu_history);
+
+    /**
+     * Squashes a particular branch instance
+     * @param tid The thread id.
+     * @param bpu_history The history to be squashed.
+     */
+    void squashHistory(ThreadID tid, PredictorHistory* &bpu_history);
+
+
+    /**
+     * Commit a particular branch
+     * @param tid The thread id.
+     * @param bpu_history The history of the branch to be commited.
+     */
+    void commitBranch(ThreadID tid, PredictorHistory* &bpu_history);
+
+
+
+
+
+  protected:
     /** Number of the threads for which the branch history is maintained. */
     const unsigned numThreads;
 
-  private:
-    /** Fallback to the BTB prediction in case the RAS is corrupted. */
-    const unsigned fallbackBTB;
+    /** Requires the BTB to hit for returns and indirect branches. For an
+     * advances front-end there is no other way to know about the branch. */
+    const bool requiresBTBHit;
 
+    /** Number of bits to shift instructions by for predictor addresses. */
+    const unsigned instShiftAmt;
 
     /**
      * The per-thread predictor history. This is used to update the predictor
@@ -378,30 +397,32 @@ class BPredUnit : public SimObject
     /** The indirect target predictor. */
     IndirectPredictor * iPred;
 
+    /** Statistics */
     struct BPredUnitStats : public statistics::Group
     {
         BPredUnitStats(statistics::Group *parent, BPredUnit *bp);
 
         /** Stat for number of BP lookups. */
-        statistics::Vector lookups;
-
-        /** Stat for BP lookup instructions by branch type (BranchType) */
-        statistics::Vector2d lookupType;
-
-        /** Stat for final prediction of the BPU by branch type (BranchType)*/
-        statistics::Vector2d predTakenType;
-        statistics::Vector2d predNotTakenType;
-
-        /** Stat for direction prediction by branch type (BranchType) */
-        statistics::Vector2d dirPredTakenType;
-        statistics::Vector2d dirPredNotTakenType;
-
-        /** Stat for branches squashed by branch type (BranchType) */
-        statistics::Vector2d squashType;
-        /** Stat for branches mispredicted by branch type (BranchType) */
-        statistics::Vector2d mispredictType;
-        /** Stat for branches commited by branch type (BranchType) */
-        statistics::Vector2d commitType;
+        statistics::Vector2d lookups;
+        /** Stat for branches that got squashed as an earlier branch was
+         * mispredicted. */
+        statistics::Vector2d squashes;
+        /** Stat for branches that got corrected but not yet commited.
+         * A corrected branch might not be commited in case an earlier
+         * branch was mispredicted */
+        statistics::Vector2d corrected;
+        /** Stat for branches finally committed */
+        statistics::Vector2d committed;
+        /** Stat for the number of committed branches that where
+         * mispredicted by the BPU */
+        statistics::Vector2d mispredicted;
+        /** Stat for the target provider of taken branches*/
+        statistics::Vector2d targetProvider;
+        /** Stat for branches where the target was incorrect or not
+         * available at prediction */
+        statistics::Vector2d targetWrong;
+        /** Stat for branches squashed from decode */
+        statistics::Vector2d earlyResteers;
 
         /** Stat for number of conditional branches predicted. */
         statistics::Scalar condPredicted;
@@ -409,6 +430,8 @@ class BPredUnit : public SimObject
         statistics::Scalar condPredictedTaken;
         /** Stat for number of conditional branches predicted incorrectly. */
         statistics::Scalar condIncorrect;
+        /** Stat for number of branches predicted incorrectly. */
+        statistics::Scalar incorrect;
         /** Stat for number of BTB lookups. */
         statistics::Scalar BTBLookups;
         /** Stat for number of BTB updates. */
@@ -429,22 +452,8 @@ class BPredUnit : public SimObject
         /** Stat for the number of indirect target mispredictions.*/
         statistics::Scalar indirectMispredicted;
 
-        /** Stat for the number of conditional calls*/
-        statistics::Scalar indirectCall;
-        /** Stat for the number of unconditional calls*/
-        statistics::Scalar directCall;
-        /** Stat for the number of mispredicted calls*/
-        statistics::Scalar mispredictCall;
-
-        /** Stat for the number of conditional branches mispredicted*/
-        statistics::Scalar mispredictCond;
-        /** Stat for the number of unconditional branches mispredicted*/
-        statistics::Scalar mispredictUncond;
         /** Stat for the number of branches predicted taken but miss in BTB*/
         statistics::Scalar predTakenBTBMiss;
-        /** Stat for the number of unconditional branches miss in BTB*/
-        statistics::Scalar uncondBTBMiss;
-
         /** Stat for the number of branches predicted not taken but
          * turn out to be taken*/
         statistics::Scalar NotTakenMispredicted;
@@ -456,8 +465,6 @@ class BPredUnit : public SimObject
     } stats;
 
   protected:
-    /** Number of bits to shift instructions by for predictor addresses. */
-    const unsigned instShiftAmt;
 
     /**
      * @{

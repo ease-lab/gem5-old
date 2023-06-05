@@ -71,26 +71,26 @@ BranchTargetBuffer::BranchTargetBufferStats::BranchTargetBufferStats(
     using namespace statistics;
     missRatio.precision(6);
     lookupType
-        .init(enums::Num_BranchClass)
+        .init(enums::Num_BranchType)
         .flags(total | pdf);
 
     missType
-        .init(enums::Num_BranchClass)
+        .init(enums::Num_BranchType)
         .flags(total | pdf);
 
     updates
-        .init(enums::Num_BranchClass)
+        .init(enums::Num_BranchType)
         .flags(total | pdf);
 
     mispredict
-        .init(enums::Num_BranchClass)
+        .init(enums::Num_BranchType)
         .flags(total | pdf);
 
-    for (int i = 0; i < enums::Num_BranchClass; i++) {
-        lookupType.subname(i, enums::BranchClassStrings[i]);
-        missType.subname(i, enums::BranchClassStrings[i]);
-        updates.subname(i, enums::BranchClassStrings[i]);
-        mispredict.subname(i, enums::BranchClassStrings[i]);
+    for (int i = 0; i < enums::Num_BranchType; i++) {
+        lookupType.subname(i, enums::BranchTypeStrings[i]);
+        missType.subname(i, enums::BranchTypeStrings[i]);
+        updates.subname(i, enums::BranchTypeStrings[i]);
+        mispredict.subname(i, enums::BranchTypeStrings[i]);
     }
 }
 

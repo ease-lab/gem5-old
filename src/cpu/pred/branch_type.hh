@@ -34,7 +34,7 @@
 #define __CPU_PRED_BRANCH_TYPE_HH__
 
 #include "cpu/static_inst.hh"
-#include "enums/BranchClass.hh"
+#include "enums/BranchType.hh"
 
 namespace gem5
 {
@@ -42,38 +42,39 @@ namespace gem5
 namespace branch_prediction
 {
 
-typedef enums::BranchClass BranchClass;
+typedef enums::BranchType BranchType;
 
-inline BranchClass getBranchClass(StaticInstPtr inst)
+inline BranchType getBranchType(StaticInstPtr inst)
 {
     if (inst->isReturn()) {
-        return BranchClass::Return;
+        return BranchType::Return;
     }
 
     if (inst->isCall()) {
         return inst->isDirectCtrl()
-                    ? BranchClass::CallDirect
-                    : BranchClass::CallIndirect;
+                    ? BranchType::CallDirect
+                    : BranchType::CallIndirect;
     }
 
     if (inst->isDirectCtrl()) {
         return inst->isCondCtrl()
-                    ? BranchClass::DirectCond
-                    : BranchClass::DirectUncond;
+                    ? BranchType::DirectCond
+                    : BranchType::DirectUncond;
     }
 
     if (inst->isIndirectCtrl()) {
         return inst->isCondCtrl()
-                    ? BranchClass::IndirectCond
-                    : BranchClass::IndirectUncond;
+                    ? BranchType::IndirectCond
+                    : BranchType::IndirectUncond;
     }
-    return BranchClass::NoBranch;
+    return BranchType::NoBranch;
 }
 
-inline std::string toString(BranchClass type)
+inline std::string toString(BranchType type)
 {
-    return std::string(enums::BranchClassStrings[type]);
+    return std::string(enums::BranchTypeStrings[type]);
 }
+
 
 } // namespace branch_prediction
 } // namespace gem5
