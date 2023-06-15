@@ -243,7 +243,12 @@ class TAGEBase(SimObject):
         True, "Use speculative update for histories"
     )
 
-
+    # Taken only history as used in most modern server CPUs.
+    takenOnlyHistory = Param.Bool(
+        False, "Build the global history only from taken branches (2-bit) "
+        "instead of direction history from all branches. Widely implemented "
+        "in modern server CPUs: https://ieeexplore.ieee.org/document/9246215"
+    )
 # TAGE branch predictor as described in https://www.jilp.org/vol8/v8paper1.pdf
 # The default sizes below are for the 8C-TAGE configuration (63.5 Kbits)
 class TAGE(BranchPredictor):
