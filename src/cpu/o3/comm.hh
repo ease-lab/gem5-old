@@ -111,6 +111,16 @@ struct IssueStruct
 /** Struct that defines all backwards communication. */
 struct TimeStruct
 {
+    struct FetchComm
+    {
+        bool block;
+        /** Signals to redirect BAC if something goes wrong. */
+        bool squash;
+        std::unique_ptr<PCStateBase> nextPC;
+    };
+
+    FetchComm fetchInfo[MaxThreads];
+
     struct DecodeComm
     {
         std::unique_ptr<PCStateBase> nextPC;
@@ -121,7 +131,7 @@ struct TimeStruct
         uint64_t branchAddr;
         unsigned branchCount;
         bool squash;
-        bool predIncorrect;
+        bool controlMispredict;
         bool branchMispredict;
         bool branchTaken;
     };

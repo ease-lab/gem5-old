@@ -280,14 +280,14 @@ Decode::unblock(ThreadID tid)
 }
 
 void
-Decode::squash(const DynInstPtr &inst, ThreadID tid)
+Decode::squash(const DynInstPtr &inst, bool control_miss, ThreadID tid)
 {
     DPRINTF(Decode, "[tid:%i] [sn:%llu] Squashing due to incorrect branch "
             "prediction detected at decode.\n", tid, inst->seqNum);
 
     // Send back mispredict information.
     toFetch->decodeInfo[tid].branchMispredict = true;
-    toFetch->decodeInfo[tid].predIncorrect = true;
+    toFetch->decodeInfo[tid].controlMispredict = control_miss;
     toFetch->decodeInfo[tid].mispredictInst = inst;
     toFetch->decodeInfo[tid].squash = true;
     toFetch->decodeInfo[tid].doneSeqNum = inst->seqNum;
@@ -701,7 +701,7 @@ Decode::decodeInsts(ThreadID tid)
 
             // Might want to set some sort of boolean and just do
             // a check at the end
-            squash(inst, inst->threadNumber);
+            squash(inst, true, inst->threadNumber);
 
             break;
         }
@@ -720,7 +720,7 @@ Decode::decodeInsts(ThreadID tid)
 
                 // Might want to set some sort of boolean and just do
                 // a check at the end
-                squash(inst, inst->threadNumber);
+                squash(inst, false, inst->threadNumber);
 
                 DPRINTF(Decode,
                         "[tid:%i] [sn:%llu] "
